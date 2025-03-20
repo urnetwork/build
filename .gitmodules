@@ -7,6 +7,3 @@
 [submodule "android"]
 	path = android
 	url = git@github.com:urnetwork/android.git
-[submodule "fdroiddata"]
-	path = fdroiddata
-	url = git@gitlab.com:urnetwork/fdroiddata.git
