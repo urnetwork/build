@@ -1,0 +1,20 @@
+Privacy-First Decentralized Network
+
+All of the privacy and all of the fun. Join a decentralized VPN that advances the state of the art of privacy, availability, security, and performance.
+
+With URnetwork you get:
+
+- Multiple IPs at once. When you connect, every dot represents a unique IP. The IPs continually change and traffic is distributed amongst IPs for best performance.
+
+- No more insecure protocols. Older insecure protocols are disabled and seamlessly upgraded to modern encrypted protocols.
+
+- Built-in anonymity. Hard guarantees of anonymity using a large decentralized multi-hop network.
+
+- Global availability. The network learns and adapts to give you connectivity no matter where you are in the world.
+
+- 100% open source and reproducible. See the exact code on the client and server. No logs, no spies.
+
+URnetwork uses VPNService to route your device traffic to provider devices. Traffic is encrypted using an open-source, web-standards protocol. Additionally traffic is anonymized using the URnetwork protocol.
+
+URnetwork links an external Solana wallet. We do not have custody of your wallet or facilitate swaps within the app.
+
