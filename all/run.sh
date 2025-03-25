@@ -115,6 +115,28 @@ error_trap 'push branch'
 error_trap 'push tag'
 
 
+(cd $BUILD_HOME/connect/provider && make)
+(cd $BUILD_HOME/sdk && make)
+
+
+
+# Upload releases to testing channels
+
+(cd $BUILD_HOME/apple/app &&
+	xcodebuild build -scheme "URnetwork" &&
+	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build &&
+	xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610 &&
+	xcrun altool --validate-app --file build/URnetwork.pkg -t ios --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610)
+
+
+# FIXME apple archive and upload to internal testflight
+# FIXME android github release and upload to github release
+# FIXME android play release to play internal testing
+
+
+
+
+
 # F-Droid
 (cd $BUILD_HOME/android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
@@ -140,10 +162,8 @@ error_trap 'push ungoogle tag'
 
 
 # Upload releases to testing channels
-# FIXME apple archive and upload to internal testflight
 # FIXME android github release and upload to github release
-# FIXME android play release to play internal testing
-# FIXME provider build
+
 
 
 # Warp services
