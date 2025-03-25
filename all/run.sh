@@ -139,12 +139,18 @@ error_trap 'push ungoogle tag'
 
 
 # Warp services
-warpctl build $BUILD_ENV server/taskworker/Makefile
-warpctl build $BUILD_ENV server/api/Makefile
-warpctl build $BUILD_ENV server/connect/Makefile
-warpctl build $BUILD_ENV web/Makefile
-warpctl build $BUILD_ENV warp/config-updater/Makefile
-warpctl build $BUILD_ENV warp/lb/Makefile
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server/taskworker/Makefile)
+error_trap 'warpctl build taskworker'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server/api/Makefile)
+error_trap 'warpctl build api'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server/connect/Makefile)
+error_trap 'warpctl build connect'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV web/Makefile)
+error_trap 'warpctl build web'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile)
+error_trap 'warpctl build config-updater'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
+error_trap 'warpctl build lb'
 
 
 
