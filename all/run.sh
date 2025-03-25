@@ -124,8 +124,8 @@ warp.version=$WARP_VERSION
 warp.version_code=$WARP_VERSION_CODE
 " > app/local.properties &&
 	git add app/local.properties -f &&
-	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/build.gradle &&
-	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' gradle.settings)
+	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/app/build.gradle &&
+	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/settings.gradle)
 error_trap 'android edit ungoogle settings'
 (cd $BUILD_HOME/android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android ungoogle push branch'
