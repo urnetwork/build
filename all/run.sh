@@ -1,9 +1,19 @@
+#!/usr/bin/env bash
 
+error_trap () {
+	code=$?
+	if [ $code != 0 ]; then
+		echo $1 >&2
+		exit $code
+	fi
+}
 
 warpctl stage version next release --message="$HOST build all"
 
 WARP_VERSION=`warpctl ls version`
 WARP_VERSION_CODE=`warpctl ls version-code`
+
+echo "Build all ${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 (cd connect && git checkout main && git pull --recurse-submodules)
@@ -18,6 +28,8 @@ error_trap 'pull android'
 error_trap 'pull server'
 (cd web && git checkout main && git pull --recurse-submodules)
 error_trap 'pull web'
+(cd warp && git checkout main && git pull --recurse-submodules)
+error_trap 'pull warp'
 
 
 (cd connect && ./test.sh)
@@ -30,18 +42,20 @@ error_trap 'server tests'
 error_trap 'server connect tests'
 
 
-(cd connect && git checkout -b v${WARP_VERSION})
+(cd connect && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'connect prepare version branch'
-(cd sdk && git checkout -b v${WARP_VERSION})
+(cd sdk && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'sdk prepare version branch'
-(cd android && git checkout -b v${WARP_VERSION})
+(cd android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'android prepare version branch'
-(cd apple && git checkout -b v${WARP_VERSION})
+(cd apple && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'apple prepare version branch'
-(cd server && git checkout -b v${WARP_VERSION})
+(cd server && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'server prepare version branch'
-(cd web && git checkout -b v${WARP_VERSION})
+(cd web && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'web prepare branch'
+(cd warp && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'warp prepare branch'
 
 
 # apple branch, edit xcodeproject
@@ -64,11 +78,28 @@ error_trap 'android edit settings'
 echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt
 error_trap 'android changelog'
 
-# FIXME commit and push all branches
 
-git add .
-git commit -m "$HOST build all"
-# FIXME create tag, push tag to origin
+(cd connect && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'connect push branch'
+(cd sdk && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'sdk push branch'
+(cd android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'android push branch'
+(cd apple && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'apple push branch'
+(cd server && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'server push branch'
+(cd web && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'web push branch'
+(cd warp && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'warp push branch'
+
+
+(git add . && git commit -m "$HOST build all" && git push)
+error_trap 'push branch'
+(git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'push tag'
+
 
 
 # FIXME apple archive and upload to internal testflight
@@ -78,7 +109,7 @@ git commit -m "$HOST build all"
 
 
 # F-Droid
-(cd android && git checkout -b v${WARP_VERSION}-ungoogle)
+(cd android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
 (cd android &&
 	echo -n "
@@ -88,15 +119,15 @@ warp.version_code=$WARP_VERSION_CODE
 	sed -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/build.gradle &&
 	sed -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' gradle.settings)
 error_trap 'android edit ungoogle settings'
+(cd android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+error_trap 'android ungoogle push branch'
 
 # this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
 
-# FIXME commit and push all branches
-git checkout -b v${WARP_VERSION}-ungoogle
-git add .
-git commit -m "$HOST build fdroid"
-# FIXME create tag, push tag to origin
-
+(git add . && git commit -m "$HOST build ungoogle" && git push)
+error_trap 'push ungoogle branch'
+(git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+error_trap 'push ungoogle tag'
 
 
 # Warp services
@@ -104,31 +135,40 @@ warpctl build main server/taskworker/Makefile
 warpctl build main server/api/Makefile
 warpctl build main server/connect/Makefile
 warpctl build main web/Makefile
+warpctl build main warp/config-updater/Makefile
+warpctl build main warp/lb/Makefile
 
 
 warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 
-sleep N
+sleep 60
 
 warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 
-sleep N
+sleep 60
 
 warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 
-sleep N
+sleep 60
 
 warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-
+warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
