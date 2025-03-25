@@ -115,7 +115,6 @@ error_trap 'push branch'
 error_trap 'push tag'
 
 
-(cd $BUILD_HOME/connect/provider && make)
 (cd $BUILD_HOME/sdk && make)
 
 
