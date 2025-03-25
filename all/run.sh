@@ -138,11 +138,6 @@ error_trap 'push ungoogle branch'
 error_trap 'push ungoogle tag'
 
 
-# FIXME
-exit
-
-
-
 # Warp services
 warpctl build $BUILD_ENV server/taskworker/Makefile
 warpctl build $BUILD_ENV server/api/Makefile
@@ -150,6 +145,12 @@ warpctl build $BUILD_ENV server/connect/Makefile
 warpctl build $BUILD_ENV web/Makefile
 warpctl build $BUILD_ENV warp/config-updater/Makefile
 warpctl build $BUILD_ENV warp/lb/Makefile
+
+
+
+# FIXME
+exit
+
 
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
