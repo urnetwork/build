@@ -102,9 +102,9 @@ error_trap 'web push branch'
 error_trap 'warp push branch'
 
 
-(git add . && git commit -m "$HOST build all" && git push)
+(cd $BUILD_HOME && git add . && git commit -m "$HOST build all" && git push)
 error_trap 'push branch'
-(git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME && git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'push tag'
 
 
@@ -132,9 +132,9 @@ error_trap 'android ungoogle push branch'
 
 # this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
 
-(git add . && git commit -m "$HOST build ungoogle" && git push)
+(cd $BUILD_HOME && git add . && git commit -m "$HOST build ungoogle" && git push)
 error_trap 'push ungoogle branch'
-(git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+(cd $BUILD_HOME && git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'push ungoogle tag'
 
 
