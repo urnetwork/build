@@ -11,7 +11,7 @@ error_trap () {
 export BUILD_HOME=..
 export BUILD_ENV=main
 export BUILD_SED=gsed
-export BRINGYOUR_HOME=../..
+export BRINGYOUR_HOME=`realpath ../..`
 
 warpctl stage version next release --message="$HOST build all"
 
