@@ -3,12 +3,13 @@
 error_trap () {
 	code=$?
 	if [ $code != 0 ]; then
-		echo $1 >&2
+		echo "error($code): $1" >&2
 		exit $code
 	fi
 }
 
 BUILD_HOME=..
+BUILD_ENV=main
 
 warpctl stage version next release --message="$HOST build all"
 
@@ -25,7 +26,7 @@ error_trap 'pull sdk'
 (cd $BUILD_HOME/android && git checkout main && git pull --recurse-submodules)
 error_trap 'pull android'
 (cd $BUILD_HOME/apple && git checkout main && git pull --recurse-submodules)
-error_trap 'pull android'
+error_trap 'pull apple'
 (cd $BUILD_HOME/server && git checkout main && git pull --recurse-submodules)
 error_trap 'pull server'
 (cd $BUILD_HOME/web && git checkout main && git pull --recurse-submodules)
@@ -133,44 +134,44 @@ error_trap 'push ungoogle tag'
 
 
 # Warp services
-warpctl build main server/taskworker/Makefile
-warpctl build main server/api/Makefile
-warpctl build main server/connect/Makefile
-warpctl build main web/Makefile
-warpctl build main warp/config-updater/Makefile
-warpctl build main warp/lb/Makefile
+warpctl build $BUILD_ENV server/taskworker/Makefile
+warpctl build $BUILD_ENV server/api/Makefile
+warpctl build $BUILD_ENV server/connect/Makefile
+warpctl build $BUILD_ENV web/Makefile
+warpctl build $BUILD_ENV warp/config-updater/Makefile
+warpctl build $BUILD_ENV warp/lb/Makefile
 
 
-warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-
-sleep 60
-
-warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
+warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 
 sleep 60
 
-warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
+warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 
 sleep 60
 
-warpctl deploy main taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-warpctl deploy main api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-warpctl deploy main connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-warpctl deploy main web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-warpctl deploy main lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-warpctl deploy main config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
+
+sleep 60
+
+warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
+warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older

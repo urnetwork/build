@@ -7,3 +7,15 @@
 [submodule "android"]
 	path = android
 	url = git@github.com:urnetwork/android.git
+[submodule "warp"]
+	path = warp
+	url = git@github.com:urnetwork/warp.git
+[submodule "web"]
+	path = web
+	url = git@github.com:urnetwork/web.git
+[submodule "server"]
+	path = server
+	url = git@github.com:urnetwork/server.git
+[submodule "apple"]
+	path = apple
+	url = git@github.com:urnetwork/apple.git
