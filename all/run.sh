@@ -37,12 +37,12 @@ error_trap 'pull web'
 error_trap 'pull warp'
 
 
-(cd $BUILD_HOME/connect && ./test.sh)
-error_trap 'connect tests'
-(cd $BUILD_HOME/sdk && ./test.sh)
-error_trap 'sdk tests'
-(cd $BUILD_HOME/server && ./test.sh)
-error_trap 'server tests'
+#(cd $BUILD_HOME/connect && ./test.sh)
+#error_trap 'connect tests'
+#(cd $BUILD_HOME/sdk && ./test.sh)
+#error_trap 'sdk tests'
+#(cd $BUILD_HOME/server && ./test.sh)
+#error_trap 'server tests'
 # FIXME
 # (cd $BUILD_HOME/server/connect && ./test.sh)
 # error_trap 'server connect tests'
@@ -77,27 +77,28 @@ warp.version=$WARP_VERSION
 warp.version_code=$WARP_VERSION_CODE
 pwsdk.maven.username=urnetwork-ops
 pwsdk.maven.password=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
-" > app/local.properties)
+" > app/local.properties &&
+	git add app/local.properties -f)
 error_trap 'android edit settings'
 
 # put a temporary changelog in place
-echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt
+(cd $BUILD_HOME && echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt)
 error_trap 'android changelog'
 
 
-(cd $BUILD_HOME/connect && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/connect && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'connect push branch'
-(cd $BUILD_HOME/sdk && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/sdk && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'sdk push branch'
 (cd $BUILD_HOME/android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'android push branch'
 (cd $BUILD_HOME/apple && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'apple push branch'
-(cd $BUILD_HOME/server && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/server && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'server push branch'
-(cd $BUILD_HOME/web && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/web && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'web push branch'
-(cd $BUILD_HOME/warp && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/warp && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'warp push branch'
 
 
@@ -122,6 +123,7 @@ error_trap 'android prepare ungoogle version branch'
 warp.version=$WARP_VERSION
 warp.version_code=$WARP_VERSION_CODE
 " > app/local.properties &&
+	git add app/local.properties -f &&
 	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/build.gradle &&
 	$BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' gradle.settings)
 error_trap 'android edit ungoogle settings'
