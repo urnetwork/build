@@ -122,7 +122,7 @@ error_trap 'push tag'
 # Upload releases to testing channels
 
 (cd $BUILD_HOME/apple/app &&
-	xcodebuild build -scheme "URnetwork" &&
+	xcodebuild -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive archive &&
 	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build &&
 	xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610 &&
 	xcrun altool --validate-app --file build/URnetwork.pkg -t ios --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610)
