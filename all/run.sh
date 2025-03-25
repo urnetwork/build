@@ -14,12 +14,17 @@ export BUILD_SED=gsed
 export BRINGYOUR_HOME=`realpath ../..`
 
 warpctl stage version next release --message="$HOST build all"
+error_trap 'warpctl stage version'
 
 export WARP_VERSION=`warpctl ls version`
+error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
+error_trap 'warpctl version code'
 
 echo "Build all ${WARP_VERSION}-${WARP_VERSION_CODE}"
 
+# (cd $BUILD_HOME && git stash -u && git checkout main && git pull --recurse-submodules)
+error_trap 'pull'
 
 (cd $BUILD_HOME/connect && git stash -u && git checkout main && git pull --recurse-submodules)
 error_trap 'pull connect'
@@ -39,6 +44,8 @@ error_trap 'pull warp'
 
 #(cd $BUILD_HOME/connect && ./test.sh)
 #error_trap 'connect tests'
+#(cd $BUILD_HOME/connect/provider && ./test.sh)
+#error_trap 'connect provider tests'
 #(cd $BUILD_HOME/sdk && ./test.sh)
 #error_trap 'sdk tests'
 #(cd $BUILD_HOME/server && ./test.sh)
@@ -108,13 +115,6 @@ error_trap 'push branch'
 error_trap 'push tag'
 
 
-
-# FIXME apple archive and upload to internal testflight
-# FIXME android github release and upload to github release
-# FIXME android play release to play internal testing
-
-
-
 # F-Droid
 (cd $BUILD_HOME/android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
@@ -138,6 +138,14 @@ error_trap 'push ungoogle branch'
 error_trap 'push ungoogle tag'
 
 
+
+# Upload releases to testing channels
+# FIXME apple archive and upload to internal testflight
+# FIXME android github release and upload to github release
+# FIXME android play release to play internal testing
+# FIXME provider build
+
+
 # Warp services
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
@@ -151,7 +159,6 @@ error_trap 'warpctl build web'
 error_trap 'warpctl build config-updater'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
-
 
 
 # FIXME
