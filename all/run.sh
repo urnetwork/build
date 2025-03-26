@@ -122,10 +122,18 @@ error_trap 'push tag'
 # Upload releases to testing channels
 
 (cd $BUILD_HOME/apple/app &&
+	xcodebuild -scheme URnetwork clean &&
 	xcodebuild -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive archive &&
 	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build &&
-	xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610 &&
-	xcrun altool --validate-app --file build/URnetwork.pkg -t ios --apiKey UG3KKXP3NF --apiIssuer bdb847bf-51bb-45d9-ab53-d55ef9cbc610)
+	xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+	xcrun altool --validate-app --file build/URnetwork.pkg -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+	xcrun altool --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+	xcrun altool --upload-app --file build/URnetwork.pkg -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+
+(cd $BUILD_HOME/android/app &&
+	./gradlew clean &&
+	./gradlew assembleRelease)
+
 
 
 # FIXME apple archive and upload to internal testflight
@@ -136,7 +144,7 @@ error_trap 'push tag'
 
 
 
-# F-Droid
+# Github / F-Droid
 (cd $BUILD_HOME/android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
 (cd $BUILD_HOME/android &&
@@ -157,6 +165,11 @@ error_trap 'android ungoogle push branch'
 error_trap 'push ungoogle branch'
 (cd $BUILD_HOME && git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'push ungoogle tag'
+
+(cd $BUILD_HOME/android/app &&
+	./gradlew clean &&
+	./gradlew assembleGithubRelease)
+
 
 
 
