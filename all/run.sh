@@ -10,7 +10,7 @@
 builder_message () {
     echo $1
     if [ "$SLACK_WEBHOOK" ]; then
-        data="{\"text\":$(echo $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo $1 | jq -Rsa .)}}]}"
+        data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n $1 | jq -Rsa .)}}]}"
         echo "$data"
         curl -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
     fi
@@ -145,8 +145,8 @@ error_trap 'build sdk'
     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
     xcrun altool --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-error_trap 'apple ios deploy'
-builder_message "apple ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+error_trap 'ios deploy'
+builder_message "ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
@@ -154,8 +154,8 @@ builder_message "apple ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
     xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-error_trap 'apple macos deploy'
-builder_message "apple macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+error_trap 'macos deploy'
+builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean &&
@@ -163,8 +163,8 @@ builder_message "apple macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 error_trap 'android build'
 
 if [ "$BUILD_OUT" ]; then
-    (mkdir -p $BUILD_OUT/apk &&
-        find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} $BUILD_OUT/apk \;)
+    (mkdir -p "$BUILD_OUT/apk" &&
+        find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} "$BUILD_OUT/apk" \;)
     error_trap 'android local copy'
     builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 fi
@@ -206,8 +206,8 @@ error_trap 'push ungoogle tag'
 error_trap 'android github build'
 
 if [ "$BUILD_OUT" ]; then
-    (mkdir -p $BUILD_OUT/apk-github && 
-        find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} $BUILD_OUT/apk-github \;)
+    (mkdir -p "$BUILD_OUT/apk-github" && 
+        find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} "$BUILD_OUT/apk-github" \;)
     error_trap 'android github local copy'
     builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 fi
@@ -250,7 +250,7 @@ builder_message "$BUILD_ENV[25%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deploy
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 builder_message "$BUILD_ENV[25%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "$BUILD_ENV services[25%]: $(warpctl ls versions $BUILD_ENV)"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
     builder_message "community[25%] provider ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
@@ -270,7 +270,7 @@ builder_message "$BUILD_ENV[50%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deploy
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 builder_message "$BUILD_ENV[50%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "$BUILD_ENV services[50%]: $(warpctl ls versions $BUILD_ENV)"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 fi
@@ -288,7 +288,7 @@ builder_message "$BUILD_ENV[75%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deploy
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 builder_message "$BUILD_ENV[75%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "$BUILD_ENV services[75%]: $(warpctl ls versions $BUILD_ENV)"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 fi
@@ -306,7 +306,7 @@ builder_message "$BUILD_ENV[100%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deplo
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 builder_message "$BUILD_ENV[100%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "$BUILD_ENV services[100%]: $(warpctl ls versions $BUILD_ENV)"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 fi
