@@ -3,11 +3,15 @@
 # Expect the following env vars to be set:
 # APPLE_API_KEY
 # APPLE_API_ISSUER
-# BUILD_OUT
+# (optional) BUILD_OUT
+# (optional) SLACK_WEBHOOK
 
 
 builder_message () {
 	echo $1
+	if [ $SLACK_WEBHOOK ]; then
+		curl -X POST -H 'Content-type: application/json' --data "{\"text\":$(echo $1 | jq -Rsa .)}" $SLACK_WEBHOOK
+	fi
 }
 
 error_trap () {
@@ -32,7 +36,7 @@ error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
 error_trap 'warpctl version code'
 
-echo "Build all ${WARP_VERSION}-${WARP_VERSION_CODE}"
+builder_message "Build all ${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 # FIXME
 # (cd $BUILD_HOME && git stash -u && git checkout main && git pull --recurse-submodules)
@@ -205,6 +209,7 @@ fi
 # Upload releases to testing channels
 # FIXME android github release and upload to github release
 
+builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
 
 exit
 
