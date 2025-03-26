@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
 # Expect the following env vars to be set:
 # APPLE_API_KEY
@@ -8,10 +8,9 @@
 
 
 builder_message () {
-    echo $1
+    echo -n "$1"
     if [ "$SLACK_WEBHOOK" ]; then
         data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n $1 | jq -Rsa .)}}]}"
-        echo "$data"
         curl -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
     fi
 }
@@ -29,6 +28,8 @@ export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
 export BRINGYOUR_HOME=`realpath ../..`
+export STAGE_SECONDS=1
+
 
 warpctl stage version next release --message="$HOST build all"
 error_trap 'warpctl stage version'
@@ -218,8 +219,6 @@ fi
 
 builder_message "$BUILD_ENV services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 
-exit
-
 
 # Warp services
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server/taskworker/Makefile)
@@ -257,7 +256,8 @@ if [ $BUILD_ENV = 'main' ]; then
 fi
 
 
-sleep 7200
+sleep $STAGE_SECONDS
+
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 builder_message "$BUILD_ENV[50%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
@@ -275,7 +275,7 @@ if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 fi
 
-sleep 7200
+sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 builder_message "$BUILD_ENV[75%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
@@ -293,7 +293,7 @@ if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 fi
 
-sleep 7200
+sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 builder_message "$BUILD_ENV[100%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
@@ -311,3 +311,5 @@ if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 fi
 
+
+builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\` ... done! Enjoy :)"
