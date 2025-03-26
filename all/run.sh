@@ -139,14 +139,21 @@ error_trap 'build sdk'
 
 (cd $BUILD_HOME/apple/app &&
 	xcodebuild -scheme URnetwork clean &&
-	xcodebuild -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive archive &&
-	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build &&
+	xcodebuild archive -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
+	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
+	xcrun altool --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+	xcrun altool --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+error_trap 'apple ios deploy'
+builder_message "apple ios ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+
+(cd $BUILD_HOME/apple/app &&
+	xcodebuild -scheme URnetwork clean &&
+	xcodebuild archive -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
+	xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
 	xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-	xcrun altool --validate-app --file build/URnetwork.pkg -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-	xcrun altool --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-	xcrun altool --upload-app --file build/URnetwork.pkg -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-error_trap 'apple deploy'
-builder_message "ios and macos ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+	xcrun altool --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+error_trap 'apple macos deploy'
+builder_message "apple macos ${WARP_VERSION}-${WARP_VERSION_CODE} available"
 
 (cd $BUILD_HOME/android/app &&
 	./gradlew clean &&
