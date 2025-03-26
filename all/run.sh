@@ -36,7 +36,7 @@ error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
 error_trap 'warpctl version code'
 
-builder_message "Build all ${WARP_VERSION}-${WARP_VERSION_CODE}"
+builder_message "Build all `${WARP_VERSION}-${WARP_VERSION_CODE}`"
 
 # FIXME
 # (cd $BUILD_HOME && git stash -u && git checkout main && git pull --recurse-submodules)
@@ -144,7 +144,7 @@ error_trap 'build sdk'
     xcrun altool --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 error_trap 'apple ios deploy'
-builder_message "apple ios ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+builder_message "apple ios `${WARP_VERSION}-${WARP_VERSION_CODE}` available"
 
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
@@ -153,7 +153,7 @@ builder_message "apple ios ${WARP_VERSION}-${WARP_VERSION_CODE} available"
     xcrun altool --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 error_trap 'apple macos deploy'
-builder_message "apple macos ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+builder_message "apple macos `${WARP_VERSION}-${WARP_VERSION_CODE}` available"
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean &&
@@ -164,7 +164,7 @@ if [ $BUILD_OUT ]; then
     (mkdir -p $BUILD_OUT/apk &&
         find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} $BUILD_OUT/apk \;)
     error_trap 'android local copy'
-    builder_message "android ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+    builder_message "android `${WARP_VERSION}-${WARP_VERSION_CODE}` available"
 fi
 
 
@@ -207,14 +207,14 @@ if [ $BUILD_OUT ]; then
     (mkdir -p $BUILD_OUT/apk-github && 
         find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} $BUILD_OUT/apk-github \;)
     error_trap 'android github local copy'
-    builder_message "android github ${WARP_VERSION}-${WARP_VERSION_CODE} available"
+    builder_message "android github `${WARP_VERSION}-${WARP_VERSION_CODE}` available"
 fi
 
 
 # Upload releases to testing channels
 # FIXME android github release and upload to github release
 
-builder_message "$BUILD_ENV services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "$BUILD_ENV services: ```$(warpctl ls versions $BUILD_ENV)```"
 
 exit
 
