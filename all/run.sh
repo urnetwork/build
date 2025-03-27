@@ -233,8 +233,6 @@ fi
 # Upload releases to testing channels
 # FIXME android github release and upload to github release
 
-builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
-
 
 # Warp services
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server/taskworker/Makefile)
@@ -253,6 +251,10 @@ if [ $BUILD_ENV = 'main' ]; then
     (cd $BUILD_HOME && warpctl build community connect/provider/Makefile)
     error_trap 'warpctl build community provider'
 fi
+
+
+builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
+
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 builder_message "${BUILD_ENV}[25%] taskworker \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
