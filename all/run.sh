@@ -1,6 +1,7 @@
 #!/usr/bin/env zsh
 
 # Expect the following env vars to be set:
+# WARP_HOME
 # APPLE_API_KEY
 # APPLE_API_ISSUER
 # (optional) BUILD_OUT
@@ -11,17 +12,20 @@ builder_message () {
     echo -n "$1"
     if [ "$SLACK_WEBHOOK" ]; then
         data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n $1 | jq -Rsa .)}}]}"
-        curl -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
+        curl -s -o /dev/null -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
     fi
 }
 
 error_trap () {
     code=$?
     if [ $code != 0 ]; then
-        echo "error($code): $1" >&2
         builder_message "error($code): $1"
         exit $code
     fi
+}
+
+git_main () {
+    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
 }
 
 export BUILD_HOME=`realpath ..`
@@ -31,33 +35,29 @@ export BRINGYOUR_HOME=`realpath ../..`
 export STAGE_SECONDS=1
 
 
-warpctl stage version next release --message="$HOST build all"
-error_trap 'warpctl stage version'
+(cd $WARP_HOME/config && git_main)
+error_trap 'pull warp config'
+(cd $WARP_HOME/vault && git_main)
+error_trap 'pull warp vault'
+(cd $WARP_HOME/release && git_main)
+error_trap 'pull warp release'
 
-export WARP_VERSION=`warpctl ls version`
-error_trap 'warpctl version'
-export WARP_VERSION_CODE=`warpctl ls version-code`
-error_trap 'warpctl version code'
 
-builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\`"
-
-# FIXME
-# (cd $BUILD_HOME && git stash -u && git checkout main && git pull --recurse-submodules)
-# error_trap 'pull'
-
-(cd $BUILD_HOME/connect && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME && git_main)
+error_trap 'pull'
+(cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'
-(cd $BUILD_HOME/sdk && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/sdk && git_main)
 error_trap 'pull sdk'
-(cd $BUILD_HOME/android && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/android && git_main)
 error_trap 'pull android'
-(cd $BUILD_HOME/apple && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/apple && git_main)
 error_trap 'pull apple'
-(cd $BUILD_HOME/server && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/server && git_main)
 error_trap 'pull server'
-(cd $BUILD_HOME/web && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/web && git_main)
 error_trap 'pull web'
-(cd $BUILD_HOME/warp && git stash -u && git checkout main && git pull --recurse-submodules)
+(cd $BUILD_HOME/warp && git_main)
 error_trap 'pull warp'
 
 
@@ -72,6 +72,18 @@ error_trap 'pull warp'
 # error_trap 'server tests'
 # (cd $BUILD_HOME/server/connect && ./test.sh)
 # error_trap] 'server connect tests'
+
+
+
+warpctl stage version next release --message="$HOST build all"
+error_trap 'warpctl stage version'
+
+export WARP_VERSION=`warpctl ls version`
+error_trap 'warpctl version'
+export WARP_VERSION_CODE=`warpctl ls version-code`
+error_trap 'warpctl version code'
+
+builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\`"
 
 
 (cd $BUILD_HOME/connect && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
@@ -136,6 +148,10 @@ error_trap 'push tag'
 
 (cd $BUILD_HOME/sdk && make)
 error_trap 'build sdk'
+(cd $BUILD_HOME/connect/provider && make)
+error_trap 'build provider'
+(cd $BUILD_HOME/server/bringyourctl && make)
+error_trap 'build bringyourctl'
 
 
 # Upload releases to testing channels
@@ -239,20 +255,20 @@ if [ $BUILD_ENV = 'main' ]; then
 fi
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[25%] taskworker \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] api ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[25%] api \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] connect ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[25%] connect \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[25%] web \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "${BUILD_ENV}[25%] services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "${BUILD_ENV}[25%] config-updater \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
+builder_message "${BUILD_ENV}[25%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
-    builder_message "community[25%] provider ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+    builder_message "community[25%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
 
@@ -260,58 +276,58 @@ sleep $STAGE_SECONDS
 
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[50%] taskworker \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] api ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[50%] api \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] connect ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[50%] connect \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[50%] web \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "${BUILD_ENV}[50%] services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "${BUILD_ENV}[50%] config-updater \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
+builder_message "${BUILD_ENV}[50%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=50 --only-older
-    builder_message "community[50%] provider ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+    builder_message "community[50%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
 sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[75%] taskworker \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] api ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[75%] api \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] connect ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[75%] connect \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[75%] web \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "${BUILD_ENV}[75%] services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "${BUILD_ENV}[75%] config-updater \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
+builder_message "${BUILD_ENV}[75%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=75 --only-older
-    builder_message "community[75%] provider ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+    builder_message "community[75%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
 sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] taskworker ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[100%] taskworker \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] api ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[100%] api \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV connect ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] connect ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[100%] connect \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] web ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+builder_message "${BUILD_ENV}[100%] web \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 # warpctl deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] config-updater ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
-builder_message "${BUILD_ENV}[100%] services: $(warpctl ls versions $BUILD_ENV)"
+builder_message "${BUILD_ENV}[100%] config-updater \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
+builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 if [ $BUILD_ENV = 'main' ]; then
     warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
-    builder_message "community[100%] provider ${WARP_VERSION}-${WARP_VERSION_CODE} deployed (only older)"
+    builder_message "community[100%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
 
