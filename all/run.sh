@@ -4,6 +4,7 @@
 # WARP_HOME
 # APPLE_API_KEY
 # APPLE_API_ISSUER
+# GITHUB_API_KEY
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 
@@ -175,8 +176,7 @@ error_trap 'macos deploy'
 builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 
 (cd $BUILD_HOME/android/app &&
-    ./gradlew clean &&
-    ./gradlew assembleRelease)
+    ./gradlew clean assemblePlayRelease assembleSolana_dappRelease)
 error_trap 'android build'
 
 if [ "$BUILD_OUT" ]; then
@@ -186,13 +186,37 @@ if [ "$BUILD_OUT" ]; then
     builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
 fi
 
-
 # FIXME apple archive and upload to internal testflight
-# FIXME android github release and upload to github release
 # FIXME android play release to play internal testing
 
+github_upload=`curl -L \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer $GITHUB_API_KEY" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/urnetwork/build/releases \
+  -d '{"tag_name":"v2025.3.27-58304693","name":"v2025.3.27-58304693","body":"v2025.3.27-58304693","draft":false,"prerelease":false,"generate_release_notes":false}'`
+error_trap 'github release'
+github_upload_id=`echo "$github_upload" | jq .id`
+github_upload_url="https://uploads.github.com/repos/urnetwork/build/releases/${github_upload_id}/assets?name=v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
+curl -L -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -H "Content-Type: application/octet-stream" \
+    -H "Authorization: Bearer $GITHUB_API_KEY" \
+    https://uploads.github.com/repos/urnetwork/build/releases/208860091/assets?name=com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.apk \
+    --data-binary "@$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.apk"
+error_trap 'github release android play'
 
+curl -L -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -H "Content-Type: application/octet-stream" \
+    -H "Authorization: Bearer $GITHUB_API_KEY" \
+    https://uploads.github.com/repos/urnetwork/build/releases/208860091/assets?name=com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk \
+    --data-binary "@$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk"
+error_trap 'github release android solana_dapp'
 
 
 # Github / F-Droid
@@ -218,8 +242,7 @@ error_trap 'push ungoogle branch'
 error_trap 'push ungoogle tag'
 
 (cd $BUILD_HOME/android/app &&
-    ./gradlew clean &&
-    ./gradlew assembleGithubRelease)
+    ./gradlew clean assembleGithubRelease)
 error_trap 'android github build'
 
 if [ "$BUILD_OUT" ]; then
@@ -231,7 +254,15 @@ fi
 
 
 # Upload releases to testing channels
-# FIXME android github release and upload to github release
+
+curl -L -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -H "Content-Type: application/octet-stream" \
+    -H "Authorization: Bearer $GITHUB_API_KEY" \
+    https://uploads.github.com/repos/urnetwork/build/releases/208860091/assets?name=com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-github-release.apk \
+    --data-binary "@$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-github-release.apk"
+error_trap 'github release android github'
 
 
 # Warp services
