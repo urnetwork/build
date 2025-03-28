@@ -221,7 +221,7 @@ github_release_upload \
 
 github_release_upload \
     "com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk"
+    "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk" &&
@@ -263,7 +263,7 @@ error_trap 'android github build'
 
 github_release_upload \
     "com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-github-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-github-release.apk"
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-github-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk-github" && 
