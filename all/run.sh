@@ -68,10 +68,26 @@ error_trap 'pull warp vault'
 error_trap 'pull warp release'
 
 
-# FIXME reset option
-# git reset --hard
-# in each submodule, git reset --hard
-# git submodule update --init
+if [ "$BUILD_RESET" ]; then
+    (cd $BUILD_HOME/connect && git reset --hard)
+    error_trap 'reset connect'
+    (cd $BUILD_HOME/sdk && git reset --hard)
+    error_trap 'reset sdk'
+    (cd $BUILD_HOME/android && git reset --hard)
+    error_trap 'reset android'
+    (cd $BUILD_HOME/apple && git reset --hard)
+    error_trap 'reset apple'
+    (cd $BUILD_HOME/server && git reset --hard)
+    error_trap 'reset server'
+    (cd $BUILD_HOME/web && git reset --hard)
+    error_trap 'reset web'
+    (cd $BUILD_HOME/warp && git reset --hard)
+    error_trap 'reset warp'
+    (cd $BUILD_HOME && 
+        git reset --hard && 
+        git submodule update --init)
+    error_trap 'reset'
+fi
 
 
 (cd $BUILD_HOME && git_main)
