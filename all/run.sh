@@ -36,7 +36,7 @@ github_create_release () {
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
     GITHUB_UPLOAD_ID=`echo "$GITHUB_UPLOAD" | jq .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_UPLOAD_ID/assets"
