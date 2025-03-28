@@ -30,7 +30,7 @@ git_main () {
 }
 
 github_create_release () {
-    GITHUB_UPLOAD=`curl -L \
+    GITHUB_UPLOAD=`curl -s -L \
         -X POST \
         -H "Accept: application/vnd.github+json" \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
@@ -43,7 +43,7 @@ github_create_release () {
 }
 
 github_release_upload () {
-    curl -L -X POST \
+    curl -s -o /dev/null -L -X POST \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         -H "Content-Type: application/octet-stream" \
