@@ -68,6 +68,12 @@ error_trap 'pull warp vault'
 error_trap 'pull warp release'
 
 
+# FIXME reset option
+# git reset --hard
+# in each submodule, git reset --hard
+# git submodule update --init
+
+
 (cd $BUILD_HOME && git_main)
 error_trap 'pull'
 (cd $BUILD_HOME/connect && git_main)
