@@ -86,7 +86,7 @@ error_trap 'pull web'
 error_trap 'pull warp'
 
 
-(cd $BUIL[D_HOME/connect && ./test.sh)
+(cd $BUILD_HOME/connect && ./test.sh)
 error_trap 'connect tests'
 # FIXME
 # (cd $BUILD_HOME/connect/provider && ./test.sh)
