@@ -86,17 +86,17 @@ error_trap 'pull web'
 error_trap 'pull warp'
 
 
-# (cd $BUIL[D_HOME/connect && ./test.sh)
-# error_trap 'connect tests'
-# # FIXME
-# # (cd $BUILD_HOME/connect/provider && ./test.sh)
-# # error_trap 'connect provider tests'
-# (cd $BUILD_HOME/sdk && ./test.sh)
-# error_trap 'sdk tests'
-# (cd $BUILD_HOME/server && ./test.sh)
-# error_trap 'server tests'
-# (cd $BUILD_HOME/server/connect && ./test.sh)
-# error_trap] 'server connect tests'
+(cd $BUIL[D_HOME/connect && ./test.sh)
+error_trap 'connect tests'
+# FIXME
+# (cd $BUILD_HOME/connect/provider && ./test.sh)
+# error_trap 'connect provider tests'
+(cd $BUILD_HOME/sdk && ./test.sh)
+error_trap 'sdk tests'
+(cd $BUILD_HOME/server && ./test.sh)
+error_trap 'server tests'
+(cd $BUILD_HOME/server/connect && ./test.sh)
+error_trap] 'server connect tests'
 
 
 
@@ -195,7 +195,7 @@ error_trap 'ios deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
 
-builder_message "ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+builder_message "ios [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
 
 
 (cd $BUILD_HOME/apple/app &&
@@ -208,7 +208,7 @@ error_trap 'macos deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
-builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+builder_message "macos [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
 
 
 (cd $BUILD_HOME/android/app &&
@@ -232,7 +232,7 @@ fi
 # FIXME apple archive and upload to internal testflight
 # FIXME android play release to play internal testing
 
-builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+builder_message "android [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
 
 
 # Github / F-Droid
@@ -273,7 +273,7 @@ fi
 
 # Upload releases to testing channels
 
-builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available"
+builder_message "android github [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
 
 
 # Warp services
@@ -391,4 +391,4 @@ fi
 builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 
 
-builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\` ... done! Enjoy :)"
+builder_message "Build all [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) ... done! Enjoy :)"
