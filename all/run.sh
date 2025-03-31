@@ -194,6 +194,10 @@ go_edit_require () {
     find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
 }
 
+go_edit_require_subpackages () {
+    find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "/\/v[0-9]\+/! s|\"$1\([^\"]*\)\"|\"$1${GO_MOD_SUFFIX}\1\"|g" {} \;
+}
+
 go_mod_fork () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
@@ -212,6 +216,7 @@ go_mod_fork () {
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_fork)
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
@@ -221,11 +226,13 @@ go_mod_fork () {
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_mod_fork)
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_edit_require_subpackages github.com/urnetwork/server &&
     go_mod_fork)
 
 
