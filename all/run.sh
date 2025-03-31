@@ -191,7 +191,7 @@ go_mod_edit_require () {
 }
 
 go_edit_require () {
-    find . -iname \( '*.go' -o  'Makefile' \) -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
+    find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
 }
 
 go_mod_fork () {
