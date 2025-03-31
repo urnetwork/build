@@ -38,13 +38,12 @@ github_create_release () {
         https://api.github.com/repos/urnetwork/build/releases \
         -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
-    echo "GITHUB UPLOAD $GITHUB_UPLOAD"
     GITHUB_UPLOAD_ID=`echo "$GITHUB_UPLOAD" | jq .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_UPLOAD_ID/assets"
+    echo "github upload to $GITHUB_UPLOAD_URL"
 }
 
 github_release_upload () {
-    echo "UPLOAD TO $GITHUB_UPLOAD_URL"
     curl -s -o /dev/null -L -X POST \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
