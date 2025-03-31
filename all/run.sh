@@ -174,7 +174,7 @@ error_trap 'android changelog'
 
 go_mod_edit () {
     GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
-    if [ $GO_MOD_VERSION == 0 || GO_MOD_VERSION == 1 ]; then
+    if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
         GO_MOD_SUFFIX=''
     else
         GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
