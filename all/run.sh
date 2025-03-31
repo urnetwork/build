@@ -208,6 +208,11 @@ go_mod_fork () {
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_mod_fork)
+(cd $BUILD_HOME/sdk/build &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_edit_require github.com/urnetwork/sdk &&
+    $BUILD_SED -i "s|github.com/urnetwork/sdk|github.com/urnetwork/sdk${GO_MOD_SUFFIX}|g" Makefile)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
@@ -285,8 +290,9 @@ error_trap 'push branch'
 github_create_release
 
 
-
-(cd $BUILD_HOME/sdk && make)
+(cd $BUILD_HOME/sdk/build && 
+    make init && 
+    make)
 error_trap 'build sdk'
 
 github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.aar" "$BUILD_HOME/build/android/URnetworkSdk.aar"
@@ -296,10 +302,10 @@ github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.xcframe
 builder_message "sdk \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
-(cd $BUILD_HOME/connect/provider && make)
+(cd $BUILD_HOME/connect${GO_MOD_SUFFIX}/provider && make)
 error_trap 'build provider'
 
-(cd $BUILD_HOME/server/bringyourctl && make)
+(cd $BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl && make)
 error_trap 'build bringyourctl'
 
 
@@ -404,20 +410,20 @@ builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` availab
 
 
 # Warp services
-(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp${GO_MOD_SUFFIX}/config-updater/Makefile)
 error_trap 'warpctl build config-updater'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp${GO_MOD_SUFFIX}/lb/Makefile)
 error_trap 'warpctl build lb'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server/taskworker/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server/api/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/api/Makefile)
 error_trap 'warpctl build api'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server/connect/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/connect/Makefile)
 error_trap 'warpctl build connect'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/Makefile)
 error_trap 'warpctl build web'
 if [ $BUILD_ENV = 'main' ]; then
-    (cd $BUILD_HOME && warpctl build community connect/provider/Makefile)
+    (cd $BUILD_HOME && warpctl build community connect${GO_MOD_SUFFIX}/provider/Makefile)
     error_trap 'warpctl build community provider'
 fi
 
