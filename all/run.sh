@@ -297,9 +297,9 @@ github_create_release
     make)
 error_trap 'build sdk'
 
-github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.aar" "$BUILD_HOME/build/android/URnetworkSdk.aar"
-github_release_upload "URnetworkSdk-sources-${WARP_VERSION}-${WARP_VERSION_CODE}.jar" "$BUILD_HOME/build/android/URnetworkSdk-sources.jar"
-github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.xcframework.zip" "$BUILD_HOME/build/apple/URnetworkSdk.xcframework.zip"
+github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
+github_release_upload "URnetworkSdk-sources-${WARP_VERSION}-${WARP_VERSION_CODE}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
+github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.xcframework.zip" "$BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework.zip"
 
 builder_message "sdk \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
