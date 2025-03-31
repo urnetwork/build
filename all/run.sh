@@ -108,18 +108,19 @@ error_trap 'pull web'
 error_trap 'pull warp'
 
 
-(cd $BUILD_HOME/connect && ./test.sh)
-error_trap 'connect tests'
-# FIXME
-# (cd $BUILD_HOME/connect/provider && ./test.sh)
-# error_trap 'connect provider tests'
-(cd $BUILD_HOME/sdk && ./test.sh)
-error_trap 'sdk tests'
-(cd $BUILD_HOME/server && ./test.sh)
-error_trap 'server tests'
-(cd $BUILD_HOME/server/connect && ./test.sh)
-error_trap] 'server connect tests'
-
+if [ "$BUILD_TEST" ]; then
+    (cd $BUILD_HOME/connect && ./test.sh)
+    error_trap 'connect tests'
+    # FIXME
+    # (cd $BUILD_HOME/connect/provider && ./test.sh)
+    # error_trap 'connect provider tests'
+    (cd $BUILD_HOME/sdk && ./test.sh)
+    error_trap 'sdk tests'
+    (cd $BUILD_HOME/server && ./test.sh)
+    error_trap 'server tests'
+    (cd $BUILD_HOME/server/connect && ./test.sh)
+    error_trap 'server connect tests'
+fi
 
 
 warpctl stage version next release --message="$HOST build all"
@@ -171,15 +172,51 @@ error_trap 'android edit settings'
 error_trap 'android changelog'
 
 
-(cd $BUILD_HOME/connect && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+go_mod_edit () {
+    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
+    if [ $GO_MOD_VERSION == 0 || GO_MOD_VERSION == 1 ]; then
+        GO_MOD_SUFFIX=''
+    else
+        GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
+    fi
+    go mod edit -dropreplace=$1
+    go mod edit -droprequire=$1
+    go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
+}
+
+
+(cd $BUILD_HOME/connect && 
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    git add . && 
+    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'connect push branch'
-(cd $BUILD_HOME/sdk && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/sdk &&
+    go_mod_edit github.com/urnetwork/connect &&
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    git add . && 
+    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'sdk push branch'
 (cd $BUILD_HOME/android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'android push branch'
 (cd $BUILD_HOME/apple && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'apple push branch'
-(cd $BUILD_HOME/server && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/server &&
+    go_mod_edit github.com/urnetwork/connect &&
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    git add . && 
+    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'server push branch'
 (cd $BUILD_HOME/web && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'web push branch'
@@ -187,24 +224,33 @@ error_trap 'web push branch'
 error_trap 'warp push branch'
 
 
-(cd $BUILD_HOME && git add . && git commit -m "$HOST build all" && git push)
+(cd $BUILD_HOME && git add . && git commit -m "$HOST build all" && git push &&
+    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'push branch'
-(cd $BUILD_HOME && git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
-error_trap 'push tag'
-
-
-(cd $BUILD_HOME/sdk && make)
-error_trap 'build sdk'
-(cd $BUILD_HOME/connect/provider && make)
-error_trap 'build provider'
-(cd $BUILD_HOME/server/bringyourctl && make)
-error_trap 'build bringyourctl'
 
 
 # Upload releases to testing channels
 
 
 github_create_release
+
+
+
+(cd $BUILD_HOME/sdk && make)
+error_trap 'build sdk'
+
+github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.aar" "$BUILD_HOME/build/android/URnetworkSdk.aar"
+github_release_upload "URnetworkSdk-sources-${WARP_VERSION}-${WARP_VERSION_CODE}.jar" "$BUILD_HOME/build/android/URnetworkSdk-sources.jar"
+github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.xcframework.zip" "$BUILD_HOME/build/apple/URnetworkSdk.xcframework.zip"
+
+builder_message "sdk \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
+
+
+(cd $BUILD_HOME/connect/provider && make)
+error_trap 'build provider'
+
+(cd $BUILD_HOME/server/bringyourctl && make)
+error_trap 'build bringyourctl'
 
 
 (cd $BUILD_HOME/apple/app &&
@@ -217,7 +263,7 @@ error_trap 'ios deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
 
-builder_message "ios [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
+builder_message "ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 (cd $BUILD_HOME/apple/app &&
@@ -230,7 +276,7 @@ error_trap 'macos deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
-builder_message "macos [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
+builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 (cd $BUILD_HOME/android/app &&
@@ -254,7 +300,7 @@ fi
 # FIXME apple archive and upload to internal testflight
 # FIXME android play release to play internal testing
 
-builder_message "android [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
+builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 # Github / F-Droid
@@ -295,7 +341,7 @@ fi
 
 # Upload releases to testing channels
 
-builder_message "android github [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) available"
+builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 # Warp services
