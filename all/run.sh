@@ -213,10 +213,14 @@ go_mod_fork () {
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_mod_fork)
+(cd $BUILD_HOME/sdk/build &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_edit_require github.com/urnetwork/sdk)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_mod_fork)
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
