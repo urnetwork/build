@@ -198,7 +198,7 @@ go_mod_fork () {
     GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
-        for f in (*|.*); do
+        for f in *; do
             if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
                 mv "$f" "$temp"
             fi
