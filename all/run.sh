@@ -179,14 +179,19 @@ error_trap 'android changelog'
 
 
 go_mod_edit_module () {
-    go mod edit -module=$1${GO_MOD_SUFFIX}
+    go mod edit -module=$1${GO_MOD_SUFFIX} &&
+    go_edit_require $1
 }
 
 go_mod_edit_require () {
     go mod edit -dropreplace=$1 &&
     go mod edit -droprequire=$1 &&
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    find . -iname '*.go' -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
+    go_edit_require $1
+}
+
+go_edit_require () {
+    find . -iname \( '*.go' -o  'Makefile' \) -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
 }
 
 go_mod_fork () {
@@ -208,17 +213,10 @@ go_mod_fork () {
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_mod_fork)
-(cd $BUILD_HOME/sdk/build &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_mod_edit_require github.com/urnetwork/sdk &&
-    $BUILD_SED -i "s|\"github.com/urnetwork/sdk\"|\"github.com/urnetwork/sdk${GO_MOD_SUFFIX}\"|g" Makefile &&
-    $BUILD_SED -i "s|\"github.com/urnetwork/connect\"|\"github.com/urnetwork/connect${GO_MOD_SUFFIX}\"|g" Makefile &&
-    $BUILD_SED -i "s|\"github.com/urnetwork/connect/protocol\"|\"github.com/urnetwork/connect/protocol${GO_MOD_SUFFIX}\"|g" Makefile)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_edit_require github.com/urnetwork/connect/protocol
     go_mod_fork)
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
