@@ -203,9 +203,9 @@ git_commit () {
 }
 
 git_tag () {
-    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git push --delete origin refs/tags/v${WARP_VERSION}-${WARP_VERSION_CODE} &&
     git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}
+    git push origin refs/tags/v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
 
