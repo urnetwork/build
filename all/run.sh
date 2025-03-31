@@ -199,7 +199,7 @@ go_mod_fork () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
         for f in (*|.*); do
-            if [ ! -e "$f/go.mod" ]; then
+            if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
                 mv "$f" "$temp"
             fi
         done &&
