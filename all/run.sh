@@ -195,8 +195,8 @@ go_mod_edit () {
 
 
 git_commit () {
-    if [ ! $(git diff --quiet) ] || [ ! $(git diff --cached --quiet) ]; then
-        git add . && 
+    git add . &&
+    if ! (git diff --quiet && git diff --cached --quiet); then
         git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
         git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}
     fi
