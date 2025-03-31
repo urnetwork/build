@@ -189,33 +189,37 @@ go_mod_edit_require () {
     else
         GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
     fi
-    go mod edit -dropreplace=$1
-    go mod edit -droprequire=$1
+    go mod edit -dropreplace=$1 &&
+    go mod edit -droprequire=$1 &&
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
-# go_mod_fork () {
-#     GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
-#     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
-#         temp=`mktemp -d`
-#         mv * "$temp"
-#         mv "$temp" v${GO_MOD_VERSION}
-#     fi
-# }
+go_mod_fork () {
+    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
+    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
+        temp=`mktemp -d`
+        mv * "$temp"
+        mv "$temp" v${GO_MOD_VERSION}
+    fi
+}
 
 (cd $BUILD_HOME/connect/protocol && 
-    go_mod_edit_module github.com/urnetwork/connect/protocol)
+    go_mod_edit_module github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol)
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol)
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol)
+    go_mod_edit_require github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 
 
 git_commit () {
@@ -232,10 +236,17 @@ git_tag () {
     git push origin refs/tags/v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
+git_tag_submodule () {
+    git push --delete origin refs/tags/$1/v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    git tag -a $1/v${WARP_VERSION}-${WARP_VERSION_CODE} -m "$1/${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push origin refs/tags/$1/v${WARP_VERSION}-${WARP_VERSION_CODE}
+}
+
 
 (cd $BUILD_HOME/connect && 
     git_commit &&
-    git_tag)
+    git_tag &&
+    git_tag_submodule protocol)
 error_trap 'connect push branch'
 (cd $BUILD_HOME/sdk &&
     git_commit &&
