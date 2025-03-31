@@ -43,6 +43,7 @@ github_create_release () {
 }
 
 github_release_upload () {
+    echo "UPLOAD TO $GITHUB_UPLOAD_URL"
     curl -s -o /dev/null -L -X POST \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -421,9 +422,9 @@ builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` availab
 
 
 # Warp services
-(cd $BUILD_HOME && warpctl build $BUILD_ENV warp${GO_MOD_SUFFIX}/config-updater/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile)
 error_trap 'warpctl build config-updater'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV warp${GO_MOD_SUFFIX}/lb/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
