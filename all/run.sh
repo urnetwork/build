@@ -184,48 +184,63 @@ go_mod_edit () {
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
-
 (cd $BUILD_HOME/connect && 
-    go_mod_edit github.com/urnetwork/connect/protocol &&
-    git add . && 
-    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
-error_trap 'connect push branch'
+    go_mod_edit github.com/urnetwork/connect/protocol)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit github.com/urnetwork/connect &&
-    go_mod_edit github.com/urnetwork/connect/protocol &&
-    git add . && 
-    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
-error_trap 'sdk push branch'
-(cd $BUILD_HOME/android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
-error_trap 'android push branch'
-(cd $BUILD_HOME/apple && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
-error_trap 'apple push branch'
+    go_mod_edit github.com/urnetwork/connect/protocol)
 (cd $BUILD_HOME/server &&
     go_mod_edit github.com/urnetwork/connect &&
-    go_mod_edit github.com/urnetwork/connect/protocol &&
-    git add . && 
-    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    go_mod_edit github.com/urnetwork/connect/protocol)
+
+
+git_commit () {
+    if [ ! $(git diff --quiet) ] || [ ! $(git diff --cached --quiet) ]; then
+        git add . && 
+        git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+        git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}
+    fi
+}
+
+git_tag () {
     git push --delete origin v${WARP_VERSION}-${WARP_VERSION_CODE} &&
     git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}
+}
+
+
+(cd $BUILD_HOME/connect && 
+    git_commit &&
+    git_tag)
+error_trap 'connect push branch'
+(cd $BUILD_HOME/sdk &&
+    git_commit &&
+    git_tag)
+error_trap 'sdk push branch'
+(cd $BUILD_HOME/android && 
+    git_commit &&
+    git_tag)
+error_trap 'android push branch'
+(cd $BUILD_HOME/apple && 
+    git_commit &&
+    git_tag)
+error_trap 'apple push branch'
+(cd $BUILD_HOME/server &&
+    git_commit &&
+    git_tag)
 error_trap 'server push branch'
-(cd $BUILD_HOME/web && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/web && 
+    git_commit &&
+    git_tag)
 error_trap 'web push branch'
-(cd $BUILD_HOME/warp && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME/warp && 
+    git_commit &&
+    git_tag)
 error_trap 'warp push branch'
 
-
-(cd $BUILD_HOME && git add . && git commit -m "$HOST build all" && git push &&
-    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE} -m "${WARP_VERSION}-${WARP_VERSION_CODE}" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE})
+(cd $BUILD_HOME &&
+    git_commit &&
+    git_tag)
 error_trap 'push branch'
 
 
