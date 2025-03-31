@@ -130,6 +130,12 @@ export WARP_VERSION=`warpctl ls version`
 error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
 error_trap 'warpctl version code'
+GO_MOD_VERSION=`echo $WARP_VERSION | $BUILD_SED 's/\([^\.]*\).*/\1/'`
+if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
+    GO_MOD_SUFFIX=''
+else
+    GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
+fi
 
 builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\`"
 
@@ -173,29 +179,17 @@ error_trap 'android changelog'
 
 
 go_mod_edit_module () {
-    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'` &&
-    if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
-        GO_MOD_SUFFIX=''
-    else
-        GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
-    fi &&
     go mod edit -module=$1${GO_MOD_SUFFIX}
 }
 
 go_mod_edit_require () {
-    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'` &&
-    if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
-        GO_MOD_SUFFIX=''
-    else
-        GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
-    fi &&
     go mod edit -dropreplace=$1 &&
     go mod edit -droprequire=$1 &&
-    go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
+    go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE} &&
+    find . -iname '*.go' -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
 }
 
 go_mod_fork () {
-    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
         for f in *; do
