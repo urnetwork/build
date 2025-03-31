@@ -173,22 +173,22 @@ error_trap 'android changelog'
 
 
 go_mod_edit_module () {
-    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
+    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'` &&
     if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
         GO_MOD_SUFFIX=''
     else
         GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
-    fi
+    fi &&
     go mod edit -module=$1${GO_MOD_SUFFIX}
 }
 
 go_mod_edit_require () {
-    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
+    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'` &&
     if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
         GO_MOD_SUFFIX=''
     else
         GO_MOD_SUFFIX="/v${GO_MOD_VERSION}"
-    fi
+    fi &&
     go mod edit -dropreplace=$1 &&
     go mod edit -droprequire=$1 &&
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
@@ -197,8 +197,12 @@ go_mod_edit_require () {
 go_mod_fork () {
     GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
-        temp=`mktemp -d`
-        mv * "$temp"
+        temp=`mktemp -d` &&
+        for f in (*|.*); do
+            if [ ! -e "$f/go.mod" ]; then
+                mv "$f" "$temp"
+            fi
+        done &&
         mv "$temp" v${GO_MOD_VERSION}
     fi
 }
