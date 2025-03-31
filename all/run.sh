@@ -212,7 +212,9 @@ go_mod_fork () {
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_mod_edit_require github.com/urnetwork/sdk &&
-    $BUILD_SED -i "s|github.com/urnetwork/sdk|github.com/urnetwork/sdk${GO_MOD_SUFFIX}|g" Makefile)
+    $BUILD_SED -i "s|\"github.com/urnetwork/sdk\"|\"github.com/urnetwork/sdk${GO_MOD_SUFFIX}\"|g" Makefile &&
+    $BUILD_SED -i "s|\"github.com/urnetwork/connect\"|\"github.com/urnetwork/connect${GO_MOD_SUFFIX}\"|g" Makefile &&
+    $BUILD_SED -i "s|\"github.com/urnetwork/connect/protocol\"|\"github.com/urnetwork/connect/protocol${GO_MOD_SUFFIX}\"|g" Makefile)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
