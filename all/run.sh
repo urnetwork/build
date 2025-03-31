@@ -239,7 +239,9 @@ error_trap 'web push branch'
 error_trap 'warp push branch'
 
 (cd $BUILD_HOME &&
-    git_commit &&
+    git add . &&
+    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}" &&
+    git push &&
     git_tag)
 error_trap 'push branch'
 
