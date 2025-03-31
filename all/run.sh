@@ -319,7 +319,8 @@ builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - ht
 
 
 # Github / F-Droid
-(cd $BUILD_HOME/android && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+(cd $BUILD_HOME/android &&
+    git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
 (cd $BUILD_HOME/android &&
     echo -n "
@@ -330,14 +331,22 @@ warp.version_code=$WARP_VERSION_CODE
     $BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/app/build.gradle &&
     $BUILD_SED -i 's|.*/\* *build: *google *\*/.*|/*ungoogled*/|g' app/settings.gradle)
 error_trap 'android edit ungoogle settings'
-(cd $BUILD_HOME/android && git add . && git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+(cd $BUILD_HOME/android && 
+    git add . && 
+    git commit -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && 
+    git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android ungoogle push branch'
 
 # this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
 
-(cd $BUILD_HOME && git add . && git commit -m "$HOST build ungoogle" && git push)
+(cd $BUILD_HOME && 
+    git add . && 
+    git commit -m "$HOST build ungoogle" && 
+    git push)
 error_trap 'push ungoogle branch'
-(cd $BUILD_HOME && git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
+(cd $BUILD_HOME && 
+    git tag -a v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle -m "${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle" && 
+    git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'push ungoogle tag'
 
 (cd $BUILD_HOME/android/app &&
