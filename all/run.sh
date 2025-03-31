@@ -184,14 +184,28 @@ go_mod_edit () {
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
+go_mod_fork () {
+    GO_MOD_VERSION=`echo $WARP_VERSION | sed 's/\([^\.]*\).*/\1/'`
+    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
+        temp=`mktemp -d`
+        mv * "$temp"
+        mv "$temp" v${GO_MOD_VERSION}
+    fi
+}
+
+(cd $BUILD_HOME/connect/protocol && 
+    go_mod_fork)
 (cd $BUILD_HOME/connect && 
-    go_mod_edit github.com/urnetwork/connect/protocol)
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit github.com/urnetwork/connect &&
-    go_mod_edit github.com/urnetwork/connect/protocol)
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 (cd $BUILD_HOME/server &&
     go_mod_edit github.com/urnetwork/connect &&
-    go_mod_edit github.com/urnetwork/connect/protocol)
+    go_mod_edit github.com/urnetwork/connect/protocol &&
+    go_mod_fork)
 
 
 git_commit () {
