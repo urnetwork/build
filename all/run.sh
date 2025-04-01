@@ -302,9 +302,7 @@ error_trap 'push branch'
 github_create_release
 
 
-(cd $BUILD_HOME/sdk/build && 
-    make init && 
-    make)
+(cd $BUILD_HOME/sdk/build && make)
 error_trap 'build sdk'
 
 github_release_upload "URnetworkSdk-${WARP_VERSION}-${WARP_VERSION_CODE}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
