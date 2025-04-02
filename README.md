@@ -43,6 +43,7 @@ If you downloaded the app from a store, go to Apps -> URnetwork to view the vers
 # check your apk for the version and version code
 # git checkout v<version>-<version_code>
 git checkout v2025.4.1-58770364
+git submodule update --init
 cd android/app
 ./gradlew assembleDebug
 ```
