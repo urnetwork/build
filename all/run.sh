@@ -26,7 +26,7 @@ error_trap () {
 }
 
 git_main () {
-    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules && git stash -u
+    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
 }
 
 github_create_release () {
@@ -70,19 +70,19 @@ error_trap 'pull warp release'
 
 
 if [ "$BUILD_RESET" ]; then
-    (cd $BUILD_HOME/connect && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf connect)
     error_trap 'reset connect'
-    (cd $BUILD_HOME/sdk && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf sdk)
     error_trap 'reset sdk'
-    (cd $BUILD_HOME/android && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf android)
     error_trap 'reset android'
-    (cd $BUILD_HOME/apple && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf apple)
     error_trap 'reset apple'
-    (cd $BUILD_HOME/server && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf server)
     error_trap 'reset server'
-    (cd $BUILD_HOME/web && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf web)
     error_trap 'reset web'
-    (cd $BUILD_HOME/warp && git stash -u && git reset --hard)
+    (cd $BUILD_HOME && rm -rf warp)
     error_trap 'reset warp'
     (cd $BUILD_HOME && 
         git stash -u && 
