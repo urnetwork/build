@@ -70,21 +70,22 @@ error_trap 'pull warp release'
 
 
 if [ "$BUILD_RESET" ]; then
-    (cd $BUILD_HOME/connect && git reset --hard)
+    (cd $BUILD_HOME/connect && git stash -u && git reset --hard)
     error_trap 'reset connect'
-    (cd $BUILD_HOME/sdk && git reset --hard)
+    (cd $BUILD_HOME/sdk && git stash -u && git reset --hard)
     error_trap 'reset sdk'
-    (cd $BUILD_HOME/android && git reset --hard)
+    (cd $BUILD_HOME/android && git stash -u && git reset --hard)
     error_trap 'reset android'
-    (cd $BUILD_HOME/apple && git reset --hard)
+    (cd $BUILD_HOME/apple && git stash -u && git reset --hard)
     error_trap 'reset apple'
-    (cd $BUILD_HOME/server && git reset --hard)
+    (cd $BUILD_HOME/server && git stash -u && git reset --hard)
     error_trap 'reset server'
-    (cd $BUILD_HOME/web && git reset --hard)
+    (cd $BUILD_HOME/web && git stash -u && git reset --hard)
     error_trap 'reset web'
-    (cd $BUILD_HOME/warp && git reset --hard)
+    (cd $BUILD_HOME/warp && git stash -u && git reset --hard)
     error_trap 'reset warp'
     (cd $BUILD_HOME && 
+        git stash -u && 
         git reset --hard && 
         git submodule update --init)
     error_trap 'reset'
