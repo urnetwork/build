@@ -57,7 +57,7 @@ github_release_upload () {
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
-export BRINGYOUR_HOME=`realpath ../..`
+export BRINGYOUR_HOME=`realpath ..`
 export STAGE_SECONDS=1
 
 
