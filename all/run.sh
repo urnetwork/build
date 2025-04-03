@@ -26,7 +26,7 @@ error_trap () {
 }
 
 git_main () {
-    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
+    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules && git stash -u
 }
 
 github_create_release () {
@@ -211,8 +211,8 @@ go_mod_fork () {
     setopt extended_glob
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
-        for f in $1; do
-            if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
+        for f in *; do
+            if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ] && [[ ! "$f" =~ "^$1\$" ]]; then
                 mv "$f" "$temp"
             fi
         done &&
@@ -222,12 +222,12 @@ go_mod_fork () {
 
 (cd $BUILD_HOME/connect/protocol && 
     go_mod_edit_module github.com/urnetwork/connect/protocol &&
-    go_mod_fork '*')
+    go_mod_fork)
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_mod_fork  '*~(api|protocol)')
+    go_mod_fork 'api|protocol')
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
@@ -237,13 +237,13 @@ go_mod_fork () {
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
-    go_mod_fork '*~(build)')
+    go_mod_fork 'build')
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_edit_require_subpackages github.com/urnetwork/server &&
-    go_mod_fork '*')
+    go_mod_fork)
 
 
 git_commit () {
