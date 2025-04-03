@@ -19,3 +19,6 @@
 [submodule "apple"]
 	path = apple
 	url = git@github.com:urnetwork/apple.git
+[submodule "docs"]
+	path = docs
+	url = git@github.com:urnetwork/docs.git

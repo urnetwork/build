@@ -71,19 +71,13 @@ error_trap 'pull warp release'
 
 if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf connect)
-    error_trap 'reset connect'
     (cd $BUILD_HOME && rm -rf sdk)
-    error_trap 'reset sdk'
     (cd $BUILD_HOME && rm -rf android)
-    error_trap 'reset android'
     (cd $BUILD_HOME && rm -rf apple)
-    error_trap 'reset apple'
     (cd $BUILD_HOME && rm -rf server)
-    error_trap 'reset server'
     (cd $BUILD_HOME && rm -rf web)
-    error_trap 'reset web'
+    (cd $BUILD_HOME && rm -rf docs)
     (cd $BUILD_HOME && rm -rf warp)
-    error_trap 'reset warp'
     (cd $BUILD_HOME && 
         git stash -u && 
         git reset --hard && 
@@ -113,6 +107,8 @@ error_trap 'pull apple'
 error_trap 'pull server'
 (cd $BUILD_HOME/web && git_main)
 error_trap 'pull web'
+(cd $BUILD_HOME/docs && git_main)
+error_trap 'pull docs'
 (cd $BUILD_HOME/warp && git_main)
 error_trap 'pull warp'
 
@@ -161,6 +157,8 @@ error_trap 'apple prepare version branch'
 error_trap 'server prepare version branch'
 (cd $BUILD_HOME/web && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'web prepare branch'
+(cd $BUILD_HOME/docs && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
+error_trap 'docs prepare branch'
 (cd $BUILD_HOME/warp && git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE})
 error_trap 'warp prepare branch'
 
@@ -291,6 +289,10 @@ error_trap 'server push branch'
     git_commit &&
     git_tag)
 error_trap 'web push branch'
+(cd $BUILD_HOME/docs && 
+    git_commit &&
+    git_tag)
+error_trap 'docs push branch'
 (cd $BUILD_HOME/warp && 
     git_commit &&
     git_tag)
