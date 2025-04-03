@@ -92,8 +92,15 @@ if [ "$BUILD_RESET" ]; then
 fi
 
 
+BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
 (cd $BUILD_HOME && git_main)
 error_trap 'pull'
+BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
+if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
+    builder_message "Build repo updated. Must restart to use the latest script."
+    exit 1
+fi
+
 (cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'
 (cd $BUILD_HOME/sdk && git_main)
