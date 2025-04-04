@@ -224,6 +224,7 @@ go_mod_fork () {
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
     go_mod_fork 'api|protocol')
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
