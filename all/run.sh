@@ -544,4 +544,4 @@ fi
 builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV)\`\`\`"
 
 
-builder_message "Build all [${WARP_VERSION}-${WARP_VERSION_CODE}](https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}) ... done! Enjoy :)"
+builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\` ... done! Enjoy :) - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
