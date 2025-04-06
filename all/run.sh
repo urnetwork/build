@@ -383,6 +383,7 @@ builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - ht
 
 
 # Github / F-Droid
+# changlelog/${WARP_VERSION_CODE}.txt this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
 (cd $BUILD_HOME/android &&
     git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
@@ -401,8 +402,6 @@ error_trap 'android edit ungoogle settings'
     git push -u origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android ungoogle push branch'
 
-# this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
-
 (cd $BUILD_HOME && 
     git add . && 
     git commit -m "$HOST build ungoogle" && 
@@ -413,8 +412,14 @@ error_trap 'push ungoogle branch'
     git push origin v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'push ungoogle tag'
 
-(cd $BUILD_HOME/android/app &&
-    ./gradlew clean assembleGithubRelease)
+# build in the fdroid server context
+# ideally this should not be required, but there are some small differences in the android artifacts apparently due to build environment (macos/arm versus linux/amd perhaps)
+(cd $BUILD_HOME &&
+    docker run --rm -u vagrant \
+        --entrypoint /urnetwork/build/fdroid/build.sh \
+        -v $WARP_HOME/release:/urnetwork/release:z \
+        -v $BUILD_HOME:/urnetwork/build:Z \
+        registry.gitlab.com/fdroid/fdroidserver:buildserver)
 error_trap 'android github build'
 
 github_release_upload \
