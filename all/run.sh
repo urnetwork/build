@@ -58,7 +58,9 @@ export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
 export BRINGYOUR_HOME=`realpath ..`
-export STAGE_SECONDS=1
+if [ ! "$STAGE_SECONDS" ]; then
+    export STAGE_SECONDS=60
+fi
 
 
 (cd $WARP_HOME/config && git_main)
