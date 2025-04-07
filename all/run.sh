@@ -244,6 +244,7 @@ error_trap 'sdk build edit'
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_fork 'build')
 error_trap 'sdk edit'
 
@@ -257,6 +258,7 @@ error_trap 'sdk push branch'
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/server &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_fork)
 error_trap 'server edit'
 
