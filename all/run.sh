@@ -202,43 +202,16 @@ go_mod_fork () {
         done &&
         mv "$temp" v${GO_MOD_VERSION}
         # the go go.sum needs to be updated
-        (cd v${GO_MOD_VERSION} && go -t -u update ./...)
+        (cd v${GO_MOD_VERSION} && go get -t ./...)
     fi
 }
 
 go_sum () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         # the go go.sum needs to be updated
-        go -t -u update ./...
+        go get -t ./...
     fi
 }
-
-(cd $BUILD_HOME/connect/protocol && 
-    go_mod_edit_module github.com/urnetwork/connect/protocol &&
-    go_mod_fork)
-(cd $BUILD_HOME/connect &&
-    go_mod_edit_module github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
-    go_mod_fork 'api|protocol')
-(cd $BUILD_HOME/sdk/build &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_mod_edit_require github.com/urnetwork/sdk &&
-    go_sum)
-(cd $BUILD_HOME/sdk &&
-    go_mod_edit_module github.com/urnetwork/sdk &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_edit_require_subpackages github.com/urnetwork/sdk &&
-    go_mod_fork 'build')
-(cd $BUILD_HOME/server &&
-    go_mod_edit_module github.com/urnetwork/server &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_edit_require_subpackages github.com/urnetwork/server &&
-    go_mod_fork)
 
 
 git_commit () {
@@ -255,46 +228,80 @@ git_tag () {
     git push origin refs/tags/v${WARP_VERSION}-${WARP_VERSION_CODE}
 }
 
-git_tag_submodule () {
-    git push --delete origin refs/tags/$1/v${WARP_VERSION}-${WARP_VERSION_CODE} &&
-    git tag -a $1/v${WARP_VERSION}-${WARP_VERSION_CODE} -m "$1/${WARP_VERSION}-${WARP_VERSION_CODE}" &&
-    git push origin refs/tags/$1/v${WARP_VERSION}-${WARP_VERSION_CODE}
-}
 
+(cd $BUILD_HOME/connect &&
+    go_mod_edit_module github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
+    go_mod_fork 'api')
+error_trap 'connect edit'
 
 (cd $BUILD_HOME/connect && 
     git_commit &&
-    git_tag &&
-    git_tag_submodule protocol)
+    git_tag)
 error_trap 'connect push branch'
+
+
+(cd $BUILD_HOME/sdk/build &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/sdk)
+error_trap 'sdk build edit'
+
+(cd $BUILD_HOME/sdk &&
+    go_mod_edit_module github.com/urnetwork/sdk &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/sdk &&
+    go_mod_fork 'build')
+error_trap 'sdk edit'
+
 (cd $BUILD_HOME/sdk &&
     git_commit &&
     git_tag)
 error_trap 'sdk push branch'
-(cd $BUILD_HOME/android && 
-    git_commit &&
-    git_tag)
-error_trap 'android push branch'
-(cd $BUILD_HOME/apple && 
-    git_commit &&
-    git_tag)
-error_trap 'apple push branch'
+
+
+(cd $BUILD_HOME/server &&
+    go_mod_edit_module github.com/urnetwork/server &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/server &&
+    go_mod_fork)
+error_trap 'server edit'
+
 (cd $BUILD_HOME/server &&
     git_commit &&
     git_tag)
 error_trap 'server push branch'
+
+
+(cd $BUILD_HOME/android && 
+    git_commit &&
+    git_tag)
+error_trap 'android push branch'
+
+
+(cd $BUILD_HOME/apple && 
+    git_commit &&
+    git_tag)
+error_trap 'apple push branch'
+
+
 (cd $BUILD_HOME/web && 
     git_commit &&
     git_tag)
 error_trap 'web push branch'
+
+
 (cd $BUILD_HOME/docs && 
     git_commit &&
     git_tag)
 error_trap 'docs push branch'
+
+
 (cd $BUILD_HOME/warp && 
     git_commit &&
     git_tag)
 error_trap 'warp push branch'
+
 
 (cd $BUILD_HOME &&
     git add . &&
