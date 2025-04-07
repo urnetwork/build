@@ -201,6 +201,15 @@ go_mod_fork () {
             fi
         done &&
         mv "$temp" v${GO_MOD_VERSION}
+        # the go go.sum needs to be updated
+        (cd v${GO_MOD_VERSION} && go -t -u update ./...)
+    fi
+}
+
+go_sum () {
+    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
+        # the go go.sum needs to be updated
+        go -t -u update ./...
     fi
 }
 
@@ -216,7 +225,8 @@ go_mod_fork () {
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/connect/protocol &&
-    go_mod_edit_require github.com/urnetwork/sdk)
+    go_mod_edit_require github.com/urnetwork/sdk &&
+    go_sum)
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
