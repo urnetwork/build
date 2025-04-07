@@ -202,14 +202,7 @@ go_mod_fork () {
         done &&
         mv "$temp" v${GO_MOD_VERSION}
         # the go go.sum needs to be updated
-        (cd v${GO_MOD_VERSION} && go get -t ./...)
-    fi
-}
-
-go_sum () {
-    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
-        # the go go.sum needs to be updated
-        go get -t ./...
+        (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...)
     fi
 }
 
