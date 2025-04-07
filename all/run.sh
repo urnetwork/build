@@ -423,6 +423,10 @@ error_trap 'push ungoogle tag'
 
 # build in the fdroid server context
 # ideally this should not be required, but there are some small differences in the android artifacts apparently due to build environment (macos/arm versus linux/amd perhaps)
+# FIXME - there is currently a bug on apple m4 that causes an "invalid instruction" error when using the docker apple virtualization framework
+#         see https://github.com/golang/go/issues/71434
+#         The docker vmm framework is a work around, but it is very slow for amd64.
+#         Run on an m1 or intel mac for now.
 (cd $BUILD_HOME &&
     docker run --rm -u vagrant \
         --entrypoint /urnetwork/build/fdroid/build.sh \
