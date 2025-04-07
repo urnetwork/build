@@ -354,12 +354,21 @@ error_trap 'build provider'
 error_trap 'build bringyourctl'
 
 
+# the latest macos or xcode messes up the package with the error
+#    ITMS-90048: This bundle is invalid - Your archive contains paths that are not allowed: [._Symbols]
+# see https://github.com/flutter/flutter/issues/166367
+bug_fix_clean_ipa () {
+    zip -d "$1" ._Symbols/
+}
+
+
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
     xcrun altool --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-    xcrun altool --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+    xcrun altool --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+    bug_fix_clean_ipa build/URnetwork.ipa)
 error_trap 'ios deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
