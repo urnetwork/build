@@ -1,7 +1,6 @@
-#!/bin/bash
+#!/bin/zsh
 
 (sudo apt-get update &&
-	sudo apt-get install -t bookworm-backports -y golang-go &&
 	sudo apt-get install -y gcc libc-dev make &&
 	echo "deb https://deb.debian.org/debian trixie main" | sudo tee /etc/apt/sources.list.d/trixie.list &&
 	sudo apt-get update &&
@@ -12,7 +11,7 @@
 export ANDROID_HOME=/opt/android-sdk
 
 sdkmanager 'ndk;28.0.13004108'
-export ANDROID_NDK_HOME=/opt/android-sdk/ndk/28.0.13004108
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
 
 (mkdir $HOME/.android &&
 	keytool -genkey -v \
@@ -23,6 +22,11 @@ export ANDROID_NDK_HOME=/opt/android-sdk/ndk/28.0.13004108
 		-keypass android \
 		-keyalg RSA \
 		-validity 14000)
+
+if [[ ! "$(go version)" =~ "^go version go1.24.2|^$" ]]; then
+	echo "system go must either be absent or version go1.24.2"
+	exit 1
+fi
 
 export WARP_HOME=/urnetwork
 export BRINGYOUR_HOME=/urnetwork/build

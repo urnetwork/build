@@ -25,34 +25,15 @@ error_trap () {
     fi
 }
 
-git_main () {
-    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
-}
 
-github_create_release () {
-    GITHUB_UPLOAD=`curl -s -L \
-        -X POST \
-        -H "Accept: application/vnd.github+json" \
-        -H "Authorization: Bearer $GITHUB_API_KEY" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
-    error_trap 'github create release'
-    GITHUB_UPLOAD_ID=`echo "$GITHUB_UPLOAD" | jq .id`
-    GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_UPLOAD_ID/assets"
-    echo "github upload to $GITHUB_UPLOAD_URL"
-}
+sdkmanager 'ndk;28.0.13004108'
+error_trap 'android ndk'
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
+if [[ ! `go version` =~ 'go version go1.24.2' ]]; then
+    builder_message 'go 1.24.2 required'
+    exit 1
+fi
 
-github_release_upload () {
-    curl -s -o /dev/null -L -X POST \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        -H "Content-Type: application/octet-stream" \
-        -H "Authorization: Bearer $GITHUB_API_KEY" \
-        "$GITHUB_UPLOAD_URL?name=$1" \
-        --data-binary "@$2"
-    error_trap "github release upload $1"
-}
 
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
@@ -62,6 +43,10 @@ if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
 fi
 
+
+git_main () {
+    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
+}
 
 (cd $WARP_HOME/config && git_main)
 error_trap 'pull warp config'
@@ -309,7 +294,32 @@ error_trap 'warp push branch'
 error_trap 'push branch'
 
 
-# Upload releases to testing channels
+# Build release
+
+github_create_release () {
+    GITHUB_UPLOAD=`curl -s -L \
+        -X POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer $GITHUB_API_KEY" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        https://api.github.com/repos/urnetwork/build/releases \
+        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+    error_trap 'github create release'
+    GITHUB_UPLOAD_ID=`echo "$GITHUB_UPLOAD" | jq .id`
+    GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_UPLOAD_ID/assets"
+    echo "github upload to $GITHUB_UPLOAD_URL"
+}
+
+github_release_upload () {
+    curl -s -o /dev/null -L -X POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -H "Content-Type: application/octet-stream" \
+        -H "Authorization: Bearer $GITHUB_API_KEY" \
+        "$GITHUB_UPLOAD_URL?name=$1" \
+        --data-binary "@$2"
+    error_trap "github release upload $1"
+}
 
 
 github_create_release
@@ -356,7 +366,6 @@ error_trap 'macos deploy'
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
 builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
-
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean assemblePlayRelease assembleSolana_dappRelease)
