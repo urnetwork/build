@@ -38,6 +38,7 @@ fi
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
+export BUILD_CURL='curl -s -o /dev/null -L'
 export BRINGYOUR_HOME=`realpath ..`
 if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
@@ -168,8 +169,8 @@ pwsdk.maven.password=github_pat_11BQVGHTQ0hZxCV65jw5QR_fApFvdBBsSbPPgU3UMr3C4wj9
 error_trap 'android edit settings'
 
 # put a temporary changelog in place
-(cd $BUILD_HOME && echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt)
-error_trap 'android changelog'
+# (cd $BUILD_HOME && echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt)
+# error_trap 'android changelog'
 
 
 go_mod_edit_module () {
@@ -308,33 +309,85 @@ error_trap 'push branch'
 
 # Build release
 
-github_create_release () {
-    GITHUB_UPLOAD=`curl -s -L \
+github_create_draft_release () {
+    GITHUB_RELEASE=`$BUILD_CURL \
         -X POST \
-        -H "Accept: application/vnd.github+json" \
+        -H 'Accept: application/vnd.github+json' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
         https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
-    GITHUB_UPLOAD_ID=`echo "$GITHUB_UPLOAD" | jq .id`
-    GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_UPLOAD_ID/assets"
+    GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq .id`
+    GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
     echo "github upload to $GITHUB_UPLOAD_URL"
+    VIRUSTOTAL_ARTIFACTS=()
 }
 
 github_release_upload () {
-    curl -s -o /dev/null -L -X POST \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        -H "Content-Type: application/octet-stream" \
+    $BUILD_CURL \
+        -X POST \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -H 'Content-Type: application/octet-stream' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         "$GITHUB_UPLOAD_URL?name=$1" \
         --data-binary "@$2"
     error_trap "github release upload $1"
+
+    virustotal "$1" "$2"
+}
+
+virustotal () {
+    SHA256=`shasum -a 256 "$2" | awk '{ print $1 }'`
+
+    if [ "$VIRUSTOTAL_API_KEY" ]; then
+        VIRUSTOTAL_BIG_UPLOAD=`$BUILD_CURL \
+            -H 'Accept: application/json' \
+            -H "x-apikey: $VIRUSTOTAL_API_KEY" \
+            https://www.virustotal.com/api/v3/files/upload_url`
+        VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_BIG_UPLOAD" | jq .data`
+        VIRUSTOTAL_UPLOAD=`$BUILD_CURL \
+            -X POST \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: multipart/form-data' \
+            -H "x-apikey: $VIRUSTOTAL_API_KEY" \
+            "$VIRUSTOTAL_UPLOAD_URL" \
+            -F "file=@$2"`
+        VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq .data.id`
+
+        # FIXME wait for virus scan output and make sure no issues
+        # VIRUSTOTAL_ANALYSIS=`curl "https://www.virustotal.com/api/v3/analyses/$VIRUSTOTAL_ID" \
+        #     --header 'accept: application/json' \
+        #     --header "x-apikey: $VIRUSTOTAL_API_KEY"`
+
+        VIRUSTOTAL_ARTIFACTS+=("|$1|\`$SHA256\`|[results](https://www.virustotal.com/gui/url/$SHA256/detection)|")
+    else
+        VIRUSTOTAL_ARTIFACTS+=("|$1|\`$SHA256\`|not submitted|")
+    fi
+}
+
+github_create_release () {
+    RELEASE_BODY="v${WARP_VERSION}-${WARP_VERSION_CODE}
+
+|Artifact|SHA256|VirusTotal results|
+|--------|------|------------------|"
+    for a in $VIRUSTOTAL_ARTIFACTS; do
+        RELEASE_BODY="$RELEASE_BODY
+$a"
+    done
+
+    $BUILD_CURL \
+        -X PATCH \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -H "Authorization: Bearer $GITHUB_API_KEY" \
+        "https://api.github.com/repos/OWNER/REPO/releases/$GITHUB_RELEASE_ID" \
+        -d "{\"body\":\"$RELEASE_BODY\",\"draft\":false}"
 }
 
 
-github_create_release
+github_create_draft_release
 
 
 (cd $BUILD_HOME/sdk/build && make)
@@ -469,6 +522,10 @@ fi
 # Upload releases to testing channels
 
 builder_message "android github \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
+
+
+github_create_release
+builder_message "release \`${WARP_VERSION}-${WARP_VERSION_CODE}\` complete - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
 # Warp services
