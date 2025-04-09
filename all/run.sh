@@ -10,7 +10,7 @@
 
 
 builder_message () {
-    echo -n "$1"
+    echo -n "$1\n"
     if [ "$SLACK_WEBHOOK" ]; then
         data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n "$1" | jq -Rsa .)}}]}"
         curl -s -o /dev/null -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
@@ -374,7 +374,7 @@ virustotal () {
 }
 
 virustotal_verify () {
-    for i in {0..19}; do
+    for i in {0..30}; do
         VIRUSTOTAL_ANALYSIS=`$BUILD_CURL \
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
@@ -393,7 +393,7 @@ virustotal_verify () {
             fi
         fi
         echo "virustotal analysis $1 waiting for result (${VIRUSTOTAL_ANALYSIS_STATUS}) ..."
-        sleep 5
+        sleep 10
     done
     builder_message "virustotal analysis $1 did not complete"
     exit 1
