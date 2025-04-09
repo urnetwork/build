@@ -367,7 +367,7 @@ virustotal () {
 
         virustotal_verify "$1" "$VIRUSTOTAL_ID"
 
-        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/url/$SHA256/detection)|")
+        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/file/$SHA256)|")
     else
         VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|not submitted|")
     fi
@@ -384,15 +384,15 @@ virustotal_verify () {
             VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq -r .data.attributes.stats`
             if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
                 if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
-                    echo "virustotal analysis $1 ok (${VIRUSTOTAL_ANALYSIS_STATS})"
+                    echo "virustotal analysis $1 ok ($VIRUSTOTAL_ANALYSIS_STATS)"
                     return
                 else
-                    builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
+                    builder_message "virustotal analysis $1 failed: \`\`\`$VIRUSTOTAL_ANALYSIS_STATS\`\`\`"
                     exit 1
                 fi
             fi
         fi
-        echo "virustotal analysis $1 waiting for result (${VIRUSTOTAL_ANALYSIS_STATUS}) ..."
+        echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
         sleep 10
     done
     builder_message "virustotal analysis $1 did not complete"
