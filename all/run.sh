@@ -389,6 +389,8 @@ virustotal_verify () {
             sleep 5
         fi
     done
+    builder_message "virustotal analysis $1 did not complete"
+    exit 1
 }
 
 github_create_release () {
