@@ -378,14 +378,14 @@ virustotal_verify () {
         VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
         if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
             if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
-                echo "virustotal $1: ok"
+                echo "virustotal analysis $1 ok"
                 return
             else
                 builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
                 exit 1
             fi
         else
-            echo "virustotal $1: waiting for result ..."
+            echo "virustotal analysis $1 waiting for result ..."
             sleep 5
         fi
     done
