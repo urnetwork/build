@@ -377,9 +377,9 @@ virustotal_verify () {
             "https://www.virustotal.com/api/v3/analyses/$2"`
         VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
         if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
-            if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` == 0 ]; then
+            if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
                 echo "virustotal $1: ok"
-                return    
+                return
             else
                 builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
                 exit 1
