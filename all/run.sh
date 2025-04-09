@@ -325,7 +325,6 @@ github_create_draft_release () {
         https://api.github.com/repos/urnetwork/build/releases \
         -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
-    echo "$GITHUB_RELEASE"
     GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq -r .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
     echo "github upload to $GITHUB_UPLOAD_URL"
@@ -355,7 +354,6 @@ virustotal () {
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             https://www.virustotal.com/api/v3/files/upload_url`
         error_trap "virustotal prepare upload $1"
-        echo "$VIRUSTOTAL_PREPARE_UPLOAD"
         VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_PREPARE_UPLOAD" | jq -r .data`
         VIRUSTOTAL_UPLOAD=`$BUILD_CURL \
             -X POST \
@@ -365,7 +363,6 @@ virustotal () {
             "$VIRUSTOTAL_UPLOAD_URL" \
             -F "file=@$2"`
         error_trap "virustotal upload $1"
-        echo "$VIRUSTOTAL_UPLOAD"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
 
         virustotal_verify "$1" "$VIRUSTOTAL_ID"
@@ -387,7 +384,7 @@ virustotal_verify () {
             VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq -r .data.attributes.stats`
             if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
                 if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
-                    echo "virustotal analysis $1 ok (${$VIRUSTOTAL_ANALYSIS_STATS})"
+                    echo "virustotal analysis $1 ok (${VIRUSTOTAL_ANALYSIS_STATS})"
                     return
                 else
                     builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
