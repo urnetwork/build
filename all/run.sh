@@ -208,7 +208,8 @@ go_mod_fork () {
                 mv "$f" "$temp"
             fi
         done &&
-        mv "$temp" v${GO_MOD_VERSION}
+        $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
+        mv "$temp" v${GO_MOD_VERSION} &&
         # the go go.sum needs to be updated
         (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...)
     fi
