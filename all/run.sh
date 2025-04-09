@@ -319,7 +319,7 @@ github_create_draft_release () {
         -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
     echo "$GITHUB_RELEASE"
-    GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq .id`
+    GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq -r .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
     echo "github upload to $GITHUB_UPLOAD_URL"
     VIRUSTOTAL_ARTIFACTS=()
@@ -343,12 +343,13 @@ virustotal () {
     SHA256=`shasum -a 256 "$2" | awk '{ print $1 }'`
 
     if [ "$VIRUSTOTAL_API_KEY" ]; then
-        VIRUSTOTAL_BIG_UPLOAD=`$BUILD_CURL \
+        VIRUSTOTAL_PREPARE_UPLOAD=`$BUILD_CURL \
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             https://www.virustotal.com/api/v3/files/upload_url`
-        echo "$VIRUSTOTAL_BIG_UPLOAD"
-        VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_BIG_UPLOAD" | jq .data`
+        error_trap "virustotal prepare upload $1"
+        echo "$VIRUSTOTAL_PREPARE_UPLOAD"
+        VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_PREPARE_UPLOAD" | jq -r .data`
         VIRUSTOTAL_UPLOAD=`$BUILD_CURL \
             -X POST \
             -H 'Accept: application/json' \
@@ -356,24 +357,25 @@ virustotal () {
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             "$VIRUSTOTAL_UPLOAD_URL" \
             -F "file=@$2"`
+        error_trap "virustotal upload $1"
         echo "$VIRUSTOTAL_UPLOAD"
-        VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq .data.id`
+        VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
 
         # FIXME wait for virus scan output and make sure no issues
         # VIRUSTOTAL_ANALYSIS=`curl "https://www.virustotal.com/api/v3/analyses/$VIRUSTOTAL_ID" \
         #     --header 'accept: application/json' \
         #     --header "x-apikey: $VIRUSTOTAL_API_KEY"`
 
-        VIRUSTOTAL_ARTIFACTS+=("|$1|\`$SHA256\`|[results](https://www.virustotal.com/gui/url/$SHA256/detection)|")
+        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|[results](https://www.virustotal.com/gui/url/$SHA256/detection)|")
     else
-        VIRUSTOTAL_ARTIFACTS+=("|$1|\`$SHA256\`|not submitted|")
+        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|not submitted|")
     fi
 }
 
 github_create_release () {
     RELEASE_BODY="v${WARP_VERSION}-${WARP_VERSION_CODE}
 
-|Artifact|SHA256|VirusTotal results|
+|Asset|SHA256|VirusTotal results|
 |--------|------|------------------|"
     for a in $VIRUSTOTAL_ARTIFACTS; do
         RELEASE_BODY="$RELEASE_BODY
