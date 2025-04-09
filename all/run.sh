@@ -385,7 +385,7 @@ $a"
         -H 'Accept: application/vnd.github+json' \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
-        "https://api.github.com/repos/OWNER/REPO/releases/$GITHUB_RELEASE_ID" \
+        "https://api.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID" \
         -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"$(echo -n "$RELEASE_BODY" | jq -Rsa .)\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github patch release'
 }
