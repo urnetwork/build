@@ -332,6 +332,8 @@ github_create_draft_release () {
 }
 
 github_release_upload () {
+    virustotal "$1" "$2"
+
     GITHUB_UPLOAD=`$BUILD_CURL \
         -X POST \
         -H 'Accept: application/vnd.github+json' \
@@ -341,8 +343,6 @@ github_release_upload () {
         "$GITHUB_UPLOAD_URL?name=$1" \
         --data-binary "@$2"`
     error_trap "github release upload $1"
-
-    virustotal "$1" "$2"
 }
 
 virustotal () {
