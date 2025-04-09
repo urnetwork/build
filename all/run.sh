@@ -382,19 +382,21 @@ virustotal_verify () {
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             "https://www.virustotal.com/api/v3/analyses/$2"`
-        VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
-        if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
-            if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
-                echo "virustotal analysis $1 ok"
-                return
-            else
-                builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
-                exit 1
+        VIRUSTOTAL_ANALYSIS_STATUS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.status`
+        if [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "completed" ]; then
+            VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
+            if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
+                if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
+                    echo "virustotal analysis $1 ok"
+                    return
+                else
+                    builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
+                    exit 1
+                fi
             fi
-        else
-            echo "virustotal analysis $1 waiting for result ..."
-            sleep 5
         fi
+        echo "virustotal analysis $1 waiting for result (${VIRUSTOTAL_ANALYSIS_STATUS}) ..."
+        sleep 5
     done
     builder_message "virustotal analysis $1 did not complete"
     exit 1
