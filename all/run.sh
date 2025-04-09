@@ -25,6 +25,13 @@ error_trap () {
     fi
 }
 
+warn_trap () {
+    code=$?
+    if [ $code != 0 ]; then
+        builder_message "warning($code): $1. Build will continue."
+    fi
+}
+
 
 sdkmanager 'ndk;28.0.13004108'
 error_trap 'android ndk'
@@ -449,7 +456,9 @@ bug_fix_clean_ipa () {
     bug_fix_clean_ipa build/URnetwork.ipa &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-error_trap 'ios deploy'
+# failure to deploy to apple connect means we can't create an iOS release, but other platforms can still release
+# typically this is because we've already submitting a release for this build version
+warn_trap 'ios deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
 
@@ -462,7 +471,9 @@ builder_message "ios \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https:
     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-error_trap 'macos deploy'
+# failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
+# typically this is because we've already submitting a release for this build version
+warn_trap 'macos deploy'
 
 github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
