@@ -346,6 +346,7 @@ virustotal () {
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             https://www.virustotal.com/api/v3/files/upload_url`
+        echo "$VIRUSTOTAL_BIG_UPLOAD"
         VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_BIG_UPLOAD" | jq .data`
         VIRUSTOTAL_UPLOAD=`$BUILD_CURL \
             -X POST \
@@ -354,6 +355,7 @@ virustotal () {
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             "$VIRUSTOTAL_UPLOAD_URL" \
             -F "file=@$2"`
+        echo "$VIRUSTOTAL_UPLOAD"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq .data.id`
 
         # FIXME wait for virus scan output and make sure no issues
