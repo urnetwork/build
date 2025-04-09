@@ -361,21 +361,40 @@ virustotal () {
         echo "$VIRUSTOTAL_UPLOAD"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
 
-        # FIXME wait for virus scan output and make sure no issues
-        # VIRUSTOTAL_ANALYSIS=`curl "https://www.virustotal.com/api/v3/analyses/$VIRUSTOTAL_ID" \
-        #     --header 'accept: application/json' \
-        #     --header "x-apikey: $VIRUSTOTAL_API_KEY"`
+        virustotal_verify "$1" "$VIRUSTOTAL_ID"
 
-        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|[results](https://www.virustotal.com/gui/url/$SHA256/detection)|")
+        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/url/$SHA256/detection)|")
     else
         VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${WARP_VERSION}-${WARP_VERSION_CODE}/$1)|\`$SHA256\`|not submitted|")
     fi
 }
 
+virustotal_verify () {
+    for i in {0..19}; do
+        VIRUSTOTAL_ANALYSIS=`$BUILD_CURL \
+            -H 'Accept: application/json' \
+            -H "x-apikey: $VIRUSTOTAL_API_KEY" \
+            "https://www.virustotal.com/api/v3/analyses/$2"`
+        VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
+        if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
+            if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` == 0 ]; then
+                echo "virustotal $1: ok"
+                return    
+            else
+                builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
+                exit 1
+            fi
+        else
+            echo "virustotal $1: waiting for result ..."
+            sleep 5
+        fi
+    done
+}
+
 github_create_release () {
     RELEASE_BODY="v${WARP_VERSION}-${WARP_VERSION_CODE}
 
-|Asset|SHA256|VirusTotal results|
+|Asset|SHA256|VirusTotal analyses|
 |--------|------|------------------|"
     for a in $VIRUSTOTAL_ARTIFACTS; do
         RELEASE_BODY="$RELEASE_BODY
