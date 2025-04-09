@@ -382,12 +382,12 @@ virustotal_verify () {
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             "https://www.virustotal.com/api/v3/analyses/$2"`
-        VIRUSTOTAL_ANALYSIS_STATUS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.status`
+        VIRUSTOTAL_ANALYSIS_STATUS=`echo "$VIRUSTOTAL_ANALYSIS" | jq -r .data.attributes.status`
         if [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "completed" ]; then
-            VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq .data.attributes.stats`
+            VIRUSTOTAL_ANALYSIS_STATS=`echo "$VIRUSTOTAL_ANALYSIS" | jq -r .data.attributes.stats`
             if [ "$VIRUSTOTAL_ANALYSIS_STATS" != "" ]; then
                 if [ `echo "$VIRUSTOTAL_ANALYSIS_STATS" | jq '[.malicious, .suspicious] | add'` = 0 ]; then
-                    echo "virustotal analysis $1 ok"
+                    echo "virustotal analysis $1 ok (${$VIRUSTOTAL_ANALYSIS_STATS})"
                     return
                 else
                     builder_message "virustotal analysis $1 failed: \`\`\`${VIRUSTOTAL_ANALYSIS_STATS}\`\`\`"
