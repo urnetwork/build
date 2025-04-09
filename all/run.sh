@@ -404,7 +404,7 @@ github_create_release () {
 
 \"$(shuf -n 1 release-color.txt) $(shuf -n 1 release-texture.txt) $(shuf -n 1 release-mineral.txt)\"
 
-|Asset|SHA256|VirusTotal analyses|
+|Asset|SHA256|VirusTotal analysis|
 |--------|------|------------------|"
     for a in $VIRUSTOTAL_ARTIFACTS; do
         RELEASE_BODY="$RELEASE_BODY
