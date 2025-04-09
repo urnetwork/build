@@ -38,7 +38,7 @@ fi
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
-export BUILD_CURL=(curl -s -o /dev/null -L)
+export BUILD_CURL=(curl -s -L)
 export BRINGYOUR_HOME=`realpath ..`
 if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
@@ -326,14 +326,14 @@ github_create_draft_release () {
 }
 
 github_release_upload () {
-    $BUILD_CURL \
+    GITHUB_UPLOAD=`$BUILD_CURL \
         -X POST \
         -H 'Accept: application/vnd.github+json' \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         -H 'Content-Type: application/octet-stream' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         "$GITHUB_UPLOAD_URL?name=$1" \
-        --data-binary "@$2"
+        --data-binary "@$2"`
     error_trap "github release upload $1"
 
     virustotal "$1" "$2"
