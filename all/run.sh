@@ -402,6 +402,8 @@ virustotal_verify () {
 github_create_release () {
     RELEASE_BODY="v${WARP_VERSION}-${WARP_VERSION_CODE}
 
+\"$(shuf -n 1 release-color.txt) $(shuf -n 1 release-texture.txt) $(shuf -n 1 release-mineral.txt)\"
+
 |Asset|SHA256|VirusTotal analyses|
 |--------|------|------------------|"
     for a in $VIRUSTOTAL_ARTIFACTS; do

@@ -1,0 +1,100 @@
+Basalt
+Rhyolite
+Andesite
+Obsidian
+Pumice
+Scoria
+Tuff
+Volcanic Breccia
+Komatiite
+Phonolite
+Trachyte
+Spilite
+Hyaloclastite
+Ignimbrite
+Pillow Lava
+Granite
+Diorite
+Gabbro
+Peridotite
+Dunite
+Syenite
+Monzonite
+Pegmatite
+Aplite
+Anorthosite
+Kimberlite
+Lamproite
+Carbonatite
+Essexite
+Ijolite
+Conglomerate
+Breccia
+Sandstone
+Quartzite (sedimentary)
+Arkose
+Greywacke
+Siltstone
+Shale
+Mudstone
+Loess
+Tillite
+Limestone
+Chalk
+Travertine
+Dolostone
+Rock Salt (Halite)
+Gypsum
+Anhydrite
+Chert
+Flint
+Jasper
+Agate
+Coal
+Oil Shale
+Ironstone
+Phosphorite
+Diatomite
+Coquina
+Stromatolite
+Banded Iron Formation (BIF)
+Slate
+Phyllite
+Schist
+Gneiss
+Migmatite
+Mylonite
+Hornfels
+Eclogite
+Blueschist
+Greenschist
+Amphibolite
+Serpentinite
+Marble
+Quartzite (metamorphic)
+Novaculite
+Skarn
+Anthracite
+Soapstone (Steatite)
+Greenstone
+Granulite
+Metaconglomerate
+Meta-arkose
+Spilosite
+Uralite
+Sanidine Hornfels
+Tektite
+Impactite
+Pseudotachylite
+Fullerite-bearing rock
+Uralolite
+Lapis Lazuli
+Malachite
+Azurite
+Rhodonite
+Smithsonite
+Wulfenite
+Vanadinite
+Crocoite
+Benitoite
+Painite
