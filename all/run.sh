@@ -318,6 +318,7 @@ github_create_draft_release () {
         https://api.github.com/repos/urnetwork/build/releases \
         -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
     error_trap 'github create release'
+    echo "$GITHUB_RELEASE"
     GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
     echo "github upload to $GITHUB_UPLOAD_URL"
