@@ -38,7 +38,7 @@ fi
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
-export BUILD_CURL='curl -s -o /dev/null -L'
+export BUILD_CURL=(curl -s -o /dev/null -L)
 export BRINGYOUR_HOME=`realpath ..`
 if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
