@@ -12,7 +12,7 @@
 builder_message () {
     echo -n "$1"
     if [ "$SLACK_WEBHOOK" ]; then
-        data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n $1 | jq -Rsa .)}}]}"
+        data="{\"text\":$(echo -n $1 | jq -Rsa .), \"blocks\":[{\"type\":\"section\", \"text\":{\"type\":\"mrkdwn\", \"text\":$(echo -n "$1" | jq -Rsa .)}}]}"
         curl -s -o /dev/null -X POST -H 'Content-type: application/json' --data "$data" $SLACK_WEBHOOK
     fi
 }
@@ -380,13 +380,14 @@ github_create_release () {
 $a"
     done
 
-    $BUILD_CURL \
+    GITHUB_RELEASE=`$BUILD_CURL \
         -X PATCH \
         -H 'Accept: application/vnd.github+json' \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         "https://api.github.com/repos/OWNER/REPO/releases/$GITHUB_RELEASE_ID" \
-        -d "{\"body\":\"$RELEASE_BODY\",\"draft\":false}"
+        -d "{\"tag_name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"name\":\"v${WARP_VERSION}-${WARP_VERSION_CODE}\",\"body\":\"$(echo -n "$RELEASE_BODY" | jq -Rsa .)\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+    error_trap 'github patch release'
 }
 
 
