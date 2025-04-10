@@ -375,7 +375,7 @@ virustotal () {
 }
 
 virustotal_verify () {
-    for i in {0..30}; do
+    for i in {0..90}; do
         VIRUSTOTAL_ANALYSIS=`$BUILD_CURL \
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
