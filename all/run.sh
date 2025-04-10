@@ -482,12 +482,16 @@ github_release_upload "URnetwork-${WARP_VERSION}-${WARP_VERSION_CODE}.pkg" "$BUI
 builder_message "macos \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 (cd $BUILD_HOME/android/app &&
-    ./gradlew clean assemblePlayRelease assembleSolana_dappRelease)
+    ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
 error_trap 'android build'
 
 github_release_upload \
     "com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.apk" \
     "$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.apk"
+
+github_release_upload \
+    "com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.aab" \
+    "$BUILD_HOME/android/app/app/build/outputs/bundle/playRelease/com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-play-release.aab"
 
 github_release_upload \
     "com.bringyour.network-${WARP_VERSION}-${WARP_VERSION_CODE}-solana_dapp-release.apk" \
