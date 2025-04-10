@@ -175,9 +175,14 @@ pwsdk.maven.password=github_pat_11BQVGHTQ0hZxCV65jw5QR_fApFvdBBsSbPPgU3UMr3C4wj9
     git add app/local.properties -f)
 error_trap 'android edit settings'
 
-# put a temporary changelog in place
-# (cd $BUILD_HOME && echo "Continuous build" > metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt)
-# error_trap 'android changelog'
+
+# metadata
+# copy the pending change log into place if it exists
+if [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
+    cp \
+        "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
+        "$BUILD_HOME/metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt"
+fi
 
 
 go_mod_edit_module () {
@@ -509,8 +514,8 @@ fi
 builder_message "android \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
 
-# Github / F-Droid
-# changlelog/${WARP_VERSION_CODE}.txt this should be manually edited and the <version>-ungoogle tag updated before submitting an fdroiddata merge
+# Github / Ungoogle
+# note for F-Droid, the -ungoogle tag should be aliased to -fdroid to trigger their build
 (cd $BUILD_HOME/android &&
     git checkout -b v${WARP_VERSION}-${WARP_VERSION_CODE}-ungoogle)
 error_trap 'android prepare ungoogle version branch'

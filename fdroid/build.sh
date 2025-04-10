@@ -37,4 +37,4 @@ export WARP_HOME=/urnetwork
 export BRINGYOUR_HOME=/urnetwork/build
 
 (cd $BRINGYOUR_HOME/android/app/ &&
-	./gradlew clean assembleGithub)
+	./gradlew clean buildSdk assembleGithub)
