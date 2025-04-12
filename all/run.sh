@@ -170,7 +170,7 @@ error_trap 'apple edit settings'
 warp.version=$WARP_VERSION
 warp.version_code=$WARP_VERSION_CODE
 pwsdk.maven.username=urnetwork-ops
-pwsdk.maven.password=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
+pwsdk.maven.password=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
 " > app/local.properties &&
     git add app/local.properties -f)
 error_trap 'android edit settings'
