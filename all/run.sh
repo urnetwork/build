@@ -604,7 +604,7 @@ if [ $BUILD_ENV = 'main' ]; then
 fi
 
 
-builder_message "${BUILD_ENV}[0%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV)\`\`\`"
+builder_message "${BUILD_ENV}[0%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV --sample)\`\`\`"
 
 
 $BUILD_WARPCTL deploy $BUILD_ENV lb ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=25 --only-older
@@ -625,7 +625,7 @@ if [ $BUILD_ENV = 'main' ]; then
     builder_message "community[25%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
-builder_message "${BUILD_ENV}[25%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV)\`\`\`"
+builder_message "${BUILD_ENV}[25%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV --sample)\`\`\`"
 
 
 sleep $STAGE_SECONDS
@@ -649,7 +649,7 @@ if [ $BUILD_ENV = 'main' ]; then
     builder_message "community[50%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
-builder_message "${BUILD_ENV}[50%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV)\`\`\`"
+builder_message "${BUILD_ENV}[50%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV --sample)\`\`\`"
 
 
 sleep $STAGE_SECONDS
@@ -673,7 +673,7 @@ if [ $BUILD_ENV = 'main' ]; then
     builder_message "community[75%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
-builder_message "${BUILD_ENV}[75%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV)\`\`\`"
+builder_message "${BUILD_ENV}[75%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV --sample)\`\`\`"
 
 
 sleep $STAGE_SECONDS
@@ -697,7 +697,7 @@ if [ $BUILD_ENV = 'main' ]; then
     builder_message "community[100%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
-builder_message "${BUILD_ENV}[100%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV)\`\`\`"
+builder_message "${BUILD_ENV}[100%] services: \`\`\`$($BUILD_WARPCTL ls versions $BUILD_ENV --sample)\`\`\`"
 
 
 builder_message "Build all \`${WARP_VERSION}-${WARP_VERSION_CODE}\` ... done! Enjoy :) - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
