@@ -40,7 +40,10 @@ if [[ ! `go version` =~ 'go version go1.24.2' ]]; then
     builder_message 'go 1.24.2 required'
     exit 1
 fi
-
+if [[ ! `java -version 2>&1` =~ 'openjdk version "22.0.2"' ]]; then
+    builder_message 'java 22.0.2 required'
+    exit 1
+fi
 
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main

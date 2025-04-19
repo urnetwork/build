@@ -12,7 +12,7 @@ error_trap () {
 	sudo apt-get install -y gcc libc-dev make &&
 	echo "deb https://deb.debian.org/debian trixie main" | sudo tee /etc/apt/sources.list.d/trixie.list &&
 	sudo apt-get update &&
-	sudo apt-get install -y -t trixie openjdk-23-jdk-headless &&
+	sudo apt-get install -y -t trixie openjdk-22-jdk-headless &&
 	sudo update-alternatives --auto java &&
 	curl -L https://go.dev/dl/go1.24.2.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/)
 error_trap 'root init'
@@ -42,6 +42,11 @@ elif [[ "$go_version" =~ "go version go1.24.2" ]]; then
 else
 	echo "go check: system go must either be 1.24.2 or not installed"
 	exit 1
+fi
+java_version=`java -version 2>&1`
+if [[ ! "$java_version" =~ 'openjdk version "22.0.2"' ]]; then
+    echo "java check: 22.0.2 required ($java_version)"
+    exit 1
 fi
 
 export WARP_HOME=/urnetwork
