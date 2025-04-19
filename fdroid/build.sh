@@ -1,5 +1,13 @@
 #!/bin/bash
 
+error_trap () {
+    code=$?
+    if [ $code != 0 ]; then
+        echo "error($code): $1"
+        exit $code
+    fi
+}
+
 (sudo apt-get update &&
 	sudo apt-get install -y gcc libc-dev make &&
 	echo "deb https://deb.debian.org/debian trixie main" | sudo tee /etc/apt/sources.list.d/trixie.list &&
@@ -7,10 +15,12 @@
 	sudo apt-get install -y -t trixie openjdk-23-jdk-headless &&
 	sudo update-alternatives --auto java &&
 	curl -L https://go.dev/dl/go1.24.2.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/)
+error_trap 'root init'
 
 export ANDROID_HOME=/opt/android-sdk
 
 sdkmanager 'ndk;28.0.13004108'
+error_trap 'android ndk install'
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
 
 (mkdir $HOME/.android &&
@@ -22,6 +32,7 @@ export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
 		-keypass android \
 		-keyalg RSA \
 		-validity 14000)
+error_trap 'android debug key init'
 
 go_version=`go version 2> /dev/null`
 if [ "$go_version" == "" ]; then
