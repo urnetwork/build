@@ -128,7 +128,7 @@ fi
 
 (cd $BUILD_HOME/warp/warpctl && make)
 error_trap 'build warpctl'
-export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64/:$PATH"
+export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
 if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
     builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
     exit 1
