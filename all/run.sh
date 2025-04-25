@@ -459,7 +459,7 @@ builder_message "sdk \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https:
 (cd $BUILD_HOME/connect${GO_MOD_SUFFIX}/provider && make)
 error_trap 'build provider'
 
-github_release_upload "provider-${WARP_VERSION}-${WARP_VERSION_CODE}.tar.gz" "$BUILD_HOME/connect${GO_MOD_SUFFIX}/build/provider.tar.gz"
+github_release_upload "provider-${WARP_VERSION}-${WARP_VERSION_CODE}.tar.gz" "$BUILD_HOME/connect${GO_MOD_SUFFIX}/provider/build/provider.tar.gz"
 
 builder_message "provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https://github.com/urnetwork/build/releases/tag/v${WARP_VERSION}-${WARP_VERSION_CODE}"
 
