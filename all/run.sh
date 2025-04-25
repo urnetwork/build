@@ -115,8 +115,8 @@ if [ "$BUILD_TEST" ]; then
     (cd $BUILD_HOME/connect && ./test.sh)
     error_trap 'connect tests'
     # FIXME
-    # (cd $BUILD_HOME/connect/provider && ./test.sh)
-    # error_trap 'connect provider tests'
+    (cd $BUILD_HOME/connect/provider && ./test.sh)
+    error_trap 'connect provider tests'
     (cd $BUILD_HOME/sdk && ./test.sh)
     error_trap 'sdk tests'
     (cd $BUILD_HOME/server && ./test.sh)
@@ -458,6 +458,9 @@ builder_message "sdk \`${WARP_VERSION}-${WARP_VERSION_CODE}\` available - https:
 
 (cd $BUILD_HOME/connect${GO_MOD_SUFFIX}/provider && make)
 error_trap 'build provider'
+
+github_release_upload "provider-${WARP_VERSION}-${WARP_VERSION_CODE}.tar.gz" "$BUILD_HOME/sdk/build/connect/provider/build/provider.tar.gz"
+
 
 (cd $BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl && make)
 error_trap 'build bringyourctl'
