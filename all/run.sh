@@ -705,7 +705,7 @@ builder_message "${BUILD_ENV}[100%] connect \`${WARP_VERSION}-${WARP_VERSION_COD
 warpctl deploy $BUILD_ENV web ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older
 builder_message "${BUILD_ENV}[100%] web \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 if [ $BUILD_ENV = 'main' ]; then
-    warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older --timeout=0
+    warpctl deploy community provider ${WARP_VERSION}+${WARP_VERSION_CODE} --percent=100 --only-older --timeout=0 --set-latest
     builder_message "community[100%] provider \`${WARP_VERSION}-${WARP_VERSION_CODE}\` deployed (only older)"
 fi
 
