@@ -1,1 +1,3 @@
-Bug fixes.
+- Flush DNS cache and network state on location change
+- New setting "allow local traffic while disconnected" aka "kill switch"
+- Bug fixes
