@@ -33,9 +33,10 @@ warn_trap () {
 }
 
 
-sdkmanager 'ndk;28.0.13004108'
+ANDROID_NDK_VERSION=28.0.13004108
+sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk'
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/ANDROID_NDK_VERSION"
 if [[ ! `go version` =~ 'go version go1.24.2' ]]; then
     builder_message 'go 1.24.2 required'
     exit 1
@@ -525,7 +526,7 @@ error_trap 'android build'
 
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-play-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-play-release.apk"
+    "$BUILD_HOME/android/app/app/build/outputs/apk/play/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-play-universal-release.apk"
 
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-play-release.aab" \
@@ -533,7 +534,7 @@ github_release_upload \
 
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-solana_dapp-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-solana_dapp-release.apk"
+    "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-solana_dapp-universal-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk" &&
@@ -591,9 +592,22 @@ error_trap 'push ungoogle tag'
         registry.gitlab.com/fdroid/fdroidserver:buildserver)
 error_trap 'android github build'
 
+# publish the non-split apk name for legacy support
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk"
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
+
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
+
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk-github" && 

@@ -19,9 +19,10 @@ error_trap 'root init'
 
 export ANDROID_HOME=/opt/android-sdk
 
-sdkmanager 'ndk;28.0.13004108'
+ANDROID_NDK_VERSION=28.0.13004108
+sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk install'
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 
 (mkdir $HOME/.android &&
 	keytool -genkey -v \
