@@ -27,6 +27,17 @@ Builds use the semver `<version>-<version_code>`. Each semver has a correspondin
 
 Because warp versions are `yyyy.mm.dd`, the go modules in the version branches are translated to the `vyyyy` major by appending `/vyyyy` to the end. This makes it so that any go module can be imported as `<module>/vyyyy`.
 
+### ABI-specific versions codes
+
+If the version code ends in non-zero, it means you have an architecture-specific build that was done to reduce download size. In this case, just change the last digit to zero to find the git tags and branch names. 
+
+e.g.
+
+```
+614087741 # specific to arm64
+614087740 # the version code to use for git tags, branches, etc.
+``` 
+
 
 ## Ungoogle flavor
 
