@@ -592,14 +592,13 @@ error_trap 'push ungoogle tag'
         registry.gitlab.com/fdroid/fdroidserver:buildserver)
 error_trap 'android github build'
 
-# publish the non-split apk name for legacy support
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
+# github_release_upload \
+#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
+#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
