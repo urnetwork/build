@@ -37,8 +37,8 @@ ANDROID_NDK_VERSION=28.0.13004108
 sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk'
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-if [[ ! `go version` =~ 'go version go1.24.2' ]]; then
-    builder_message 'go 1.24.2 required'
+if [[ ! `go version` =~ 'go version go1.24.3' ]]; then
+    builder_message 'go 1.24.3 required'
     exit 1
 fi
 if [[ ! `java -version 2>&1` =~ 'openjdk version "22.0.2"' ]]; then
