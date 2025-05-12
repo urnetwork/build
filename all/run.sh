@@ -585,7 +585,7 @@ error_trap 'push ungoogle tag'
 #         The docker vmm framework is a work around, but it is very slow for amd64.
 #         Run on an m1 or intel mac for now.
 (cd $BUILD_HOME &&
-    docker run --rm -u vagrant \
+    docker run --oom-kill-disable --rm -u vagrant \
         --entrypoint /urnetwork/build/fdroid/build.sh \
         -v $WARP_HOME/release:/urnetwork/release:z \
         -v $BUILD_HOME:/urnetwork/build:Z \
