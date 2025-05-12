@@ -1,3 +1,2 @@
-- Flush DNS cache and network state on location change
-- New setting "allow local traffic while disconnected" aka "kill switch"
-- Bug fixes
+- Login with Solana wallet
+- Performance and bug fixes
