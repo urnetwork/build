@@ -12,7 +12,7 @@ error_trap () {
 	sudo apt-get install -y gcc libc-dev make &&
 	echo "deb https://deb.debian.org/debian trixie main" | sudo tee /etc/apt/sources.list.d/trixie.list &&
 	sudo apt-get update &&
-	sudo apt-get install -y -t trixie openjdk-22-jdk-headless &&
+	sudo apt-get install -y -t trixie openjdk-21-jdk-headless &&
 	sudo update-alternatives --auto java &&
 	curl -L https://go.dev/dl/go1.24.3.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/)
 error_trap 'root init'
@@ -45,13 +45,14 @@ else
 	exit 1
 fi
 java_version=`java -version 2>&1`
-if [[ ! "$java_version" =~ 'openjdk version "22.0.2"' ]]; then
-    echo "java check: 22.0.2 required ($java_version)"
+if [[ ! "$java_version" =~ 'openjdk version "21.0.7"' ]]; then
+    echo "java check: 21.0.7 required ($java_version)"
     exit 1
 fi
 
 export WARP_HOME=/urnetwork
 export BRINGYOUR_HOME=/urnetwork/build
+export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process"
 
 (cd $BRINGYOUR_HOME/android/app/ &&
 	./gradlew clean buildSdk assembleGithub)

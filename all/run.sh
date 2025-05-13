@@ -33,19 +33,6 @@ warn_trap () {
 }
 
 
-ANDROID_NDK_VERSION=28.0.13004108
-sdkmanager "ndk;$ANDROID_NDK_VERSION"
-error_trap 'android ndk'
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-if [[ ! `go version` =~ 'go version go1.24.3' ]]; then
-    builder_message 'go 1.24.3 required'
-    exit 1
-fi
-if [[ ! `java -version 2>&1` =~ 'openjdk version "22.0.2"' ]]; then
-    builder_message 'java 22.0.2 required'
-    exit 1
-fi
-
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
@@ -93,6 +80,21 @@ if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
     builder_message "Build repo updated. Must restart to use the latest script."
     exit 1
 fi
+
+
+ANDROID_NDK_VERSION=28.0.13004108
+sdkmanager "ndk;$ANDROID_NDK_VERSION"
+error_trap 'android ndk'
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+if [[ ! `go version` =~ 'go version go1.24.3' ]]; then
+    builder_message 'go 1.24.3 required'
+    exit 1
+fi
+if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.7"' ]]; then
+    builder_message 'java 21.0.7 required'
+    exit 1
+fi
+
 
 (cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'

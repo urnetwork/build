@@ -60,5 +60,9 @@ cd android/app
 ```
 
 
+## Resource notes
+
+On macOS, the docker engine must have at least 16GiB of memory allocated.
+
 
 
