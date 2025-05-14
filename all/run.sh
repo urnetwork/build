@@ -348,19 +348,33 @@ error_trap 'warp push branch'
     git commit -m "${EXTERNAL_WARP_VERSION}" &&
     git push &&
     git_tag)
+# version code variants for the github flavor
+(cd $BUILD_HOME &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    git_tag)
+(cd $BUILD_HOME &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    git_tag)
 error_trap 'push branch'
 
 
 # Build release
 
 github_create_draft_release () {
+    if [ "$1" ]; then
+        PRE_RELEASE=true
+    else
+        PRE_RELEASE=false
+    fi
     GITHUB_RELEASE=`$BUILD_CURL \
         -X POST \
         -H 'Accept: application/vnd.github+json' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":\"v${EXTERNAL_WARP_VERSION}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":\"v${EXTERNAL_WARP_VERSION}\",\"draft\":true,\"prerelease\":$PRE_RELEASE,\"generate_release_notes\":false}"`
     error_trap 'github create release'
     GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq -r .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
@@ -437,6 +451,11 @@ virustotal_verify () {
 }
 
 github_create_release () {
+    if [ "$1" ]; then
+        PRE_RELEASE=true
+    else
+        PRE_RELEASE=false
+    fi
     RELEASE_BODY="v${EXTERNAL_WARP_VERSION}
 
 \"$(shuf -n 1 release-color.txt) $(shuf -n 1 release-texture.txt) $(shuf -n 1 release-mineral.txt)\"
@@ -454,7 +473,7 @@ $a"
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         "https://api.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID" \
-        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":$(echo -n "$RELEASE_BODY" | jq -Rsa .),\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":$(echo -n "$RELEASE_BODY" | jq -Rsa .),\"draft\":false,\"prerelease\":$PRE_RELEASE,\"generate_release_notes\":false}"`
     error_trap 'github patch release'
 }
 
@@ -602,13 +621,13 @@ github_release_upload \
 #     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
 #     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+# github_release_upload \
+#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk"
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk"
+# github_release_upload \
+#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk-github" && 
@@ -623,6 +642,32 @@ builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https:/
 
 github_create_release
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+
+# create pre-releases for version code variants
+# this is needed for reproducible builds
+(cd $BUILD_HOME &&
+    BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    github_create_draft_release true &&
+    github_release_upload \
+        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
+    github_create_release true
+)
+
+(cd $BUILD_HOME &&
+    BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    github_create_draft_release true &&
+    github_release_upload \
+        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+    github_create_release true
+)
 
 
 # Warp services
