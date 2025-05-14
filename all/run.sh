@@ -47,12 +47,12 @@ git_main () {
     git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
 }
 
-(cd $WARP_HOME/config && git_main)
-error_trap 'pull warp config'
-(cd $WARP_HOME/vault && git_main)
-error_trap 'pull warp vault'
-(cd $WARP_HOME/release && git_main)
-error_trap 'pull warp release'
+# (cd $WARP_HOME/config && git_main)
+# error_trap 'pull warp config'
+# (cd $WARP_HOME/vault && git_main)
+# error_trap 'pull warp vault'
+# (cd $WARP_HOME/release && git_main)
+# error_trap 'pull warp release'
 
 
 if [ "$BUILD_RESET" ]; then
@@ -72,14 +72,14 @@ if [ "$BUILD_RESET" ]; then
 fi
 
 
-BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
-(cd $BUILD_HOME && git_main)
-error_trap 'pull'
-BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
-if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
-    builder_message "Build repo updated. Must restart to use the latest script."
-    exit 1
-fi
+# BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
+# (cd $BUILD_HOME && git_main)
+# error_trap 'pull'
+# BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
+# if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
+#     builder_message "Build repo updated. Must restart to use the latest script."
+#     exit 1
+# fi
 
 
 ANDROID_NDK_VERSION=28.0.13004108
