@@ -47,12 +47,12 @@ git_main () {
     git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
 }
 
-# (cd $WARP_HOME/config && git_main)
-# error_trap 'pull warp config'
-# (cd $WARP_HOME/vault && git_main)
-# error_trap 'pull warp vault'
-# (cd $WARP_HOME/release && git_main)
-# error_trap 'pull warp release'
+(cd $WARP_HOME/config && git_main)
+error_trap 'pull warp config'
+(cd $WARP_HOME/vault && git_main)
+error_trap 'pull warp vault'
+(cd $WARP_HOME/release && git_main)
+error_trap 'pull warp release'
 
 
 if [ "$BUILD_RESET" ]; then
@@ -72,14 +72,14 @@ if [ "$BUILD_RESET" ]; then
 fi
 
 
-# BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
-# (cd $BUILD_HOME && git_main)
-# error_trap 'pull'
-# BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
-# if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
-#     builder_message "Build repo updated. Must restart to use the latest script."
-#     exit 1
-# fi
+BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
+(cd $BUILD_HOME && git_main)
+error_trap 'pull'
+BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
+if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
+    builder_message "Build repo updated. Must restart to use the latest script."
+    exit 1
+fi
 
 
 ANDROID_NDK_VERSION=28.0.13004108
@@ -458,7 +458,7 @@ github_create_release () {
     fi
     RELEASE_BODY="v${EXTERNAL_WARP_VERSION}
 
-\"$(shuf -n 1 release-color.txt) $(shuf -n 1 release-texture.txt) $(shuf -n 1 release-mineral.txt)\"
+\"$(shuf -n 1 $BUILD_HOME/all/release-color.txt) $(shuf -n 1 $BUILD_HOME/all/release-texture.txt) $(shuf -n 1 $BUILD_HOME/all/release-mineral.txt)\"
 
 |Asset|SHA256|VirusTotal analysis|
 |--------|------|------------------|"
@@ -647,8 +647,7 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
 
 # create pre-releases for version code variants
 # this is needed for reproducible builds
-(cd $BUILD_HOME &&
-    BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
     github_create_draft_release true &&
@@ -659,8 +658,7 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
 )
 error_trap 'android github armeabi-v7a reproducible pre-release'
 
-(cd $BUILD_HOME &&
-    BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
     github_create_draft_release true &&
