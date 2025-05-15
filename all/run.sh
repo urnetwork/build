@@ -348,19 +348,33 @@ error_trap 'warp push branch'
     git commit -m "${EXTERNAL_WARP_VERSION}" &&
     git push &&
     git_tag)
+# version code variants for the github flavor
+(cd $BUILD_HOME &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    git_tag)
+(cd $BUILD_HOME &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    git_tag)
 error_trap 'push branch'
 
 
 # Build release
 
 github_create_draft_release () {
+    if [ "$1" ]; then
+        PRE_RELEASE=true
+    else
+        PRE_RELEASE=false
+    fi
     GITHUB_RELEASE=`$BUILD_CURL \
         -X POST \
         -H 'Accept: application/vnd.github+json' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":\"v${EXTERNAL_WARP_VERSION}\",\"draft\":true,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":\"v${EXTERNAL_WARP_VERSION}\",\"draft\":true,\"prerelease\":$PRE_RELEASE,\"generate_release_notes\":false}"`
     error_trap 'github create release'
     GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq -r .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
@@ -437,9 +451,14 @@ virustotal_verify () {
 }
 
 github_create_release () {
+    if [ "$1" ]; then
+        PRE_RELEASE=true
+    else
+        PRE_RELEASE=false
+    fi
     RELEASE_BODY="v${EXTERNAL_WARP_VERSION}
 
-\"$(shuf -n 1 release-color.txt) $(shuf -n 1 release-texture.txt) $(shuf -n 1 release-mineral.txt)\"
+\"$(shuf -n 1 $BUILD_HOME/all/release-color.txt) $(shuf -n 1 $BUILD_HOME/all/release-texture.txt) $(shuf -n 1 $BUILD_HOME/all/release-mineral.txt)\"
 
 |Asset|SHA256|VirusTotal analysis|
 |--------|------|------------------|"
@@ -454,7 +473,7 @@ $a"
         -H 'X-GitHub-Api-Version: 2022-11-28' \
         -H "Authorization: Bearer $GITHUB_API_KEY" \
         "https://api.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID" \
-        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":$(echo -n "$RELEASE_BODY" | jq -Rsa .),\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false}"`
+        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":$(echo -n "$RELEASE_BODY" | jq -Rsa .),\"draft\":false,\"prerelease\":$PRE_RELEASE,\"generate_release_notes\":false}"`
     error_trap 'github patch release'
 }
 
@@ -508,19 +527,19 @@ github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/appl
 builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-# (cd $BUILD_HOME/apple/app &&
-#     xcodebuild -scheme URnetwork clean &&
-#     xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
-#     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
-#     xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-#     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-# # failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
-# # typically this is because we've already submitting a release for this build version
-# warn_trap 'macos deploy'
+(cd $BUILD_HOME/apple/app &&
+    xcodebuild -scheme URnetwork clean &&
+    xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
+    xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
+    xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+    xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+# failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
+# typically this is because we've already submitting a release for this build version
+warn_trap 'macos deploy'
 
-# github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
-# builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
@@ -602,13 +621,13 @@ github_release_upload \
 #     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
 #     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+# github_release_upload \
+#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk"
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk"
+# github_release_upload \
+#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk-github" && 
@@ -623,6 +642,32 @@ builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https:/
 
 github_create_release
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+
+# create pre-releases for version code variants
+# this is needed for reproducible builds
+(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    github_create_draft_release true &&
+    github_release_upload \
+        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
+    github_create_release true
+)
+error_trap 'android github armeabi-v7a reproducible pre-release'
+
+(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
+    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+    github_create_draft_release true &&
+    github_release_upload \
+        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+    github_create_release true
+)
+error_trap 'android github arm64-v8a reproducible pre-release'
 
 
 # Warp services
