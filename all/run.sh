@@ -657,6 +657,7 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
     github_create_release true
 )
+error_trap 'android github armeabi-v7a reproducible pre-release'
 
 (cd $BUILD_HOME &&
     BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
@@ -668,6 +669,7 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
     github_create_release true
 )
+error_trap 'android github arm64-v8a reproducible pre-release'
 
 
 # Warp services
