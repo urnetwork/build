@@ -1,0 +1,2 @@
+- Login with Solana wallet
+- Performance and bug fixes
