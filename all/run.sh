@@ -655,6 +655,7 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
     github_create_release true
+    echo "[1/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
 )
 error_trap 'android github armeabi-v7a reproducible pre-release'
 
@@ -666,6 +667,7 @@ error_trap 'android github armeabi-v7a reproducible pre-release'
         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
     github_create_release true
+    echo "[2/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
 )
 error_trap 'android github arm64-v8a reproducible pre-release'
 
