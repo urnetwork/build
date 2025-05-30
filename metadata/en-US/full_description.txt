@@ -18,3 +18,5 @@ URnetwork uses VPNService to route your device traffic to provider devices. Traf
 
 URnetwork links an external Solana wallet. We do not have custody of your wallet or facilitate swaps within the app.
 
+Terms of Use: https://ur.io/terms
+Privacy Policy: https://ur.io/privacy
