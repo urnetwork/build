@@ -521,19 +521,20 @@ github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/appl
 builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-(cd $BUILD_HOME/apple/app &&
-    xcodebuild -scheme URnetwork clean &&
-    xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
-    xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
-    xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-    xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-# failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
-# typically this is because we've already submitting a release for this build version
-warn_trap 'macos deploy'
+# FIXME there is an x86_64 build issue with the latest xcode. bring back macOS build when this is resolved
+# (cd $BUILD_HOME/apple/app &&
+#     xcodebuild -scheme URnetwork clean &&
+#     xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
+#     xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
+#     xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
+#     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+# # failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
+# # typically this is because we've already submitting a release for this build version
+# warn_trap 'macos deploy'
 
-github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+# github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
-builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+# builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
