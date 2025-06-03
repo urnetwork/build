@@ -524,7 +524,6 @@ github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/appl
 builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-# FIXME there is an x86_64 build issue with the latest xcode. bring back macOS build when this is resolved
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
@@ -538,6 +537,7 @@ warn_trap 'macos deploy'
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
 builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
 
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
