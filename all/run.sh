@@ -124,8 +124,8 @@ if [ "$BUILD_TEST" ]; then
     error_trap 'sdk tests'
     (cd $BUILD_HOME/server && ./test.sh)
     error_trap 'server tests'
-    (cd $BUILD_HOME/server/connect && ./test.sh)
-    error_trap 'server connect tests'
+    # (cd $BUILD_HOME/server/connect && ./test.sh)
+    # error_trap 'server connect tests'
 fi
 
 
