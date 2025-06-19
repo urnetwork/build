@@ -1,3 +1,3 @@
-- Hello provider leaderboard! Opt-in to show your network rank and see stats on the top 100 providers.
-- New transports for better performance and availability. For unfiltered networks, a memory-optimized H3 transport improves speed by over 2x and decreases battery drain. For filtered networks, the "whodis" transport uses pre-authenticated protocols to anonymously connect. Both transports automatically turn on when possible to give a seamless connection experience.
-- Bug fixes.
+- Welcome to Phase 2 earnings! You now earn points for provided capacity as well as referrals. 
+- Referrals can be manually edited to to earn bonus at any time.
+- Bug and performance fixes.

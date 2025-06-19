@@ -10,8 +10,6 @@ With URnetwork you get:
 
 - Built-in anonymity. Hard guarantees of anonymity using a large decentralized multi-hop network.
 
-- Global availability. The network learns and adapts to give you connectivity no matter where you are in the world.
-
 - 100% open source and reproducible. See the exact code on the client and server. No logs, no spies.
 
 URnetwork uses VPNService to route your device traffic to provider devices. Traffic is encrypted using an open-source, web-standards protocol. Additionally traffic is anonymized using the URnetwork protocol.
