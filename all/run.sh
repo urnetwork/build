@@ -279,11 +279,14 @@ error_trap 'connect push branch'
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
+# TODO `-ldflags "-X sdk.Version=...` doesn't appear to work with gomobile
+# TODO we hardcode the sdk.Version for now
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
     go_mod_fork 'build')
 error_trap 'sdk edit'
 
