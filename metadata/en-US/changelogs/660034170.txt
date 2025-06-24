@@ -1,0 +1,3 @@
+- Welcome to Phase 2 earnings! You now earn points for provided capacity as well as referrals. 
+- Referrals can be manually edited to to earn bonus at any time.
+- Bug and performance fixes.
