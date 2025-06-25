@@ -130,7 +130,7 @@ fi
 
 
 (cd $BUILD_HOME/warp/warpctl && make)
-error_trap 'build warpctl'
+error_trap 'build bootstrap warpctl'
 export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
 if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
     builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
@@ -163,6 +163,12 @@ else
 fi
 export WARP_VERSION="${WARP_VERSION_BASE}+${WARP_VERSION_CODE}"
 export EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}"
+
+
+# rebuild warpctl with the `WARP_*` env vars so we have the binary properly versioned
+(cd $BUILD_HOME/warp/warpctl && make)
+error_trap 'build warpctl'
+
 
 builder_message "Build all \`${EXTERNAL_WARP_VERSION}\`"
 
