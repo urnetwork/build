@@ -19,7 +19,7 @@ error_trap 'root init'
 
 export ANDROID_HOME=/opt/android-sdk
 
-ANDROID_NDK_VERSION=28.0.13004108
+ANDROID_NDK_VERSION=28.2.13676358
 sdkmanager "ndk;$ANDROID_NDK_VERSION" 'platforms;android-36'
 error_trap 'android ndk install'
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
