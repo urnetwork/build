@@ -90,7 +90,7 @@ if [[ ! `go version` =~ 'go version go1.24.5' ]]; then
     builder_message 'go 1.24.5 required'
     exit 1
 fi
-if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.7"' ]]; then
+if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.8"' ]]; then
     builder_message 'java 21.0.7 required'
     exit 1
 fi
