@@ -690,7 +690,7 @@ error_trap 'warpctl build taskworker'
 error_trap 'warpctl build api'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/connect/Makefile)
 error_trap 'warpctl build connect'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV web/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/app/Makefile)
 error_trap 'warpctl build web/app'
