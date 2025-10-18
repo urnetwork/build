@@ -702,12 +702,14 @@ fi
 
 builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
+# fully deploy the new config before any services
+# `--percent=XX of the config-updates does not cover all the blocks of `--percent=XX` for other services
+warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=100 --only-older
+builder_message "${BUILD_ENV}[100%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+
 
 warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=25 --only-older
 builder_message "${BUILD_ENV}[25%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=25 --only-older
 builder_message "${BUILD_ENV}[25%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=25 --only-older
@@ -731,9 +733,6 @@ sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=50 --only-older
 builder_message "${BUILD_ENV}[50%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=50 --only-older
 builder_message "${BUILD_ENV}[50%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=50 --only-older
@@ -757,9 +756,6 @@ sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=75 --only-older
 builder_message "${BUILD_ENV}[75%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=75 --only-older
 builder_message "${BUILD_ENV}[75%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=75 --only-older
@@ -783,9 +779,6 @@ sleep $STAGE_SECONDS
 
 warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=100 --only-older
 builder_message "${BUILD_ENV}[100%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-
 warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=100 --only-older
 builder_message "${BUILD_ENV}[100%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=100 --only-older
