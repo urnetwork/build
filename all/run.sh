@@ -614,18 +614,18 @@ error_trap 'push ungoogle tag'
 #         see https://github.com/golang/go/issues/71434
 #         The docker vmm framework is a work around, but it is very slow for amd64.
 #         Run on an m1 or intel mac for now.
-# (cd $BUILD_HOME &&
-#     docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver &&
-#     docker run --oom-kill-disable --memory="8192m" --rm -u vagrant \
-#         --entrypoint /urnetwork/build/fdroid/build.sh \
-#         -v $WARP_HOME/release:/urnetwork/release:z \
-#         -v $BUILD_HOME:/urnetwork/build:Z \
-#         registry.gitlab.com/fdroid/fdroidserver:buildserver)
-# error_trap 'android github build'
+(cd $BUILD_HOME &&
+    docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver &&
+    docker run --oom-kill-disable --memory="8192m" --rm -u vagrant \
+        --entrypoint /urnetwork/build/fdroid/build.sh \
+        -v $WARP_HOME/release:/urnetwork/release:z \
+        -v $BUILD_HOME:/urnetwork/build:Z \
+        registry.gitlab.com/fdroid/fdroidserver:buildserver)
+error_trap 'android github build'
 
-# github_release_upload \
-#     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
-#     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
 # github_release_upload \
 #     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
@@ -639,15 +639,15 @@ error_trap 'push ungoogle tag'
 #     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
 #     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
 
-# if [ "$BUILD_OUT" ]; then
-#     (mkdir -p "$BUILD_OUT/apk-github" && 
-#         find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} "$BUILD_OUT/apk-github" \;)
-#     error_trap 'android github local copy'
-# fi
+if [ "$BUILD_OUT" ]; then
+    (mkdir -p "$BUILD_OUT/apk-github" && 
+        find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} "$BUILD_OUT/apk-github" \;)
+    error_trap 'android github local copy'
+fi
 
 # Upload releases to testing channels
 
-# builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 github_create_release
