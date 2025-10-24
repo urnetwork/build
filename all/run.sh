@@ -650,36 +650,36 @@ error_trap 'push ungoogle tag'
 # builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-github_create_release
-builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+# github_create_release
+# builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 
 # create pre-releases for version code variants
 # this is needed for reproducible builds
-(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
-    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
-    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
-    github_create_draft_release true &&
-    github_release_upload \
-        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
-        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
-    github_create_release true
-    echo "[1/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
-)
-error_trap 'android github armeabi-v7a reproducible pre-release'
+# (BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+#     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
+#     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+#     github_create_draft_release true &&
+#     github_release_upload \
+#         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+#         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
+#     github_create_release true
+#     echo "[1/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
+# )
+# error_trap 'android github armeabi-v7a reproducible pre-release'
 
-(BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
-    WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
-    EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
-    github_create_draft_release true &&
-    github_release_upload \
-        "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
-        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
-    github_create_release true
-    echo "[2/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
-)
-error_trap 'android github arm64-v8a reproducible pre-release'
+# (BASE_EXTERNAL_WARP_VERSION="$EXTERNAL_WARP_VERSION" &&
+#     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
+#     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
+#     github_create_draft_release true &&
+#     github_release_upload \
+#         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
+#         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
+#     github_create_release true
+#     echo "[2/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
+# )
+# error_trap 'android github arm64-v8a reproducible pre-release'
 
 
 # Warp services
