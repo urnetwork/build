@@ -8,6 +8,9 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 
+# note: if docker fails to build, try pruning the build images:
+#       docker system prune
+
 
 builder_message () {
     echo -n "$1\n"
