@@ -8,7 +8,8 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 
-# note: if docker fails to build, try pruning the build images:
+# note: if docker fails to build, try 1. removing all images then 2. pruning the build images:
+#       docker rmi `docker images -a -q`
 #       docker system prune
 
 
@@ -89,8 +90,8 @@ ANDROID_NDK_VERSION=28.2.13676358
 sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk'
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-if [[ ! `go version` =~ 'go version go1.25.2' ]]; then
-    builder_message 'go 1.25.2 required'
+if [[ ! `go version` =~ 'go version go1.25.4' ]]; then
+    builder_message 'go 1.25.4 required'
     exit 1
 fi
 if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.8"' ]]; then
