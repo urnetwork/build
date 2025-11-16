@@ -120,6 +120,9 @@ error_trap 'pull docs'
 error_trap 'pull warp'
 
 
+builder_message "Build all test \`${EXTERNAL_WARP_VERSION}\`"
+
+
 if [ "$BUILD_TEST" ]; then
     (cd $BUILD_HOME/connect && ./test.sh)
     error_trap 'connect tests'
@@ -132,6 +135,8 @@ if [ "$BUILD_TEST" ]; then
     error_trap 'server tests'
     # (cd $BUILD_HOME/server/connect && ./test.sh)
     # error_trap 'server connect tests'
+
+    builder_message "Build all tests PASSED \`${EXTERNAL_WARP_VERSION}\`"
 fi
 
 
@@ -655,8 +660,6 @@ builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https:/
 
 
 github_create_release
-builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
-
 
 
 # create pre-releases for version code variants
@@ -689,22 +692,39 @@ error_trap 'android github arm64-v8a reproducible pre-release'
 # Warp services
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile)
 error_trap 'warpctl build config-updater'
+builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
+builder_message "service lb \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
+builder_message "service taskworker \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/api/Makefile)
 error_trap 'warpctl build api'
+builder_message "service api \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/connect/Makefile)
 error_trap 'warpctl build connect'
+builder_message "service connect \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
+builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/app/Makefile)
 error_trap 'warpctl build web/app'
+builder_message "service web/app \`${EXTERNAL_WARP_VERSION}\` available"
+
 if [ $BUILD_ENV = 'main' ]; then
     (cd $BUILD_HOME && warpctl build community connect${GO_MOD_SUFFIX}/provider/Makefile)
     error_trap 'warpctl build community provider'
+    builder_message "service community provider \`${EXTERNAL_WARP_VERSION}\` available"
 fi
+
+builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
