@@ -120,10 +120,9 @@ error_trap 'pull docs'
 error_trap 'pull warp'
 
 
-builder_message "Build all test \`${EXTERNAL_WARP_VERSION}\`"
-
-
 if [ "$BUILD_TEST" ]; then
+    builder_message "Build all test candidate"
+
     (cd $BUILD_HOME/connect && ./test.sh)
     error_trap 'connect tests'
     # FIXME
@@ -136,7 +135,7 @@ if [ "$BUILD_TEST" ]; then
     # (cd $BUILD_HOME/server/connect && ./test.sh)
     # error_trap 'server connect tests'
 
-    builder_message "Build all tests PASSED \`${EXTERNAL_WARP_VERSION}\`"
+    builder_message "Build all test candidate PASSED. A version number can now be assigned."
 fi
 
 
