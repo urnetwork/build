@@ -309,8 +309,10 @@ error_trap 'sdk build edit'
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/golang/glog &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/golang/glog &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
     go_mod_fork 'build')
 error_trap 'sdk edit'
