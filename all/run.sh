@@ -48,7 +48,11 @@ fi
 
 
 git_main () {
-    git diff --quiet && git diff --cached --quiet && git checkout main && git pull --recurse-submodules
+    branch_name=main
+    if [ $1 ]; then
+        branch_name=$1
+    fi
+    git diff --quiet && git diff --cached --quiet && git checkout $branch_name && git pull --recurse-submodules
 }
 
 (cd $WARP_HOME/config && git_main)
@@ -119,7 +123,7 @@ error_trap 'pull web'
 error_trap 'pull docs'
 (cd $BUILD_HOME/warp && git_main)
 error_trap 'pull warp'
-(cd $BUILD_HOME/glog && git_main)
+(cd $BUILD_HOME/glog && git_main master)
 error_trap 'pull glog'
 
 
