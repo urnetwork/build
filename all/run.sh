@@ -286,6 +286,12 @@ git_tag () {
 }
 
 
+(cd $BUILD_HOME/glog &&
+    go_mod_edit_module github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog)
+error_trap 'glog edit'
+
+
 (cd $BUILD_HOME/glog && 
     git_commit &&
     git_tag)
