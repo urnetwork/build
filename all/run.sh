@@ -286,10 +286,16 @@ git_tag () {
 }
 
 
+(cd $BUILD_HOME/glog && 
+    git_commit &&
+    git_tag)
+error_trap 'glog push branch'
+
+
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/glog &&
     go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
     go_mod_fork 'api')
 error_trap 'connect edit'
@@ -368,12 +374,6 @@ error_trap 'docs push branch'
     git_commit &&
     git_tag)
 error_trap 'warp push branch'
-
-
-(cd $BUILD_HOME/glog && 
-    git_commit &&
-    git_tag)
-error_trap 'glog push branch'
 
 
 (cd $BUILD_HOME &&
