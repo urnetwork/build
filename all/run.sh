@@ -288,7 +288,9 @@ git_tag () {
 
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
+    go_mod_edit_module github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
     go_mod_fork 'api')
 error_trap 'connect edit'
@@ -301,6 +303,7 @@ error_trap 'connect push branch'
 
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
@@ -326,8 +329,10 @@ error_trap 'sdk push branch'
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
 error_trap 'server edit'
 
