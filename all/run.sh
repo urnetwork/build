@@ -385,6 +385,7 @@ error_trap 'docs push branch'
     git_tag)
 error_trap 'warp push branch'
 
+
 (cd $BUILD_HOME/proxy &&
     go_mod_edit_module github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
@@ -393,10 +394,10 @@ error_trap 'warp push branch'
     go_mod_fork)
 error_trap 'proxy edit'
 
-(cd $BUILD_HOME/connect && 
+(cd $BUILD_HOME/proxy && 
     git_commit &&
     git_tag)
-error_trap 'connect push branch'
+error_trap 'proxy push branch'
 
 
 (cd $BUILD_HOME &&
