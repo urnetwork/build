@@ -386,13 +386,29 @@ error_trap 'docs push branch'
 error_trap 'warp push branch'
 
 
-(cd $BUILD_HOME/proxy &&
-    go_mod_edit_module github.com/urnetwork/proxy &&
-    go_edit_require_subpackages github.com/urnetwork/proxy &&
+(cd $BUILD_HOME/proxy/socks &&
+    go_mod_edit_module github.com/urnetwork/proxy/socks &&
+    go_edit_require_subpackages github.com/urnetwork/proxy/socks &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_fork)
-error_trap 'proxy edit'
+error_trap 'proxy socks edit'
+
+(cd $BUILD_HOME/proxy/http &&
+    go_mod_edit_module github.com/urnetwork/proxy/http &&
+    go_edit_require_subpackages github.com/urnetwork/proxy/http &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_fork)
+error_trap 'proxy http edit'
+
+(cd $BUILD_HOME/proxy/wg &&
+    go_mod_edit_module github.com/urnetwork/proxy/wg &&
+    go_edit_require_subpackages github.com/urnetwork/proxy/wg &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_fork)
+error_trap 'proxy wg edit'
 
 (cd $BUILD_HOME/proxy && 
     git_commit &&
