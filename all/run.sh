@@ -73,6 +73,7 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf docs)
     (cd $BUILD_HOME && rm -rf warp)
     (cd $BUILD_HOME && rm -rf glog)
+    (cd $BUILD_HOME && rm -rf proxy)
     (cd $BUILD_HOME && 
         git stash -u && 
         git reset --hard && 
@@ -125,7 +126,8 @@ error_trap 'pull docs'
 error_trap 'pull warp'
 (cd $BUILD_HOME/glog && git_main master)
 error_trap 'pull glog'
-
+(cd $BUILD_HOME/proxy && git_main)
+error_trap 'pull proxy'
 
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
@@ -208,6 +210,8 @@ error_trap 'docs prepare branch'
 error_trap 'warp prepare branch'
 (cd $BUILD_HOME/glog && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'glog prepare branch'
+(cd $BUILD_HOME/proxy && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'proxy prepare branch'
 
 
 # apple branch, edit xcodeproject
@@ -381,6 +385,19 @@ error_trap 'docs push branch'
     git_tag)
 error_trap 'warp push branch'
 
+(cd $BUILD_HOME/proxy &&
+    go_mod_edit_module github.com/urnetwork/proxy &&
+    go_edit_require_subpackages github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_fork)
+error_trap 'proxy edit'
+
+(cd $BUILD_HOME/connect && 
+    git_commit &&
+    git_tag)
+error_trap 'connect push branch'
+
 
 (cd $BUILD_HOME &&
     git add . &&
@@ -543,6 +560,28 @@ builder_message "provider \`${EXTERNAL_WARP_VERSION}\` available - https://githu
 
 (cd $BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl && make)
 error_trap 'build bringyourctl'
+
+
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks && make)
+error_trap 'build proxy socks'
+
+github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-socks.tar.gz"
+
+builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/http && make)
+error_trap 'build proxy http'
+
+github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-http.tar.gz"
+
+builder_message "proxy http \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg && make)
+error_trap 'build proxy wg'
+
+github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg/build/proxy-wg.tar.gz"
+
+builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # the latest macos or xcode messes up the package with the error

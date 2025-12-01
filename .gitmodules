@@ -25,3 +25,6 @@
 [submodule "glog"]
 	path = glog
 	url = git@github.com:urnetwork/glog.git
+[submodule "proxy"]
+	path = proxy
+	url = git@github.com:urnetwork/proxy.git
