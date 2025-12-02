@@ -129,7 +129,7 @@ error_trap 'pull warp'
 error_trap 'pull glog'
 (cd $BUILD_HOME/proxy && git_main)
 error_trap 'pull proxy'
-(cd $BUILD_HOME/userwireguard && git_main)
+(cd $BUILD_HOME/userwireguard && git_main master)
 error_trap 'pull userwireguard'
 
 if [ "$BUILD_TEST" ]; then
