@@ -74,6 +74,7 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf warp)
     (cd $BUILD_HOME && rm -rf glog)
     (cd $BUILD_HOME && rm -rf proxy)
+    (cd $BUILD_HOME && rm -rf userwireguard)
     (cd $BUILD_HOME && 
         git stash -u && 
         git reset --hard && 
@@ -128,6 +129,8 @@ error_trap 'pull warp'
 error_trap 'pull glog'
 (cd $BUILD_HOME/proxy && git_main)
 error_trap 'pull proxy'
+(cd $BUILD_HOME/userwireguard && git_main)
+error_trap 'pull userwireguard'
 
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
@@ -212,6 +215,8 @@ error_trap 'warp prepare branch'
 error_trap 'glog prepare branch'
 (cd $BUILD_HOME/proxy && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'proxy prepare branch'
+(cd $BUILD_HOME/userwireguard && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'userwireguard prepare branch'
 
 
 # apple branch, edit xcodeproject
@@ -386,6 +391,18 @@ error_trap 'docs push branch'
     git_commit &&
     git_tag)
 error_trap 'warp push branch'
+
+
+(cd $BUILD_HOME/userwireguard &&
+    go_mod_edit_module github.com/urnetwork/userwireguard &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard)
+error_trap 'userwireguard edit'
+
+
+(cd $BUILD_HOME/userwireguard && 
+    git_commit &&
+    git_tag)
+error_trap 'userwireguard push branch'
 
 
 (cd $BUILD_HOME/proxy/socks &&
