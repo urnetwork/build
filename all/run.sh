@@ -609,21 +609,21 @@ error_trap 'build bringyourctl'
 (cd $BUILD_HOME/proxy/socks${GO_MOD_SUFFIX} && make)
 error_trap 'build proxy socks'
 
-github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-socks.tar.gz"
+github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/socks${GO_MOD_SUFFIX}/build/proxy-socks.tar.gz"
 
 builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 (cd $BUILD_HOME/proxy/http${GO_MOD_SUFFIX} && make)
 error_trap 'build proxy http'
 
-github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-http.tar.gz"
+github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/http${GO_MOD_SUFFIX}/build/proxy-http.tar.gz"
 
 builder_message "proxy http \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 (cd $BUILD_HOME/proxy/wg${GO_MOD_SUFFIX} && make)
 error_trap 'build proxy wg'
 
-github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg/build/proxy-wg.tar.gz"
+github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/wg${GO_MOD_SUFFIX}/build/proxy-wg.tar.gz"
 
 builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
