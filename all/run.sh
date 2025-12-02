@@ -428,6 +428,8 @@ error_trap 'proxy http edit'
 (cd $BUILD_HOME/proxy/wg &&
     go_mod_edit_module github.com/urnetwork/proxy/wg &&
     go_edit_require_subpackages github.com/urnetwork/proxy/wg &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
