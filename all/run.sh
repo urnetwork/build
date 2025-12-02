@@ -306,6 +306,7 @@ error_trap 'glog push branch'
     go_mod_edit_module github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
     go_mod_fork 'api')
 error_trap 'connect edit'
@@ -347,6 +348,7 @@ error_trap 'sdk push branch'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
 error_trap 'server edit'
 
@@ -390,7 +392,9 @@ error_trap 'warp push branch'
     go_mod_edit_module github.com/urnetwork/proxy/socks &&
     go_edit_require_subpackages github.com/urnetwork/proxy/socks &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
 error_trap 'proxy socks edit'
 
@@ -398,7 +402,9 @@ error_trap 'proxy socks edit'
     go_mod_edit_module github.com/urnetwork/proxy/http &&
     go_edit_require_subpackages github.com/urnetwork/proxy/http &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
 error_trap 'proxy http edit'
 
@@ -406,7 +412,9 @@ error_trap 'proxy http edit'
     go_mod_edit_module github.com/urnetwork/proxy/wg &&
     go_edit_require_subpackages github.com/urnetwork/proxy/wg &&
     go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
 error_trap 'proxy wg edit'
 
