@@ -28,3 +28,6 @@
 [submodule "proxy"]
 	path = proxy
 	url = git@github.com:urnetwork/proxy.git
+[submodule "userwireguard"]
+	path = userwireguard
+	url = git@github.com:urnetwork/userwireguard.git
