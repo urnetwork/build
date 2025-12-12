@@ -405,37 +405,17 @@ error_trap 'userwireguard edit'
 error_trap 'userwireguard push branch'
 
 
-(cd $BUILD_HOME/proxy/socks &&
-    go_mod_edit_module github.com/urnetwork/proxy/socks &&
-    go_edit_require_subpackages github.com/urnetwork/proxy/socks &&
+(cd $BUILD_HOME/proxy &&
+    go_mod_edit_module github.com/urnetwork/proxy &&
+    go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
-    go_mod_fork)
-error_trap 'proxy socks edit'
-
-(cd $BUILD_HOME/proxy/http &&
-    go_mod_edit_module github.com/urnetwork/proxy/http &&
-    go_edit_require_subpackages github.com/urnetwork/proxy/http &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/glog &&
-    go_edit_require_subpackages github.com/urnetwork/glog &&
-    go_mod_fork)
-error_trap 'proxy http edit'
-
-(cd $BUILD_HOME/proxy/wg &&
-    go_mod_edit_module github.com/urnetwork/proxy/wg &&
-    go_edit_require_subpackages github.com/urnetwork/proxy/wg &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/glog &&
-    go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
-error_trap 'proxy wg edit'
+error_trap 'proxy edit'
 
 (cd $BUILD_HOME/proxy && 
     git_commit &&
@@ -590,6 +570,7 @@ error_trap 'build sdk'
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
 github_release_upload "URnetworkSdk-sources-${EXTERNAL_WARP_VERSION}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.xcframework.zip" "$BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework.zip"
+github_release_upload "URnetworkSdkJs-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/build/js/URnetworkSdkJs.zip"
 
 builder_message "sdk \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
@@ -606,24 +587,24 @@ builder_message "provider \`${EXTERNAL_WARP_VERSION}\` available - https://githu
 error_trap 'build bringyourctl'
 
 
-(cd $BUILD_HOME/proxy/socks${GO_MOD_SUFFIX} && make)
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks && make)
 error_trap 'build proxy socks'
 
-github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/socks${GO_MOD_SUFFIX}/build/proxy-socks.tar.gz"
+github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-socks.tar.gz"
 
 builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
-(cd $BUILD_HOME/proxy/http${GO_MOD_SUFFIX} && make)
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/http && make)
 error_trap 'build proxy http'
 
-github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/http${GO_MOD_SUFFIX}/build/proxy-http.tar.gz"
+github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/http/build/proxy-http.tar.gz"
 
 builder_message "proxy http \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
-(cd $BUILD_HOME/proxy/wg${GO_MOD_SUFFIX} && make)
+(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg && make)
 error_trap 'build proxy wg'
 
-github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy/wg${GO_MOD_SUFFIX}/build/proxy-wg.tar.gz"
+github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg/build/proxy-wg.tar.gz"
 
 builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
