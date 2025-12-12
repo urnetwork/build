@@ -570,6 +570,7 @@ error_trap 'build sdk'
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
 github_release_upload "URnetworkSdk-sources-${EXTERNAL_WARP_VERSION}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.xcframework.zip" "$BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework.zip"
+github_release_upload "URnetworkSdkJs-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/build/js/URnetworkSdkJs.zip"
 
 builder_message "sdk \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
