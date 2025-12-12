@@ -292,6 +292,7 @@ go_mod_fork_update () {
 
 
 git_commit () {
+    git tag -d v${EXTERNAL_WARP_VERSION}
     git add . &&
     if ! (git diff --quiet && git diff --cached --quiet); then
         git commit -m "${EXTERNAL_WARP_VERSION}" &&
