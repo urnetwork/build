@@ -275,7 +275,12 @@ go_mod_fork () {
         $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
         mv "$temp" v${GO_MOD_VERSION} &&
         # the go go.sum needs to be updated
-        (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...) &&
+        (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...)
+    fi
+}
+
+go_mod_fork_update () {
+    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         # the go go.sum needs to be updated for the forked mods
         for f in *; do
             if [ -e "$f/go.mod" ] && [[ "$f" =~ "^($1)\$" ]]; then
@@ -348,6 +353,8 @@ error_trap 'sdk build edit'
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
+    git_commit &&
+    go_mod_fork_update 'build' &&
     git_commit &&
     git_tag)
 error_trap 'sdk push branch'
