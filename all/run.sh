@@ -275,7 +275,13 @@ go_mod_fork () {
         $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
         mv "$temp" v${GO_MOD_VERSION} &&
         # the go go.sum needs to be updated
-        (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...)
+        (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...) &&
+        # the go go.sum needs to be updated for the forked mods
+        for f in *; do
+            if [ -e "$f/go.mod" ] && [[ "$f" =~ "^($1)\$" ]]; then
+                (cd $f && go mod tidy && go get -t ./...)
+            fi
+        done
     fi
 }
 
