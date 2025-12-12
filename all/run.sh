@@ -354,8 +354,10 @@ error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
     git_commit &&
+    git_tag &&
     go_mod_fork_update 'build' &&
     git_commit &&
+    # this recreates the tag but the module contents are unchanged
     git_tag)
 error_trap 'sdk push branch'
 
