@@ -7,6 +7,7 @@
 # GITHUB_API_KEY
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
+# (optional) WARP_SKIP_DEPLOY set to skip deployment
 
 # note: if docker fails to build, try 1. removing all images then 2. pruning the build images:
 #       docker rmi `docker images -a -q`
@@ -832,101 +833,102 @@ fi
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
+if [ "$WARP_SKIP_DEPLOY" == "" ]; then
+    builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
-# fully deploy the new config before any services
-# `--percent=XX of the config-updates does not cover all the blocks of `--percent=XX` for other services
-warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    # fully deploy the new config before any services
+    # `--percent=XX of the config-updates does not cover all the blocks of `--percent=XX` for other services
+    warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 
 
-warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=25 --only-older
-builder_message "${BUILD_ENV}[25%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-if [ $BUILD_ENV = 'main' ]; then
-    warpctl deploy community provider ${WARP_VERSION} --percent=25 --only-older --timeout=0
-    builder_message "community[25%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    if [ $BUILD_ENV = 'main' ]; then
+        warpctl deploy community provider ${WARP_VERSION} --percent=25 --only-older --timeout=0
+        builder_message "community[25%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    fi
+
+    builder_message "${BUILD_ENV}[25%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
+
+
+    sleep $STAGE_SECONDS
+
+
+    warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    if [ $BUILD_ENV = 'main' ]; then
+        warpctl deploy community provider ${WARP_VERSION} --percent=50 --only-older --timeout=0
+        builder_message "community[50%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    fi
+
+    builder_message "${BUILD_ENV}[50%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
+
+
+    sleep $STAGE_SECONDS
+
+
+    warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    if [ $BUILD_ENV = 'main' ]; then
+        warpctl deploy community provider ${WARP_VERSION} --percent=75 --only-older --timeout=0
+        builder_message "community[75%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    fi
+
+    builder_message "${BUILD_ENV}[75%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
+
+
+    sleep $STAGE_SECONDS
+
+
+    warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    if [ $BUILD_ENV = 'main' ]; then
+        warpctl deploy community provider ${WARP_VERSION} --percent=100 --only-older --timeout=0 --set-latest
+        builder_message "community[100%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    fi
+
+    builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 fi
-
-builder_message "${BUILD_ENV}[25%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
-
-
-sleep $STAGE_SECONDS
-
-
-warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=50 --only-older
-builder_message "${BUILD_ENV}[50%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-if [ $BUILD_ENV = 'main' ]; then
-    warpctl deploy community provider ${WARP_VERSION} --percent=50 --only-older --timeout=0
-    builder_message "community[50%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-fi
-
-builder_message "${BUILD_ENV}[50%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
-
-
-sleep $STAGE_SECONDS
-
-
-warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=75 --only-older
-builder_message "${BUILD_ENV}[75%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-if [ $BUILD_ENV = 'main' ]; then
-    warpctl deploy community provider ${WARP_VERSION} --percent=75 --only-older --timeout=0
-    builder_message "community[75%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-fi
-
-builder_message "${BUILD_ENV}[75%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
-
-
-sleep $STAGE_SECONDS
-
-
-warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV taskworker ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] taskworker \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV api ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] api \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV connect ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] connect \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV web ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=100 --only-older
-builder_message "${BUILD_ENV}[100%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-if [ $BUILD_ENV = 'main' ]; then
-    warpctl deploy community provider ${WARP_VERSION} --percent=100 --only-older --timeout=0 --set-latest
-    builder_message "community[100%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-fi
-
-builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
-
 
 builder_message "Build all \`${EXTERNAL_WARP_VERSION}\` ... done! Enjoy :) - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
