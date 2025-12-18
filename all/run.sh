@@ -833,7 +833,7 @@ fi
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-if [ "$WARP_SKIP_DEPLOY" == "" ]; then
+if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[0%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
     # fully deploy the new config before any services
