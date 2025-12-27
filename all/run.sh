@@ -666,7 +666,7 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.c
 
 
 (cd $BUILD_HOME/android/app &&
-    ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
+    ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease assembleEthos_dappRelease)
 error_trap 'android build'
 
 github_release_upload \
@@ -680,6 +680,10 @@ github_release_upload \
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-solana_dapp-release.apk" \
     "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-solana_dapp-universal-release.apk"
+
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-ethos_dapp-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/ethos_dapp/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-ethos_dapp-universal-release.apk"
 
 if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk" &&
