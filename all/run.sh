@@ -746,6 +746,11 @@ github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
 
+# alias the upload as the "official" apk which lexicograhpically sorts to the front, for release systems like Obtanium
+github_release_upload \
+    "com.bringyour.network-${EXTERNAL_WARP_VERSION}.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
+
 # github_release_upload \
 #     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk" \
 #     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
