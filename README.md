@@ -66,8 +66,4 @@ On macOS, the docker engine must have at least 16GiB of memory allocated.
 
 ## DockerHub Images
 
-Production images can be found at [DockerHub](https://hub.docker.com/u/bringyour)
-
-
-
-##
+Production images can be found at [DockerHub](https://hub.docker.com/u/bringyour). These are deployed with the [`warpctl` tool](https://github.com/urnetwork/warp).
