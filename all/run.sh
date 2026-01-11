@@ -335,6 +335,24 @@ error_trap 'connect edit'
 error_trap 'connect push branch'
 
 
+(cd $BUILD_HOME/proxy &&
+    go_mod_edit_module github.com/urnetwork/proxy &&
+    go_edit_require_subpackages github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard &&
+    go_mod_fork)
+error_trap 'proxy edit'
+
+(cd $BUILD_HOME/proxy && 
+    git_commit &&
+    git_tag)
+error_trap 'proxy push branch'
+
+
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
@@ -424,24 +442,6 @@ error_trap 'userwireguard edit'
     git_commit &&
     git_tag)
 error_trap 'userwireguard push branch'
-
-
-(cd $BUILD_HOME/proxy &&
-    go_mod_edit_module github.com/urnetwork/proxy &&
-    go_edit_require_subpackages github.com/urnetwork/proxy &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/glog &&
-    go_edit_require_subpackages github.com/urnetwork/glog &&
-    go_mod_edit_require github.com/urnetwork/userwireguard &&
-    go_edit_require_subpackages github.com/urnetwork/userwireguard &&
-    go_mod_fork)
-error_trap 'proxy edit'
-
-(cd $BUILD_HOME/proxy && 
-    git_commit &&
-    git_tag)
-error_trap 'proxy push branch'
 
 
 (cd $BUILD_HOME &&
