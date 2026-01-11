@@ -335,6 +335,17 @@ error_trap 'connect edit'
 error_trap 'connect push branch'
 
 
+(cd $BUILD_HOME/userwireguard &&
+    go_mod_edit_module github.com/urnetwork/userwireguard &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard)
+error_trap 'userwireguard edit'
+
+(cd $BUILD_HOME/userwireguard && 
+    git_commit &&
+    git_tag)
+error_trap 'userwireguard push branch'
+
+
 (cd $BUILD_HOME/proxy &&
     go_mod_edit_module github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
@@ -430,18 +441,6 @@ error_trap 'docs push branch'
     git_commit &&
     git_tag)
 error_trap 'warp push branch'
-
-
-(cd $BUILD_HOME/userwireguard &&
-    go_mod_edit_module github.com/urnetwork/userwireguard &&
-    go_edit_require_subpackages github.com/urnetwork/userwireguard)
-error_trap 'userwireguard edit'
-
-
-(cd $BUILD_HOME/userwireguard && 
-    git_commit &&
-    git_tag)
-error_trap 'userwireguard push branch'
 
 
 (cd $BUILD_HOME &&
