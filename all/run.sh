@@ -398,11 +398,13 @@ error_trap 'sdk push branch'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_mod_fork)
 error_trap 'server edit'
