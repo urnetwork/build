@@ -45,7 +45,7 @@ else
 	exit 1
 fi
 java_version=`java -version 2>&1`
-if [[ ! "$java_version" =~ 'openjdk version "21.0."' ]]; then
+if [[ ! "$java_version" =~ 'openjdk version "21.0.' ]]; then
     echo "java check: 21.0.x required ($java_version)"
     exit 1
 fi
