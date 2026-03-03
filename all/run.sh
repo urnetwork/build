@@ -828,6 +828,14 @@ builder_message "service api \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build connect'
 builder_message "service connect \`${EXTERNAL_WARP_VERSION}\` available"
 
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/mcp/Makefile)
+error_trap 'warpctl build mcp'
+builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
+
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/proxy/Makefile)
+error_trap 'warpctl build proxy'
+builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
@@ -866,6 +874,10 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[25%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=25 --only-older
     builder_message "${BUILD_ENV}[25%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV mcp ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=25 --only-older
+    builder_message "${BUILD_ENV}[25%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     if [ $BUILD_ENV = 'main' ]; then
         warpctl deploy community provider ${WARP_VERSION} --percent=25 --only-older --timeout=0
         builder_message "community[25%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
@@ -889,6 +901,10 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[50%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=50 --only-older
     builder_message "${BUILD_ENV}[50%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV mcp ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=50 --only-older
+    builder_message "${BUILD_ENV}[50%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     if [ $BUILD_ENV = 'main' ]; then
         warpctl deploy community provider ${WARP_VERSION} --percent=50 --only-older --timeout=0
         builder_message "community[50%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
@@ -912,6 +928,10 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[75%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=75 --only-older
     builder_message "${BUILD_ENV}[75%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV mcp ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=75 --only-older
+    builder_message "${BUILD_ENV}[75%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     if [ $BUILD_ENV = 'main' ]; then
         warpctl deploy community provider ${WARP_VERSION} --percent=75 --only-older --timeout=0
         builder_message "community[75%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
@@ -935,6 +955,10 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[100%] web \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV app ${WARP_VERSION} --percent=100 --only-older
     builder_message "${BUILD_ENV}[100%] app \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV mcp ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
+    warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     if [ $BUILD_ENV = 'main' ]; then
         warpctl deploy community provider ${WARP_VERSION} --percent=100 --only-older --timeout=0 --set-latest
         builder_message "community[100%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
