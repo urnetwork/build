@@ -541,9 +541,14 @@ virustotal_verify () {
                     builder_message "virustotal analysis $1 failed: \`\`\`$VIRUSTOTAL_ANALYSIS_STATS\`\`\`"
                     exit 1
                 fi
+            else
+                echo "virustotal analysis $1 complete, waiting for stats ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
             fi
+        else if [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "null" ]; then
+            echo "virustotal analysis $1 unknown result ($VIRUSTOTAL_ANALYSIS) ..."
+        else
+            echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
         fi
-        echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
         sleep 10
     done
     builder_message "virustotal analysis $1 did not complete"
