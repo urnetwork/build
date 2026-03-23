@@ -515,7 +515,7 @@ virustotal () {
             -F "file=@$2"`
         error_trap "virustotal upload $1"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
-
+        # FIXME if the same file is uploaded multiple times, the VIRUSTOTAL_ID will need to be pulled from a different field (fix)
         virustotal_verify "$1" "$VIRUSTOTAL_ID"
 
         VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/file/$SHA256)|")
@@ -545,7 +545,7 @@ virustotal_verify () {
                 echo "virustotal analysis $1 complete, waiting for stats ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
             fi
         elif [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "null" ]; then
-            echo "virustotal analysis $1 unknown result ($VIRUSTOTAL_ANALYSIS) ..."
+            echo "virustotal analysis $1 ($2) unknown result ($VIRUSTOTAL_ANALYSIS) ..."
         else
             echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
         fi
@@ -750,11 +750,7 @@ error_trap 'push ungoogle tag'
         registry.gitlab.com/fdroid/fdroidserver:buildserver)
 error_trap 'android github build'
 
-github_release_upload \
-    "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-release.apk" \
-    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
-
-# alias the upload as the "official" apk which lexicograhpically sorts to the front, for release systems like Obtanium
+# upload github as the "official" apk which lexicograhpically sorts to the front, for release systems like Obtanium
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}.apk" \
     "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-universal-release.apk"
