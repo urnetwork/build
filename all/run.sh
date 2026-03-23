@@ -544,7 +544,7 @@ virustotal_verify () {
             else
                 echo "virustotal analysis $1 complete, waiting for stats ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
             fi
-        else if [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "null" ]; then
+        elif [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "null" ]; then
             echo "virustotal analysis $1 unknown result ($VIRUSTOTAL_ANALYSIS) ..."
         else
             echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
