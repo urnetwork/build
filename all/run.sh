@@ -106,12 +106,12 @@ if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
     builder_message 'java 21.0.x required'
     exit 1
 fi
-if [[ ! `node --version 2>&1` =~ 'v24.11.1' ]]; then
-    builder_message 'node 24.11.1 required'
+if [[ ! `node --version 2>&1` =~ 'v24.14.1' ]]; then
+    builder_message 'node 24.14.1 required'
     exit 1
 fi
-if [[ ! `npm --version 2>&1` =~ '11.7.0' ]]; then
-    builder_message 'npm 11.7.0 required'
+if [[ ! `npm --version 2>&1` =~ '11.11.0' ]]; then
+    builder_message 'npm 11.11.0 required'
     exit 1
 fi
 
