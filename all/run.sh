@@ -138,11 +138,11 @@ error_trap 'pull glog'
 error_trap 'pull proxy'
 (cd $BUILD_HOME/userwireguard && git_main master)
 error_trap 'pull userwireguard'
-(cd $BUILD_HOME/extension && git_main master)
+(cd $BUILD_HOME/extension && git_main)
 error_trap 'pull extension'
-(cd $BUILD_HOME/elements && git_main master)
+(cd $BUILD_HOME/elements && git_main)
 error_trap 'pull elements'
-(cd $BUILD_HOME/localizations && git_main master)
+(cd $BUILD_HOME/localizations && git_main)
 error_trap 'pull localizations'
 
 if [ "$BUILD_TEST" ]; then
