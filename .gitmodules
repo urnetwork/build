@@ -31,3 +31,12 @@
 [submodule "userwireguard"]
 	path = userwireguard
 	url = git@github.com:urnetwork/userwireguard.git
+[submodule "elements"]
+	path = elements
+	url = git@github.com:urnetwork/elements.git
+[submodule "localizations"]
+	path = localizations
+	url = git@github.com:urnetwork/localizations.git
+[submodule "extension"]
+	path = extension
+	url = git@github.com:urnetwork/extension.git

@@ -106,6 +106,14 @@ if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
     builder_message 'java 21.0.x required'
     exit 1
 fi
+if [[ ! `node --version 2>&1` =~ 'v24.11.1' ]]; then
+    builder_message 'node 24.11.1 required'
+    exit 1
+fi
+if [[ ! `npm --version 2>&1` =~ '11.7.0' ]]; then
+    builder_message 'npm 11.7.0 required'
+    exit 1
+fi
 
 
 (cd $BUILD_HOME/connect && git_main)
@@ -130,6 +138,12 @@ error_trap 'pull glog'
 error_trap 'pull proxy'
 (cd $BUILD_HOME/userwireguard && git_main master)
 error_trap 'pull userwireguard'
+(cd $BUILD_HOME/extension && git_main master)
+error_trap 'pull extension'
+(cd $BUILD_HOME/elements && git_main master)
+error_trap 'pull elements'
+(cd $BUILD_HOME/localizations && git_main master)
+error_trap 'pull localizations'
 
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
@@ -177,6 +191,7 @@ error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
 error_trap 'warpctl version code'
 GO_MOD_VERSION=`echo $WARP_VERSION_BASE | $BUILD_SED 's/\([^\.]*\).*/\1/'`
+NPM_PACKAGE_VERSION=$GO_MOD_VERSION
 if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
     GO_MOD_SUFFIX=''
 else
@@ -267,8 +282,16 @@ go_mod_fork () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
         for f in *; do
-            if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ] && [[ ! "$f" =~ "^($1)\$" ]]; then
-                mv "$f" "$temp"
+            if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
+                fork_dir=
+                for t in "$@"; do
+                    if [[ ! "$f" =~ "^($t)\$" ]]; then
+                        fork_dir=1;
+                    fi;
+                done
+                if [[ "$fork_dir" ]]; then
+                    mv "$f" "$temp"
+                fi
             fi
         done &&
         $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
@@ -287,6 +310,27 @@ go_mod_fork_update () {
             fi
         done
     fi
+}
+
+
+npm_edit_module () {
+    jq --arg p "$1" --arg v "$NPM_PACKAGE_VERSION" '.dependencies.[$p] = $v' package.json.2 && mv package.json.2 package.json
+}
+
+npm_fork () {
+    jq --arg v "$NPM_PACKAGE_VERSION" '.version = $v' package.json.2 && mv package.json.2 package.json
+}
+
+npm_fork_update () {
+    for f in *; do
+        if [ -e "$f/package.json" ] && [[ "$f" =~ "^($1)\$" ]]; then
+            jq --arg v "$NPM_PACKAGE_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
+        fi
+    done
+}
+
+npm_publish () {
+    npm publish
 }
 
 
@@ -378,18 +422,20 @@ error_trap 'sdk build edit'
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
-    go_mod_fork 'build')
+    go_mod_fork 'build' 'sdk-js')
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
     git_commit &&
     git_tag &&
     go_mod_fork_update 'build' &&
+    npm_fork_update 'sdk-js' &&
     git_commit &&
     # this recreates the tag but the module contents are unchanged
     git_tag)
+(cd $BUILD_HOME/sdk/sdk-js &&
+    npm_publish)
 error_trap 'sdk push branch'
-
 
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
@@ -442,6 +488,35 @@ error_trap 'docs push branch'
     git_tag)
 error_trap 'warp push branch'
 
+(cd $BUILD_HOME/elements &&
+    npm_fork)
+(cd $BUILD_HOME/elements && 
+    git_commit &&
+    git_tag)
+(cd $BUILD_HOME/elements && 
+    npm_publish)
+error_trap 'elements push branch'
+
+(cd $BUILD_HOME/localizations &&
+    npm_fork)
+(cd $BUILD_HOME/localizations && 
+    git_commit &&
+    git_tag)
+(cd $BUILD_HOME/localizations &&
+    npm_publish)
+error_trap 'localizations push branch'
+
+(cd $BUILD_HOME/extension &&
+    npm_edit_module @urnetwork/elements &&
+    npm_edit_module @urnetwork/localizations &&
+    npm_edit_module @urnetwork/sdk-js &&
+    npm_fork)
+(cd $BUILD_HOME/extension && 
+    git_commit &&
+    git_tag)
+(cd $BUILD_HOME/extension &&
+    npm_publish)
+error_trap 'extension push branch'
 
 (cd $BUILD_HOME &&
     git add . &&
@@ -632,6 +707,14 @@ error_trap 'build proxy wg'
 github_release_upload "urnetwork-proxy-wg-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg/build/proxy-wg.tar.gz"
 
 builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+(cd $BUILD_HOME/extension && make)
+error_trap 'build extension'
+
+github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${NPM_PACKAGE_VERSION}.zip"
+
+builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # the latest macos or xcode messes up the package with the error
