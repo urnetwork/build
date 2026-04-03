@@ -191,7 +191,6 @@ error_trap 'warpctl version'
 export WARP_VERSION_CODE=`warpctl ls version-code`
 error_trap 'warpctl version code'
 GO_MOD_VERSION=`echo $WARP_VERSION_BASE | $BUILD_SED 's/\([^\.]*\).*/\1/'`
-NPM_PACKAGE_VERSION=$GO_MOD_VERSION
 if [ $GO_MOD_VERSION = 0 ] || [ $GO_MOD_VERSION = 1 ]; then
     GO_MOD_SUFFIX=''
 else
@@ -320,17 +319,17 @@ go_mod_fork_update () {
 
 
 npm_edit_module () {
-    jq --arg p "$1" --arg v "$NPM_PACKAGE_VERSION" '.dependencies.[$p] = $v' package.json.2 && mv package.json.2 package.json
+    jq --arg p "$1" --arg v "$WARP_VERSION" '.dependencies.[$p] = $v' package.json.2 && mv package.json.2 package.json
 }
 
 npm_fork () {
-    jq --arg v "$NPM_PACKAGE_VERSION" '.version = $v' package.json.2 && mv package.json.2 package.json
+    jq --arg v "$WARP_VERSION" '.version = $v' package.json.2 && mv package.json.2 package.json
 }
 
 npm_fork_update () {
     for f in *; do
         if [ -e "$f/package.json" ] && [[ "$f" =~ "^($1)\$" ]]; then
-            jq --arg v "$NPM_PACKAGE_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
+            jq --arg v "$WARP_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
         fi
     done
 }
@@ -718,7 +717,7 @@ builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://githu
 (cd $BUILD_HOME/extension && make)
 error_trap 'build extension'
 
-github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${NPM_PACKAGE_VERSION}.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${WARP_VERSION}.zip"
 
 builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
