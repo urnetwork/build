@@ -231,6 +231,12 @@ error_trap 'glog prepare branch'
 error_trap 'proxy prepare branch'
 (cd $BUILD_HOME/userwireguard && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'userwireguard prepare branch'
+(cd $BUILD_HOME/extension && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'extension prepare branch'
+(cd $BUILD_HOME/elements && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'elements prepare branch'
+(cd $BUILD_HOME/localizations && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'localizations prepare branch'
 
 
 # apple branch, edit xcodeproject
@@ -283,11 +289,11 @@ go_mod_fork () {
         temp=`mktemp -d` &&
         for f in *; do
             if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
-                fork_dir=
+                fork_dir=1
                 for t in "$@"; do
-                    if [[ ! "$f" =~ "^($t)\$" ]]; then
-                        fork_dir=1;
-                    fi;
+                    if [[ "$f" =~ "^($t)\$" ]]; then
+                        fork_dir=
+                    fi
                 done
                 if [[ "$fork_dir" ]]; then
                     mv "$f" "$temp"
