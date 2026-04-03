@@ -335,6 +335,8 @@ npm_fork_update () {
 }
 
 npm_publish () {
+    npm ci
+    npm build
     npm publish
 }
 
