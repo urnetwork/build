@@ -521,8 +521,6 @@ error_trap 'localizations push branch'
 (cd $BUILD_HOME/extension && 
     git_commit &&
     git_tag)
-(cd $BUILD_HOME/extension &&
-    npm_publish)
 error_trap 'extension push branch'
 
 (cd $BUILD_HOME &&
