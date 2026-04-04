@@ -319,17 +319,17 @@ go_mod_fork_update () {
 
 
 npm_edit_module () {
-    jq --arg p "$1" --arg v "$WARP_VERSION" '.dependencies.[$p] = $v' package.json > package.json.2 && mv package.json.2 package.json
+    jq --arg p "$1" --arg v "$EXTERNAL_WARP_VERSION" '.dependencies.[$p] = $v' package.json > package.json.2 && mv package.json.2 package.json
 }
 
 npm_fork () {
-    jq --arg v "$WARP_VERSION" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
+    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
 }
 
 npm_fork_update () {
     for f in *; do
         if [ -e "$f/package.json" ] && [[ "$f" =~ "^($1)\$" ]]; then
-            jq --arg v "$WARP_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
+            jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
         fi
     done
 }
