@@ -723,7 +723,7 @@ builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://githu
 (cd $BUILD_HOME/extension && make)
 error_trap 'build extension'
 
-github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${WARP_VERSION}.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
 
 builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
