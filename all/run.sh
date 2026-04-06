@@ -344,9 +344,14 @@ npm_fork_update () {
     done
 }
 
+# note npm publishing requires a build unlike go publishing, which just requires the git tag
 npm_publish () {
-    npm ci
-    npm build
+    if [ -e "Makefile" ]; then
+        make
+    else
+        npm ci
+        npm build
+    fi
     npm publish --tag nightly
 }
 
