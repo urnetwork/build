@@ -326,8 +326,8 @@ npm_edit_module () {
 
 npm_fork () {
     jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package-lock.lock > package-lock.json.2 && mv $f/package-lock.json.2 package-lock.json
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' package-lock.lock > package-lock.json.2 && mv package-lock.json.2 package-lock.json
+    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package-lock.json > package-lock.json.2 && mv $f/package-lock.json.2 package-lock.json
+    jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     # update package-lock.json
     npm install
 }
@@ -336,8 +336,8 @@ npm_fork_update () {
     for f in *; do
         if [ -e "$f/package.json" ] && [[ "$f" =~ "^($1)\$" ]]; then
             jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' $f/package.json > $f/package.json.2 && mv $f/package.json.2 $f/package.json
-            jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' $f/package-lock.lock > $f/package-lock.json.2 && mv $f/package-lock.json.2 $f/package-lock.json
-            jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' $f/package-lock.lock > $f/package-lock.json.2 && mv $f/package-lock.json.2 $f/package-lock.json
+            jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' $f/package-lock.json > $f/package-lock.json.2 && mv $f/package-lock.json.2 $f/package-lock.json
+            jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' $f/package-lock.json > $f/package-lock.json.2 && mv $f/package-lock.json.2 $f/package-lock.json
             # update package-lock.json
             (cd $f && npm install)
         fi
