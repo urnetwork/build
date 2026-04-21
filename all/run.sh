@@ -326,7 +326,7 @@ npm_edit_module () {
 
 npm_fork () {
     jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package-lock.json > package-lock.json.2 && mv $f/package-lock.json.2 package-lock.json
+    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     # update package-lock.json
     npm install
