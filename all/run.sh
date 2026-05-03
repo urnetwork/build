@@ -611,6 +611,7 @@ virustotal () {
         error_trap "virustotal upload $1"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
         # FIXME if the same file is uploaded multiple times, the VIRUSTOTAL_ID will need to be pulled from a different field (fix)
+        echo "virustotal analysis https://www.virustotal.com/gui/file/$SHA256"
         virustotal_verify "$1" "$VIRUSTOTAL_ID"
 
         VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/file/$SHA256)|")
