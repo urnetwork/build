@@ -455,9 +455,12 @@ error_trap 'sdk edit'
     git_commit &&
     # this recreates the tag but the module contents are unchanged
     git_tag)
+error_trap 'sdk push branch'
+
 (cd $BUILD_HOME/sdk/sdk-js &&
     npm_publish)
-error_trap 'sdk push branch'
+error_trap 'js-sdk publish'
+
 
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
@@ -510,8 +513,11 @@ error_trap 'docs push branch'
     git_tag)
 error_trap 'warp push branch'
 
+
 (cd $BUILD_HOME/elements &&
     npm_fork)
+error_trap 'elements edit'
+
 (cd $BUILD_HOME/elements && 
     git_commit &&
     git_tag)
@@ -519,40 +525,48 @@ error_trap 'warp push branch'
     npm_publish)
 error_trap 'elements push branch'
 
-(cd $BUILD_HOME/localizations &&
-    npm_fork)
+
 (cd $BUILD_HOME/localizations && 
+    npm_fork &&
     git_commit &&
     git_tag)
+error_trap 'localizations edit'
+
 (cd $BUILD_HOME/localizations &&
     npm_publish)
 error_trap 'localizations push branch'
+
 
 (cd $BUILD_HOME/extension &&
     npm_edit_module @urnetwork/elements &&
     npm_edit_module @urnetwork/localizations &&
     npm_edit_module @urnetwork/sdk-js &&
     npm_fork)
+error_trap 'extension edit'
+
 (cd $BUILD_HOME/extension && 
     git_commit &&
     git_tag)
 error_trap 'extension push branch'
+
 
 (cd $BUILD_HOME &&
     git add . &&
     git commit -m "${EXTERNAL_WARP_VERSION}" &&
     git push &&
     git_tag)
+error_trap 'push branch'
 # version code variants for the github flavor
 (cd $BUILD_HOME &&
     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+2))
     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
     git_tag)
+error_trap 'push +2 branch'
 (cd $BUILD_HOME &&
     WARP_VERSION_CODE=$(($WARP_VERSION_CODE+3))
     EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}" &&
     git_tag)
-error_trap 'push branch'
+error_trap 'push +3 branch'
 
 
 # Build release
