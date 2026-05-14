@@ -729,12 +729,12 @@ github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$
 
 builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
-(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/http && make)
-error_trap 'build proxy http'
+# (cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/http && make)
+# error_trap 'build proxy http'
 
-github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/http/build/proxy-http.tar.gz"
+# github_release_upload "urnetwork-proxy-http-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/http/build/proxy-http.tar.gz"
 
-builder_message "proxy http \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+# builder_message "proxy http \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 # (cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/wg && make)
 # error_trap 'build proxy wg'
