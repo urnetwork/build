@@ -76,6 +76,9 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf glog)
     (cd $BUILD_HOME && rm -rf proxy)
     (cd $BUILD_HOME && rm -rf userwireguard)
+    (cd $BUILD_HOME && rm -rf extension)
+    (cd $BUILD_HOME && rm -rf elements)
+    (cd $BUILD_HOME && rm -rf localization)
     (cd $BUILD_HOME && 
         git stash -u && 
         git reset --hard && 
