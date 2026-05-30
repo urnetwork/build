@@ -151,17 +151,12 @@ error_trap 'pull localizations'
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
 
-    (cd $BUILD_HOME/connect && ./test.sh)
-    error_trap 'connect tests'
-    # FIXME
-    (cd $BUILD_HOME/connect/provider && ./test.sh)
-    error_trap 'connect provider tests'
-    (cd $BUILD_HOME/sdk && ./test.sh)
-    error_trap 'sdk tests'
-    (cd $BUILD_HOME/server && ./test.sh)
-    error_trap 'server tests'
-    # (cd $BUILD_HOME/server/connect && ./test.sh)
-    # error_trap 'server connect tests'
+    for m in `find $BUILD_HOME -type d -d 1 -exec basename {} \;`; do
+        if [[ -e "$m/test.sh" ]]; then
+            (cd $BUILD_HOME/$m && ./test.sh)
+            error_trap "$m tests"
+        fi
+    done
 
     builder_message "Build all test candidate PASSED. A version number can now be assigned."
 fi
