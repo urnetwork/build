@@ -152,7 +152,7 @@ if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
 
     for m in `find $BUILD_HOME -type d -d 1 -exec basename {} \;`; do
-        if [[ -e "$m/test.sh" ]]; then
+        if [[ -e "$BUILD_HOME/$m/test.sh" ]]; then
             (cd $BUILD_HOME/$m && ./test.sh)
             error_trap "$m tests"
         fi
