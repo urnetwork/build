@@ -155,10 +155,11 @@ if [ "$BUILD_TEST" ]; then
         if [[ -e "$BUILD_HOME/$m/test.sh" ]]; then
             (cd $BUILD_HOME/$m && ./test.sh)
             error_trap "$m tests"
+            builder_message "$m tests passed."
         fi
     done
 
-    builder_message "Build all test candidate PASSED. A version number can now be assigned."
+    builder_message "Build all test candidate passed. A version number can now be assigned."
 fi
 
 
