@@ -934,23 +934,23 @@ builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build lb'
 builder_message "service lb \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/taskworker/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
 builder_message "service taskworker \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/api/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/api/Makefile)
 error_trap 'warpctl build api'
 builder_message "service api \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/connect/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/connect/Makefile)
 error_trap 'warpctl build connect'
 builder_message "service connect \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/mcp/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/mcp/Makefile)
 error_trap 'warpctl build mcp'
 builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/proxy/Makefile)
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/proxy/Makefile)
 error_trap 'warpctl build proxy'
 builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 
