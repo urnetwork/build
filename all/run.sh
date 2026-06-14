@@ -348,7 +348,7 @@ npm_publish () {
     if [ -e "Makefile" ]; then
         make || return $?
     else
-        npm ci && npm run build || return $?
+        npm ci && npm run build --if-present || return $?
     fi
     npm publish --tag nightly
 }
