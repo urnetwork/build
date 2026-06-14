@@ -747,6 +747,10 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 # builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
+# give npm a bit of time to ingest the latest packages before we link against them
+sleep 30
+
+
 (cd $BUILD_HOME/extension && make)
 error_trap 'build extension'
 
