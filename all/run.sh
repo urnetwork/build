@@ -747,16 +747,13 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 # builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-# give npm a bit of time to ingest the latest packages before we link against them
-sleep 30
+# FIXME bring this back after resolving flakiness
+# (cd $BUILD_HOME/extension && make)
+# error_trap 'build extension'
 
+# github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
 
-(cd $BUILD_HOME/extension && make)
-error_trap 'build extension'
-
-github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
-
-builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+# builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # the latest macos or xcode messes up the package with the error
