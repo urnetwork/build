@@ -346,10 +346,9 @@ npm_fork_update () {
 # note npm publishing requires a build unlike go publishing, which just requires the git tag
 npm_publish () {
     if [ -e "Makefile" ]; then
-        make
+        make || return $?
     else
-        npm ci
-        npm build
+        npm ci && npm run build || return $?
     fi
     npm publish --tag nightly
 }
@@ -747,13 +746,12 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 # builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-# FIXME bring this back after resolving flakiness
-# (cd $BUILD_HOME/extension && make)
-# error_trap 'build extension'
+(cd $BUILD_HOME/extension && make)
+error_trap 'build extension'
 
-# github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
 
-# builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # the latest macos or xcode messes up the package with the error
