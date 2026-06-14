@@ -536,6 +536,10 @@ error_trap 'localizations edit'
 error_trap 'localizations push branch'
 
 
+# give npm a bit of time to ingest the latest packages before we link against them
+sleep 30
+
+
 (cd $BUILD_HOME/extension &&
     npm_edit_module @urnetwork/elements &&
     npm_edit_module @urnetwork/localizations &&
