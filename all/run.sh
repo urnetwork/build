@@ -750,6 +750,7 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 error_trap 'build extension'
 
 github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}-firefox.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}-firefox.zip"
 
 builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
