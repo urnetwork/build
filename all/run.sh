@@ -41,7 +41,11 @@ warn_trap () {
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
 export BUILD_SED=gsed
-export BUILD_CURL=(curl -s -L)
+# -S/--fail-with-body: stay quiet on success, but on HTTP >= 400 fail with a
+# non-zero exit (so error_trap fires) while still printing the response body and
+# the curl error line. Without this, API errors (e.g. an expired GITHUB_API_KEY
+# returning 401) are swallowed and the release silently fails to upload/publish.
+export BUILD_CURL=(curl -s -S -L --fail-with-body)
 export BRINGYOUR_HOME=`realpath ..`
 if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
@@ -197,6 +201,10 @@ else
 fi
 export WARP_VERSION="${WARP_VERSION_BASE}+${WARP_VERSION_CODE}"
 export EXTERNAL_WARP_VERSION="${WARP_VERSION_BASE}-${WARP_VERSION_CODE}"
+# Browser extension stores (Chrome Web Store and addons.mozilla.org) require a
+# plain dotted version of 1-4 integers with no leading zeros and no suffix. They
+# reject the "-<version_code>".
+export EXTENSION_VERSION="$WARP_VERSION_BASE"
 
 
 # rebuild warpctl with the `WARP_*` env vars so we have the binary properly versioned
@@ -323,12 +331,20 @@ npm_edit_module () {
     jq --arg p "$1" 'del(.packages.["node_modules/" + $p])' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
 }
 
-npm_fork () {
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
-    jq --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
+# Set this fork's own package version. Defaults to EXTERNAL_WARP_VERSION (a valid
+# npm pre-release version). Pass an explicit version for targets like the browser
+# extension whose manifest must use the bare, store-compatible EXTENSION_VERSION.
+npm_fork_version () {
+    local v="${1:-$EXTERNAL_WARP_VERSION}"
+    jq --arg v "$v" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
+    jq --arg v "$v" '.version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
+    jq --arg v "$v" '.packages.[""].version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     # update package-lock.json
     npm install
+}
+
+npm_fork () {
+    npm_fork_version "$EXTERNAL_WARP_VERSION"
 }
 
 npm_fork_update () {
@@ -363,10 +379,30 @@ git_commit () {
     fi
 }
 
+# Create and push the annotated release tag for the current version.
+#
+# A version is published at most once, so a tag that already exists on origin means
+# something is wrong (a re-run, or a version-code collision). Fail loudly instead of
+# silently overwriting it -- this also avoids fighting a published immutable-release
+# tag lock.
+#
+# Pass "recreate" to deliberately move the tag to the current commit. This is only
+# used where the same version is re-tagged within a single run (the sdk re-tags
+# after its fork/lock files are regenerated). The caller must drop the local tag
+# first, which git_commit already does via `git tag -d`.
 git_tag () {
-    git push --delete origin refs/tags/v${EXTERNAL_WARP_VERSION} &&
-    git tag -a v${EXTERNAL_WARP_VERSION} -m "${EXTERNAL_WARP_VERSION}" &&
-    git push origin refs/tags/v${EXTERNAL_WARP_VERSION}
+    local tag="v${EXTERNAL_WARP_VERSION}"
+    if [ "$1" = "recreate" ]; then
+        git push --delete origin "refs/tags/$tag" &&
+        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}" &&
+        git push origin "refs/tags/$tag"
+    elif git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once). Pass 'recreate' to move it intentionally."
+        return 1
+    else
+        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}" &&
+        git push origin "refs/tags/$tag"
+    fi
 }
 
 
@@ -451,8 +487,9 @@ error_trap 'sdk edit'
     go_mod_fork_update 'build' &&
     npm_fork_update 'sdk-js' &&
     git_commit &&
-    # this recreates the tag but the module contents are unchanged
-    git_tag)
+    # re-tag the same version now that the fork/lock files above were regenerated;
+    # "recreate" intentionally moves the existing tag instead of failing on the duplicate
+    git_tag recreate)
 error_trap 'sdk push branch'
 
 (cd $BUILD_HOME/sdk/sdk-js &&
@@ -543,7 +580,7 @@ sleep 30
     npm_edit_module @urnetwork/elements &&
     npm_edit_module @urnetwork/localizations &&
     npm_edit_module @urnetwork/sdk-js &&
-    npm_fork)
+    npm_fork_version "$EXTENSION_VERSION")
 error_trap 'extension edit'
 
 (cd $BUILD_HOME/extension && 
@@ -749,10 +786,10 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 (cd $BUILD_HOME/extension && make)
 error_trap 'build extension'
 
-github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}.zip"
-github_release_upload "crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}-firefox.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTERNAL_WARP_VERSION}-firefox.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTENSION_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTENSION_VERSION}.zip"
+github_release_upload "crx-@urnetwork-extension-${EXTENSION_VERSION}-firefox.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTENSION_VERSION}-firefox.zip"
 
-builder_message "extension \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+builder_message "extension \`${EXTENSION_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # the latest macos or xcode messes up the package with the error
