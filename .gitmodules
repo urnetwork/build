@@ -40,3 +40,6 @@
 [submodule "extension"]
 	path = extension
 	url = git@github.com:urnetwork/extension.git
+[submodule "sn"]
+	path = sn
+	url = git@github.com:urfoundation/sn.git

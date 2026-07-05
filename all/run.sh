@@ -73,6 +73,7 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf sdk)
     (cd $BUILD_HOME && rm -rf android)
     (cd $BUILD_HOME && rm -rf apple)
+    (cd $BUILD_HOME && rm -rf sn)
     (cd $BUILD_HOME && rm -rf server)
     (cd $BUILD_HOME && rm -rf web)
     (cd $BUILD_HOME && rm -rf docs)
@@ -131,6 +132,8 @@ error_trap 'pull sdk'
 error_trap 'pull android'
 (cd $BUILD_HOME/apple && git_main)
 error_trap 'pull apple'
+(cd $BUILD_HOME/sn && git_main)
+error_trap 'pull sn'
 (cd $BUILD_HOME/server && git_main)
 error_trap 'pull server'
 (cd $BUILD_HOME/web && git_main)
@@ -223,6 +226,8 @@ error_trap 'sdk prepare version branch'
 error_trap 'android prepare version branch'
 (cd $BUILD_HOME/apple && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'apple prepare version branch'
+(cd $BUILD_HOME/sn && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'sn prepare version branch'
 (cd $BUILD_HOME/server && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'server prepare version branch'
 (cd $BUILD_HOME/web && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -497,6 +502,20 @@ error_trap 'sdk push branch'
 error_trap 'js-sdk publish'
 
 
+(cd $BUILD_HOME/sn &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_fork)
+error_trap 'sn edit'
+
+(cd $BUILD_HOME/sn &&
+    git_commit &&
+    git_tag)
+error_trap 'sn push branch'
+
+
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
@@ -504,12 +523,14 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk &&
+    go_mod_edit_require github.com/urfoundation/sn &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
+    go_edit_require_subpackages github.com/urfoundation/sn &&
     go_mod_fork)
 error_trap 'server edit'
 
