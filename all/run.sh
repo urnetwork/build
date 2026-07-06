@@ -506,6 +506,7 @@ error_trap 'js-sdk publish'
     go_mod_edit_module github.com/urfoundation/sn &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urfoundation/sn &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_mod_fork)
