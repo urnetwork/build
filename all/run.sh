@@ -503,6 +503,7 @@ error_trap 'js-sdk publish'
 
 
 (cd $BUILD_HOME/sn &&
+    go_mod_edit_module github.com/urfoundation/sn &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
