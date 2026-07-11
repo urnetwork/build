@@ -1,0 +1,7 @@
+# Never commit the build key, the Packer output image, UEFI vars, or ISOs.
+.ssh/
+output/
+*.iso
+*.qcow2
+*.fd
+packer_cache/

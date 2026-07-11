@@ -8,6 +8,10 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
+#
+# The Windows build image is built once, out of band, by build/all/windows/setup.sh
+# (which takes the Windows 11 ARM64 + virtio-win ISOs). run.sh only boots that image
+# and rsyncs the build home into it, so it needs no ISO env vars here.
 
 # note: if docker fails to build, try 1. removing all images then 2. pruning the build images:
 #       docker rmi `docker images -a -q`
@@ -158,6 +162,48 @@ error_trap 'pull localizations'
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
 
+    # Bring up the local test environment (postgres + redis on a dedicated
+    # loopback IP) for the duration of the tests. server/local/run-local.sh blocks
+    # in the foreground and restores /etc/hosts + tears down the containers on
+    # exit, so we background it, wait for the DBs to go healthy, run the tests,
+    # then stop it. NOTE: the build user needs passwordless sudo — run-local.sh
+    # edits /etc/hosts and adds a loopback alias.
+    builder_message "starting local test environment"
+    "$BUILD_HOME/server/local/run-local.sh" &
+    RUN_LOCAL_PID=$!
+    stop_local_env () {
+        if [ "$RUN_LOCAL_PID" ]; then
+            # Kill run-local's blocking child (`compose logs -f`) so its own trap
+            # runs the teardown (compose down + restore /etc/hosts + drop alias),
+            # and TERM the script itself; then wait for the teardown to finish.
+            pkill -TERM -P "$RUN_LOCAL_PID" 2>/dev/null
+            kill -TERM "$RUN_LOCAL_PID" 2>/dev/null
+            wait "$RUN_LOCAL_PID" 2>/dev/null
+            RUN_LOCAL_PID=""
+        fi
+    }
+    # Safety net: stop the env even if a test fails and error_trap exits the build.
+    trap stop_local_env EXIT
+
+    # Wait for the containers run-local.sh starts to become healthy (names are
+    # fixed in that script). Bail if run-local dies early.
+    local_env_up=""
+    for i in {1..180}; do
+        kill -0 "$RUN_LOCAL_PID" 2>/dev/null || break
+        pg_health=`docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' urnetwork-local-pg 2>/dev/null`
+        redis_health=`docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' urnetwork-local-redis 2>/dev/null`
+        if [ "$pg_health" = healthy ] && [ "$redis_health" = healthy ]; then
+            local_env_up=1
+            break
+        fi
+        sleep 1
+    done
+    if [ ! "$local_env_up" ]; then
+        builder_message "error: local test environment did not come up"
+        exit 1
+    fi
+    builder_message "local test environment ready"
+
     for m in `find $BUILD_HOME -type d -d 1 -exec basename {} \;`; do
         if [[ -e "$BUILD_HOME/$m/test.sh" ]]; then
             (cd $BUILD_HOME/$m && ./test.sh)
@@ -165,6 +211,11 @@ if [ "$BUILD_TEST" ]; then
             builder_message "$m tests passed."
         fi
     done
+
+    # Tests done — stop the local environment and clear the safety-net trap.
+    builder_message "stopping local test environment"
+    stop_local_env
+    trap - EXIT
 
     builder_message "Build all test candidate passed. A version number can now be assigned."
 fi
@@ -226,6 +277,10 @@ error_trap 'sdk prepare version branch'
 error_trap 'android prepare version branch'
 (cd $BUILD_HOME/apple && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'apple prepare version branch'
+(cd $BUILD_HOME/windows && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'windows prepare version branch'
+(cd $BUILD_HOME/linux && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'linux prepare version branch'
 (cd $BUILD_HOME/sn && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'sn prepare version branch'
 (cd $BUILD_HOME/server && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -473,6 +528,12 @@ error_trap 'proxy push branch'
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
+(cd $BUILD_HOME/sdk/js &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/sdk)
+error_trap 'sdk js edit'
+
 # TODO `-ldflags "-X sdk.Version=...` doesn't appear to work with gomobile
 # TODO we hardcode the sdk.Version for now
 (cd $BUILD_HOME/sdk &&
@@ -483,21 +544,22 @@ error_trap 'sdk build edit'
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
-    go_mod_fork 'build' 'sdk-js')
+    go_mod_fork 'build' 'js')
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
     git_commit &&
     git_tag &&
     go_mod_fork_update 'build' &&
-    npm_fork_update 'sdk-js' &&
+    go_mod_fork_update 'js' &&
+    npm_fork_update 'js' &&
     git_commit &&
     # re-tag the same version now that the fork/lock files above were regenerated;
     # "recreate" intentionally moves the existing tag instead of failing on the duplicate
     git_tag recreate)
 error_trap 'sdk push branch'
 
-(cd $BUILD_HOME/sdk/sdk-js &&
+(cd $BUILD_HOME/sdk/js &&
     npm_publish)
 error_trap 'js-sdk publish'
 
@@ -548,13 +610,25 @@ error_trap 'server push branch'
 error_trap 'android push branch'
 
 
-(cd $BUILD_HOME/apple && 
+(cd $BUILD_HOME/apple &&
     git_commit &&
     git_tag)
 error_trap 'apple push branch'
 
 
-(cd $BUILD_HOME/web && 
+(cd $BUILD_HOME/windows &&
+    git_commit &&
+    git_tag)
+error_trap 'windows push branch'
+
+
+(cd $BUILD_HOME/linux &&
+    git_commit &&
+    git_tag)
+error_trap 'linux push branch'
+
+
+(cd $BUILD_HOME/web &&
     git_commit &&
     git_tag)
 error_trap 'web push branch'
@@ -767,7 +841,7 @@ error_trap 'build sdk'
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
 github_release_upload "URnetworkSdk-sources-${EXTERNAL_WARP_VERSION}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.xcframework.zip" "$BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework.zip"
-github_release_upload "URnetworkSdkJs-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/build/js/URnetworkSdkJs.zip"
+github_release_upload "URnetworkSdkJs-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/js/build/URnetworkSdkJs.zip"
 
 builder_message "sdk \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
@@ -853,6 +927,79 @@ warn_trap 'macos deploy'
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
 builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+# =============================================================================
+# Desktop apps: Windows Store (MSI) + Snap Store (snap).
+# See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
+#
+# The SDK desktop libraries cross-build NATIVELY on this macOS host (sdk/cgo:
+# mingw-w64 + llvm-mingw for Windows, zig for Linux). The final app *bundles*
+# each need their own OS, both produced LOCALLY on this host via virtualization:
+# the MSI in a local QEMU/HVF ARM Windows VM (build/all/windows, image built once
+# with Packer); the snap in a Docker container (build/all/linux, Canonical
+# snapcraft rock, --destructive-mode per arch).
+#
+# Store SUBMISSION is manual for now: this pipeline builds the bundles and
+# attaches them to the GitHub release; a human submits the MSI to the Microsoft
+# Store (Partner Center) and the .snap to the Snap Store.
+# =============================================================================
+
+DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
+mkdir -p "$DESKTOP_OUT/windows" "$DESKTOP_OUT/linux"
+
+# --- SDK desktop libraries (native macOS cross-build) ---
+# One-time server provisioning installs the cross toolchains: (cd sdk/cgo && make init)
+(cd $BUILD_HOME/sdk/cgo && WARP_VERSION=$WARP_VERSION make build_windows build_linux)
+error_trap 'build sdk desktop libraries'
+github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
+github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+
+# --- Windows app MSI (local QEMU ARM Windows VM; one VM cross-builds x64+arm64) ---
+# Built in a local, HVF-accelerated Windows-on-ARM VM (image built once by
+# setup.sh, booted here as a CoW overlay), NOT a remote host — see
+# build/all/windows/README.md. build.sh boots the VM, rsyncs the whole local build
+# home into it (all repos, on the version branch run.sh just checked out), delivers
+# the SDK zip, runs build.ps1 (msbuild x64+ARM64 -> sign -> WiX MSI -> sign) over
+# ssh, retrieves the MSIs, and shuts the VM down. One-time image build:
+# build/all/windows/setup.sh (Docker Desktop for Mac exposes no /dev/kvm, so
+# dockur/windows can't be used).
+builder_message "building windows app (local QEMU ARM Windows VM)"
+# Non-blocking: a flaky VM/build must NOT sink the release. On failure, warn and
+# skip the artifact (don't upload a stale/partial MSI); the pipeline continues.
+# BUILD_HOME is exported above; build.sh rsyncs it into the VM.
+if SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip" \
+   OUT_DIR="$DESKTOP_OUT/windows" \
+   VERSION="$EXTERNAL_WARP_VERSION" \
+       "$BUILD_HOME/build/all/windows/build.sh"; then
+    for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
+        github_release_upload "$(basename "$msi")" "$msi"
+    done
+    builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+else
+    builder_message "warning: windows app build did not finish — skipping the MSI artifact (release continues)"
+fi
+
+# --- Linux snap (amd64 + arm64) ---
+# The Linux app is now C++/GTK4 (not Go), built via the Canonical snapcraft rock
+# in Docker (build/all/linux) — no Launchpad, no go mod vendor. arm64 builds
+# native on this host; amd64 builds under Docker's qemu emulation. build.sh
+# stamps the version, stages the cgo SDK zip into third_party, and packs each
+# arch with `snapcraft --destructive-mode`. See build/all/linux/README.md.
+builder_message "building linux snap (C++/GTK4 via snapcraft rock container)"
+# Non-blocking (same policy as windows): warn + skip the artifact on failure.
+if LINUX_APP_DIR="$BUILD_HOME/linux/app" \
+   SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip" \
+   OUT_DIR="$DESKTOP_OUT/linux" \
+   VERSION="$EXTERNAL_WARP_VERSION" \
+       "$BUILD_HOME/build/all/linux/build.sh"; then
+    for snap in "$DESKTOP_OUT/linux/"*.snap(N); do
+        github_release_upload "$(basename "$snap")" "$snap"
+    done
+    builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+else
+    builder_message "warning: linux snap build did not finish — skipping the .snap artifact (release continues)"
+fi
 
 
 (cd $BUILD_HOME/android/app &&

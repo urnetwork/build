@@ -43,3 +43,9 @@
 [submodule "sn"]
 	path = sn
 	url = git@github.com:urfoundation/sn.git
+[submodule "linux"]
+	path = linux
+	url = git@github.com:urnetwork/linux.git
+[submodule "windows"]
+	path = windows
+	url = git@github.com:urnetwork/windows.git

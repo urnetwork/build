@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Direct QEMU boot test for the Windows 11 ARM64 install ISO — a diagnostic for
+# setup.sh (usb-storage + bootindex drive layout, password-protected VNC).
+#
+# Run:   bash TESTCOMMAND.txt
+# Watch: open vnc://127.0.0.1:5901      (password: windows)
+#
+# When "Press any key to boot from CD or DVD..." shows in Screen Sharing, press a
+# key; Windows Setup should start (language screen — this test has no autounattend).
+set -eu
+
+ISO=/Users/brien/urnetwork/xops/windows/Win11_25H2_English_Arm64_v2.iso
+VIRTIO=/Users/brien/urnetwork/xops/windows/virtio-win-0.1.285.iso
+UEFI_CODE=/opt/homebrew/share/qemu/edk2-aarch64-code.fd
+UEFI_VARS=/opt/homebrew/share/qemu/edk2-arm-vars.fd
+
+# fresh scratch disk + writable UEFI vars each run
+rm -f /tmp/efivars.fd /tmp/wintest.qcow2
+cp "$UEFI_VARS" /tmp/efivars.fd
+qemu-img create -f qcow2 /tmp/wintest.qcow2 90G
+
+echo ">>> booting — connect: open vnc://127.0.0.1:5901  (password: windows)"
+
+exec qemu-system-aarch64 \
+  -machine virt -accel hvf -cpu host -smp 4 -m 8192 \
+  -drive if=pflash,format=raw,readonly=on,file="$UEFI_CODE" \
+  -drive if=pflash,format=raw,file=/tmp/efivars.fd \
+  -device ramfb -device qemu-xhci -device usb-kbd -device usb-tablet \
+  -device nvme,drive=system,serial=urnvme \
+  -drive if=none,id=system,file=/tmp/wintest.qcow2,format=qcow2 \
+  -device usb-bot,id=usbcd \
+  -device scsi-cd,bus=usbcd.0,drive=install \
+  -drive if=none,id=install,media=cdrom,file="$ISO" \
+  -device usb-storage,drive=drivers \
+  -drive if=none,id=drivers,media=cdrom,file="$VIRTIO" \
+  -object secret,id=vncpw,data=windows \
+  -vnc 127.0.0.1:1,password-secret=vncpw
