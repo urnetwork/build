@@ -22,12 +22,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-dev \
         nlohmann-json3-dev \
         gettext \
+        libwebkitgtk-6.0-dev \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # *important* gettext (msgfmt) is required, not optional: meson's i18n module
 # SILENTLY disables translations when msgfmt is missing — the build still
 # succeeds and the snap ships english-only, with no error to notice.
+
+# *important* libwebkitgtk-6.0-dev is likewise a soft dependency: meson
+# (required: false) SILENTLY builds the app without the embedded Stripe
+# checkout webview when it is missing — the build still succeeds and upgrade
+# quietly falls back to the hosted checkout in the browser, with no error to
+# notice.
 
 # The rock's entrypoint is `snapcraft`; args passed to `docker run` are forwarded
 # to it (e.g. `pack --destructive-mode --build-for arm64`).

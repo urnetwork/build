@@ -77,13 +77,30 @@ win_make_autounattend_iso() {  # -> echoes the iso path
   echo "$out"
 }
 
-# Send Enter to the VM's QEMU monitor for a while, to answer the Windows
-# "Press any key to boot from CD or DVD..." El-Torito prompt during install.
+# Send one command to the VM's QEMU monitor. Pinned to /usr/bin/nc: a PATH
+# netcat variant (ncat, gnu) can sit forever reading the open monitor
+# connection after stdin EOF, which would wedge the caller's loop on its
+# first send; Apple's nc with an idle timeout always returns.
+win_mon() {  # win_mon MON_SOCK CMD
+  local sock="$1" cmd="$2"
+  [ -S "$sock" ] || return 0
+  printf '%s\n' "$cmd" | /usr/bin/nc -w 1 -U "$sock" >/dev/null 2>&1 || true
+}
+
+# Tap Enter to answer the edk2 "Press any key to boot from CD or DVD..."
+# El-Torito prompt during install. Timed against this exact firmware+ISO
+# (captured live over the QEMU monitor): the prompt opens ~9s after power-on
+# and closes ~13s; miss it and edk2 falls straight through to the UEFI shell
+# (startup.nsh -> "Shell>") and sits there forever — the install never starts.
+# So tap once a second from power-on through ~30s: dense enough that the ~4s
+# window is caught even if a slower host shifts it later, yet finished well
+# before Windows Setup's GUI paints (~50s+), whose focused Cancel button would
+# turn a stray Enter into a "quit setup?" dialog.
 win_press_any_key() {  # win_press_any_key MON_SOCK
   local sock="$1" i
-  for i in $(seq 1 25); do
-    [ -S "$sock" ] && printf 'sendkey ret\n' | nc -U "$sock" >/dev/null 2>&1
-    sleep 2
+  for i in $(seq 1 30); do
+    win_mon "$sock" "sendkey ret"
+    sleep 1
   done
 }
 
@@ -129,7 +146,13 @@ win_install_image() {
   ( win_press_any_key "$mon" ) &
 
   echo ">>> waiting for the unattended install to finish (install + OOBE + first logon; can take a while)"
-  win_wait_ssh 480 || { echo "install did not come up (watch VNC 5901)" >&2; return 1; }
+  if ! win_wait_ssh 480; then
+    # Grab what the VM was showing so a headless failure is diagnosable later.
+    mkdir -p "$WIN_HERE/output"
+    win_mon "$mon" "screendump $WIN_HERE/output/install-fail.ppm"
+    echo "install did not come up; last screen saved to $WIN_HERE/output/install-fail.ppm" >&2
+    return 1
+  fi
   # Leave the VM running: the install writes directly to $IMAGE (the NVMe disk),
   # so the caller provisions the toolchain over ssh into the same image, then
   # shuts down (win_shutdown_vm) to finalize it.
