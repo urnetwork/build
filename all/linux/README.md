@@ -42,7 +42,11 @@ remote-build, no snapd, no LXD, no VM.
 
 ## Run standalone (outside the release pipeline)
 
-Docker `-v` needs absolute paths, so resolve them (BUILD_HOME is the repo root):
+The easy entry point is `../build-linux.sh`, which uses the local branches
+as-is, derives the version from the `linux` repo's `v<version>` branch, builds
+the cgo SDK zip, and then calls this `build.sh`. To drive `build.sh` directly
+instead: Docker `-v` needs absolute paths, so resolve them (BUILD_HOME is the
+repo root):
 
 ```bash
 BUILD_HOME=$(cd ../../.. && pwd) \
@@ -54,8 +58,9 @@ VERSION=0.0.1 \
 # ARCHES="arm64" ./build.sh   # to build a single arch
 ```
 
-`build/all/run.sh` invokes this after the macOS app build; the resulting `.snap`
-files are uploaded to the GitHub release. **Snap Store submission is manual.**
+`build/all/build-linux.sh` (run.sh's linux build part) invokes this after the
+macOS app build; the resulting `.snap` files are uploaded to the GitHub release.
+**Snap Store submission is manual.**
 
 ## Notes
 

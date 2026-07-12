@@ -92,23 +92,31 @@ point to), `run.sh` runs `go mod vendor` first — the replaces resolve against 
 alongside checkouts, vendoring the deps into `linux/app/vendor/` so the snap
 build is fully self-contained (no network module fetches on Launchpad).
 
-## run.sh flow (added after the SDK build)
+## run.sh flow (added after the macOS app build)
+
+Each platform's build lives in its own script — `all/build-windows.sh` and
+`all/build-linux.sh` — which run.sh calls non-blocking (a flaky desktop build
+warns and skips that platform's artifacts instead of sinking the release):
 
 ```sh
-# SDK desktop libraries — native on macOS
-(cd $BUILD_HOME/sdk/cgo && make init build_windows build_linux)   # mingw/llvm-mingw/zig
-github_release_upload "URnetworkSdkWindows-${V}.zip" .../URnetworkSdkWindows.zip
-github_release_upload "URnetworkSdkLinux-${V}.zip"   .../URnetworkSdkLinux.zip
+# all/build-windows.sh: cgo SDK zip (native macOS cross-build: mingw/llvm-mingw)
+#                       + MSIs (x64+arm64) in the local QEMU/HVF ARM Windows VM
+if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
+    github_release_upload "URnetworkSdkWindows-${V}.zip" ...
+    github_release_upload URnetwork-*.msi ...   # (then submit to the Store manually)
+fi
 
-# Windows MSI — on the ARM Windows VM over ssh (skipped if WINDOWS_BUILD_HOST unset)
-ssh "$WINDOWS_BUILD_HOST" powershell -File build.ps1 -Version $V -SdkZip ...
-scp  "$WINDOWS_BUILD_HOST:.../URnetwork-*.msi" $BUILD_OUT/
-github_release_upload   # (then submit to the Store manually)
-
-# Linux snap — remote-build (skipped if SNAP_BUILD unset)
-(cd $BUILD_HOME/linux/app && snapcraft remote-build ... )
-github_release_upload   # (then submit to the Snap Store manually)
+# all/build-linux.sh: cgo SDK zip (native macOS cross-build: zig)
+#                     + snaps (amd64+arm64) in the snapcraft rock container
+if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
+    github_release_upload "URnetworkSdkLinux-${V}.zip" ...
+    github_release_upload urnetwork_*.snap ...  # (then submit to the Snap Store manually)
+fi
 ```
+
+Both scripts use the local branches AS-IS (run.sh configures the `v<version>`
+branches earlier in the run) and also run standalone — see
+`all/{windows,linux}/README.md`.
 
 ## Store submission: manual for now
 

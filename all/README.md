@@ -53,3 +53,20 @@ Full list in the header of `run.sh`. Desktop-specific:
 
 - `WINDOWS_ISO` / `VIRTIO_ISO` — only for the **first** Windows image build
   (reused after; `windows/setup.sh` can also build it out of band).
+
+## Rebuilding just one platform's artifacts
+
+`build-windows.sh`, `build-linux.sh`, and `build-fdroid.sh` are the extracted
+build parts of `run.sh`. They use the local branches AS-IS — no pulls, no
+checkouts, no version staging — so after a release run has configured the
+version branches, re-run one standalone, e.g. when a VM or container build
+flaked. Uploading to the GitHub release stays in `run.sh`.
+
+- `build-windows.sh` / `build-linux.sh` — the cgo SDK zip + the app bundle
+  (MSIs / snaps). The version comes off the `windows`/`linux` repo's
+  `v<version>` branch (or `EXTERNAL_WARP_VERSION` / `WARP_VERSION` from the
+  env); artifacts land in `${BUILD_OUT:-<build home>/out}/desktop/` (override
+  with `OUT_DIR`).
+- `build-fdroid.sh` — the android github/ungoogle flavor APKs, built in the
+  F-Droid buildserver container. Needs `WARP_HOME` and the android repo on its
+  `v<version>-ungoogle` branch; APKs land in the android gradle outputs dir.

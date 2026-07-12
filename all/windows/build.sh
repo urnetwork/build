@@ -6,7 +6,7 @@
 #
 # Each run boots a copy-on-write OVERLAY of the base image, so the base stays
 # pristine. The VM lifecycle helpers are shared with setup.sh via lib.sh.
-# Called by build/all/run.sh.
+# Called by build/all/build-windows.sh (run.sh's windows build part).
 #
 # Inputs (env):
 #   BUILD_HOME  the build server's local build dir (all repos, on their correct

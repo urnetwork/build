@@ -21,8 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libadwaita-1-dev \
         libglib2.0-dev \
         nlohmann-json3-dev \
+        gettext \
         unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# *important* gettext (msgfmt) is required, not optional: meson's i18n module
+# SILENTLY disables translations when msgfmt is missing — the build still
+# succeeds and the snap ships english-only, with no error to notice.
 
 # The rock's entrypoint is `snapcraft`; args passed to `docker run` are forwarded
 # to it (e.g. `pack --destructive-mode --build-for arm64`).

@@ -8,6 +8,10 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
+# (optional) CONNECT_IP_UPDATE set (non-empty) to regenerate the connect IP
+#            tables (security + blocker) from the live feeds before the tests
+#            run, then push them to connect main (commit message stamped with
+#            the release version) before the version branches are cut
 #
 # The Windows build image is built once, out of band, by build/all/windows/setup.sh
 # (which takes the Windows 11 ARM64 + virtio-win ISOs). run.sh only boots that image
@@ -159,6 +163,36 @@ error_trap 'pull elements'
 (cd $BUILD_HOME/localizations && git_main)
 error_trap 'pull localizations'
 
+# refresh the generated connect IP tables from the live threat feeds:
+# security/main.go -> ip_security_cfaa_block.go, blocker/main.go -> ip_blocker_block.go.
+# Runs while every repo is still on main so the tests below exercise the update.
+# The commit + push to connect main happens after the release version is staged
+# (the commit message carries it) and before the version branches are cut — see
+# the matching CONNECT_IP_UPDATE block below.
+if [ "$CONNECT_IP_UPDATE" ]; then
+    builder_message "updating the generated connect ip tables (security + blocker)"
+    (cd $BUILD_HOME/connect &&
+        go run ./security &&
+        go run ./blocker)
+    error_trap 'connect ip update'
+fi
+
+# regenerate every app's strings from the shared localization store:
+# localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
+# windows .resw, linux .po. Runs while every repo is still on main (localizations
+# included, pulled above) so the tests below exercise the freshly generated
+# strings. Unlike the connect IP tables this is not flag-gated — the store is the
+# single source of truth, so the generated files must match it on every build.
+# The codegen is byte-stable, so an unchanged store produces no commit below.
+# The commit + push to each app repo happens after the release version is staged
+# (the commit message carries it) and before the version branches are cut — see
+# the matching localizations block below.
+builder_message "generating app localizations from the shared store"
+(cd $BUILD_HOME/localizations &&
+    npm ci --silent &&
+    URNETWORK_ROOT="$BUILD_HOME" npm run gen)
+error_trap 'localizations codegen'
+
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
 
@@ -267,6 +301,56 @@ error_trap 'build warpctl'
 
 
 builder_message "Build all \`${EXTERNAL_WARP_VERSION}\`"
+
+
+# push the connect IP table update (generated before the tests above) to connect
+# main, stamped with the release version, before the version branches below are
+# cut from it. Stage only the generated tables, never a blanket add.
+if [ "$CONNECT_IP_UPDATE" ]; then
+    (cd $BUILD_HOME/connect &&
+        git add ip_security_cfaa_block.go ip_blocker_block.go &&
+        if ! git diff --cached --quiet; then
+            git commit -m "${EXTERNAL_WARP_VERSION} ip security and blocker update" &&
+            git push
+        fi)
+    error_trap 'connect ip update push'
+fi
+
+
+# push the regenerated localizations (generated before the tests above) to each
+# app repo's main, stamped with the release version, before the version branches
+# below are cut from them. Stage only the generated paths — never a blanket add:
+# these are app repos, and `git add .` here would sweep any unrelated working-tree
+# change into the release commit. Guarding on the *staged* diff also means a build
+# where nothing changed pushes nothing.
+(cd $BUILD_HOME/android &&
+    git add 'app/app/src/main/res/values*/strings.xml' &&
+    if ! git diff --cached --quiet; then
+        git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
+        git push
+    fi)
+error_trap 'android localizations push'
+(cd $BUILD_HOME/apple &&
+    git add app/network/Shared/Resources/Localizable.xcstrings &&
+    if ! git diff --cached --quiet; then
+        git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
+        git push
+    fi)
+error_trap 'apple localizations push'
+(cd $BUILD_HOME/windows &&
+    git add app/src/App/Strings &&
+    if ! git diff --cached --quiet; then
+        git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
+        git push
+    fi)
+error_trap 'windows localizations push'
+(cd $BUILD_HOME/linux &&
+    git add app/po &&
+    if ! git diff --cached --quiet; then
+        git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
+        git push
+    fi)
+error_trap 'linux localizations push'
 
 
 (cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -933,12 +1017,20 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.c
 # Desktop apps: Windows Store (MSI) + Snap Store (snap).
 # See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
 #
-# The SDK desktop libraries cross-build NATIVELY on this macOS host (sdk/cgo:
-# mingw-w64 + llvm-mingw for Windows, zig for Linux). The final app *bundles*
-# each need their own OS, both produced LOCALLY on this host via virtualization:
-# the MSI in a local QEMU/HVF ARM Windows VM (build/all/windows, image built once
-# with Packer); the snap in a Docker container (build/all/linux, Canonical
-# snapcraft rock, --destructive-mode per arch).
+# Each platform builds via its own script (all/build-windows.sh,
+# all/build-linux.sh): the cgo SDK zip cross-builds NATIVELY on this macOS host
+# (sdk/cgo: mingw-w64 + llvm-mingw for Windows, zig for Linux), then the app
+# *bundle* is produced LOCALLY on this host via virtualization — the MSI in a
+# QEMU/HVF ARM Windows VM (build/all/windows, image built once by setup.sh);
+# the snap in a Docker container (build/all/linux, Canonical snapcraft rock,
+# --destructive-mode per arch). The scripts use the local branches as-is (the
+# version branches configured above) and inherit BUILD_HOME + the WARP_*
+# versions exported above; they can also be re-run standalone after this
+# pipeline, e.g. when a flaky VM/container build needs a retry.
+#
+# Non-blocking: a flaky desktop build must NOT sink the release. On failure,
+# warn and skip that platform's artifacts (don't upload stale/partial ones);
+# the pipeline continues.
 #
 # Store SUBMISSION is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
@@ -946,59 +1038,27 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.c
 # =============================================================================
 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
-mkdir -p "$DESKTOP_OUT/windows" "$DESKTOP_OUT/linux"
 
-# --- SDK desktop libraries (native macOS cross-build) ---
-# One-time server provisioning installs the cross toolchains: (cd sdk/cgo && make init)
-(cd $BUILD_HOME/sdk/cgo && WARP_VERSION=$WARP_VERSION make build_windows build_linux)
-error_trap 'build sdk desktop libraries'
-github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
-github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
-
-# --- Windows app MSI (local QEMU ARM Windows VM; one VM cross-builds x64+arm64) ---
-# Built in a local, HVF-accelerated Windows-on-ARM VM (image built once by
-# setup.sh, booted here as a CoW overlay), NOT a remote host — see
-# build/all/windows/README.md. build.sh boots the VM, rsyncs the whole local build
-# home into it (all repos, on the version branch run.sh just checked out), delivers
-# the SDK zip, runs build.ps1 (msbuild x64+ARM64 -> sign -> WiX MSI -> sign) over
-# ssh, retrieves the MSIs, and shuts the VM down. One-time image build:
-# build/all/windows/setup.sh (Docker Desktop for Mac exposes no /dev/kvm, so
-# dockur/windows can't be used).
-builder_message "building windows app (local QEMU ARM Windows VM)"
-# Non-blocking: a flaky VM/build must NOT sink the release. On failure, warn and
-# skip the artifact (don't upload a stale/partial MSI); the pipeline continues.
-# BUILD_HOME is exported above; build.sh rsyncs it into the VM.
-if SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip" \
-   OUT_DIR="$DESKTOP_OUT/windows" \
-   VERSION="$EXTERNAL_WARP_VERSION" \
-       "$BUILD_HOME/build/all/windows/build.sh"; then
+builder_message "building windows app (cgo sdk + MSI in the local QEMU ARM Windows VM)"
+if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
+    github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
     for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
         github_release_upload "$(basename "$msi")" "$msi"
     done
     builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 else
-    builder_message "warning: windows app build did not finish — skipping the MSI artifact (release continues)"
+    builder_message "warning: windows build did not finish — skipping the windows sdk + MSI artifacts (release continues)"
 fi
 
-# --- Linux snap (amd64 + arm64) ---
-# The Linux app is now C++/GTK4 (not Go), built via the Canonical snapcraft rock
-# in Docker (build/all/linux) — no Launchpad, no go mod vendor. arm64 builds
-# native on this host; amd64 builds under Docker's qemu emulation. build.sh
-# stamps the version, stages the cgo SDK zip into third_party, and packs each
-# arch with `snapcraft --destructive-mode`. See build/all/linux/README.md.
-builder_message "building linux snap (C++/GTK4 via snapcraft rock container)"
-# Non-blocking (same policy as windows): warn + skip the artifact on failure.
-if LINUX_APP_DIR="$BUILD_HOME/linux/app" \
-   SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip" \
-   OUT_DIR="$DESKTOP_OUT/linux" \
-   VERSION="$EXTERNAL_WARP_VERSION" \
-       "$BUILD_HOME/build/all/linux/build.sh"; then
+builder_message "building linux snap (cgo sdk + C++/GTK4 snap via snapcraft rock container)"
+if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
+    github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
     for snap in "$DESKTOP_OUT/linux/"*.snap(N); do
         github_release_upload "$(basename "$snap")" "$snap"
     done
     builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 else
-    builder_message "warning: linux snap build did not finish — skipping the .snap artifact (release continues)"
+    builder_message "warning: linux snap build did not finish — skipping the linux sdk + snap artifacts (release continues)"
 fi
 
 
@@ -1064,19 +1124,10 @@ error_trap 'push ungoogle branch'
     git push origin v${EXTERNAL_WARP_VERSION}-ungoogle)
 error_trap 'push ungoogle tag'
 
-# build in the fdroid server context
+# build in the fdroid server context (all/build-fdroid.sh — uses the ungoogle
+# branch state configured above; also runs standalone)
 # ideally this should not be required, but there are some small differences in the android artifacts apparently due to build environment (macos/arm versus linux/amd perhaps)
-# FIXME - there is currently a bug on apple m4 that causes an "invalid instruction" error when using the docker apple virtualization framework
-#         see https://github.com/golang/go/issues/71434
-#         The docker vmm framework is a work around, but it is very slow for amd64.
-#         Run on an m1 or intel mac for now.
-(cd $BUILD_HOME &&
-    docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver &&
-    docker run --oom-kill-disable --memory="8192m" --rm -u vagrant \
-        --entrypoint /urnetwork/build/fdroid/build.sh \
-        -v $WARP_HOME/release:/urnetwork/release:z \
-        -v $BUILD_HOME:/urnetwork/build:Z \
-        registry.gitlab.com/fdroid/fdroidserver:buildserver)
+"$BUILD_HOME/all/build-fdroid.sh"
 error_trap 'android github build'
 
 # upload github as the "official" apk which lexicograhpically sorts to the front, for release systems like Obtanium
@@ -1142,6 +1193,10 @@ error_trap 'android github arm64-v8a reproducible pre-release'
 error_trap 'warpctl build config-updater'
 builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
 
+(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/grafana/Makefile)
+error_trap 'warpctl build grafana'
+builder_message "service grafana \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
 builder_message "service lb \`${EXTERNAL_WARP_VERSION}\` available"
@@ -1190,7 +1245,9 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     # `--percent=XX of the config-updates does not cover all the blocks of `--percent=XX` for other services
     warpctl deploy $BUILD_ENV config-updater ${WARP_VERSION} --percent=100 --only-older
     builder_message "${BUILD_ENV}[100%] config-updater \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-
+    # fully deploy the new grafana
+    warpctl deploy $BUILD_ENV grafana ${WARP_VERSION} --percent=100 --only-older
+    builder_message "${BUILD_ENV}[100%] grafana \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
 
     warpctl deploy $BUILD_ENV lb ${WARP_VERSION} --percent=25 --only-older
     builder_message "${BUILD_ENV}[25%] lb \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"

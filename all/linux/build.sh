@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the URnetwork Linux snap for amd64 + arm64 in Docker (Canonical snapcraft
 # rock, --destructive-mode). Runs on the macOS build host; arm64 builds native,
-# amd64 builds under qemu emulation. Called by build/all/run.sh.
+# amd64 builds under qemu emulation. Called by build/all/build-linux.sh
+# (run.sh's linux build part).
 #
 # Inputs (env):
 #   BUILD_HOME      the build server's local build dir (all repos) — bind-mounted
