@@ -143,3 +143,18 @@ aarch64 Windows-on-QEMU is finicky; the knobs most likely to need adjusting:
 
 Microsoft publishes an official **Windows 11 ARM64 ISO** (Software Download site).
 Activation for a private build VM is the operator's call.
+
+**Use the 24H2 ARM64 ISO, not 25H2.** The **25H2** ARM64 build (e.g.
+`Win11_25H2_English_Arm64_v2.iso`) installs its first phase fine but then
+**hangs at the firmware splash on the first boot of the installed OS** — the
+display freezes on the TianoCore/"Start boot option" screen with a vCPU pinned
+and no further disk writes; the install never reaches OOBE or ssh, so
+`setup.sh` times out at `win_wait_ssh`. The **24H2** ARM64 build
+(`Win11_24H2_English_Arm64.iso`) boots through to the desktop and runs the
+FirstLogonCommands (NetKVM + sshd) on the same QEMU/edk2 device layout, so the
+image builds. Verified 2026-07-12 by installing both on the identical layout
+(edk2 `edk2-aarch64-code.fd`, ramfb + usb-bot CD + NVMe): 25H2 hung at first
+boot every time; 24H2 reached the desktop. If a future 25H2/26xx ISO is
+required, this first-boot hang must be re-investigated (suspect the edk2/UEFI
+handoff or a 25H2 boot-driver expectation) — it is NOT the "press any key to
+boot from CD" prompt, which `lib.sh:win_press_any_key` handles.

@@ -77,28 +77,50 @@ win_make_autounattend_iso() {  # -> echoes the iso path
   echo "$out"
 }
 
-# Send one command to the VM's QEMU monitor. Pinned to /usr/bin/nc: a PATH
-# netcat variant (ncat, gnu) can sit forever reading the open monitor
-# connection after stdin EOF, which would wedge the caller's loop on its
-# first send; Apple's nc with an idle timeout always returns.
-win_mon() {  # win_mon MON_SOCK CMD
+# Send one command to the VM's QEMU monitor and echo its reply. Pinned to
+# /usr/bin/nc: a PATH netcat variant (ncat, gnu) can sit forever reading the
+# open monitor connection after stdin EOF, which would wedge the caller's loop
+# on its first send; Apple's nc with an idle timeout always returns.
+win_mon_out() {  # win_mon_out MON_SOCK CMD  -> monitor reply on stdout
   local sock="$1" cmd="$2"
   [ -S "$sock" ] || return 0
-  printf '%s\n' "$cmd" | /usr/bin/nc -w 1 -U "$sock" >/dev/null 2>&1 || true
+  printf '%s\n' "$cmd" | /usr/bin/nc -w 1 -U "$sock" 2>/dev/null || true
 }
 
-# Tap Enter to answer the edk2 "Press any key to boot from CD or DVD..."
-# El-Torito prompt during install. Timed against this exact firmware+ISO
-# (captured live over the QEMU monitor): the prompt opens ~9s after power-on
-# and closes ~13s; miss it and edk2 falls straight through to the UEFI shell
-# (startup.nsh -> "Shell>") and sits there forever — the install never starts.
-# So tap once a second from power-on through ~30s: dense enough that the ~4s
-# window is caught even if a slower host shifts it later, yet finished well
-# before Windows Setup's GUI paints (~50s+), whose focused Cancel button would
-# turn a stray Enter into a "quit setup?" dialog.
+# Send a monitor command, discarding the reply.
+win_mon() {  # win_mon MON_SOCK CMD
+  win_mon_out "$1" "$2" >/dev/null
+}
+
+# Read one drive's cumulative byte counter from `info blockstats`. Args:
+# MON_SOCK DRIVE_ID FIELD(rd_bytes|wr_bytes). Echoes an integer, empty if not
+# yet readable. Device lines are "installcd: rd_bytes=N wr_bytes=N ...".
+win_mon_blockbytes() {  # -> integer (maybe empty)
+  win_mon_out "$1" "info blockstats" | tr -d '\r' \
+    | grep "$2:" | grep -oE "$3=[0-9]+" | head -1 | cut -d= -f2
+}
+
+# Answer the one-time edk2 "Press any key to boot from CD or DVD..." El-Torito
+# prompt, then STOP. The prompt appears only on the FIRST boot (empty NVMe),
+# opens ~9s after power-on, and stays up only ~4-5s; miss it and edk2 falls
+# through to the UEFI shell ("Shell>") and hangs forever — the install never
+# starts. But the prompt's wall-clock position varies with host speed, and once
+# Windows Setup's GUI paints, a stray Enter lands on its focused Cancel button
+# and opens a "quit setup?" dialog (seen on a fast build host where the GUI
+# appeared within 30s). A fixed tap window is fragile at both ends, so instead
+# tap Enter once a second but stop the instant the installer is demonstrably
+# booting — the CD streams boot.wim (installcd rd_bytes jumps past ~50MB) or
+# Setup starts writing the NVMe (sysdisk wr_bytes climbs). Both cross well
+# before any interactive screen, so no tap ever reaches the Cancel button. The
+# iteration cap only backstops a monitor/parse failure.
 win_press_any_key() {  # win_press_any_key MON_SOCK
-  local sock="$1" i
-  for i in $(seq 1 30); do
+  local sock="$1" i rd wr
+  for i in $(seq 1 60); do
+    rd="$(win_mon_blockbytes "$sock" installcd rd_bytes)"
+    wr="$(win_mon_blockbytes "$sock" sysdisk wr_bytes)"
+    if [ "${rd:-0}" -gt 52428800 ] || [ "${wr:-0}" -gt 10485760 ]; then
+      return 0   # installer is booting/installing — the prompt was answered
+    fi
     win_mon "$sock" "sendkey ret"
     sleep 1
   done
