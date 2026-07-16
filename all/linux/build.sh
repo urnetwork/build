@@ -54,26 +54,32 @@ for arch in ${ARCHES}; do
   # Build the per-arch builder image (deps baked in; layer-cached across runs).
   docker build --platform "linux/${arch}" -t "${image_base}:${arch}" "${here}"
 
-  # snapcraft runs as the rock's entrypoint; args after the image go to snapcraft.
-  # --destructive-mode builds directly in the container (arch == container arch).
+  # snapcraft (--destructive-mode) builds in-container and resolves the project at
+  # /project. /project must NOT be the Docker bind mount of the macOS source:
+  # craft-parts writes user.* xattrs into parts/ when extracting stage-packages, and
+  # the bind-mount FS (Docker virtiofs) rejects them ("Failed to write attribute
+  # 'user.craft_parts.origin_stage_package'"). So mount the source READ-ONLY at /src,
+  # copy it into a container-local /project (the overlay FS supports xattrs), build
+  # there, and copy the .snap out to the writable OUT_DIR mount. fetch-deps.sh already
+  # staged the cgo SDK into linux/app/third_party, so /project is self-contained.
+  # We override the rock entrypoint (run-snapcraft.sh) with bash, so do its `apt
+  # update` ourselves (the image cleared /var/lib/apt/lists).
   docker run --rm --platform "linux/${arch}" -u root \
-    -v "${BUILD_HOME}:/build" -w "/build/${proj_rel}" \
+    -v "${LINUX_APP_DIR}:/src:ro" -v "${OUT_DIR}:/out" \
+    --entrypoint /bin/bash \
     "${image_base}:${arch}" \
-    pack --destructive-mode --build-for "${arch}" --verbosity verbose
+    -c "set -eu; mkdir -p /project && cp -a /src/. /project/ && cd /project && rm -rf parts stage prime ./*.snap; apt-get update >/dev/null 2>&1 || true; snapcraft pack --destructive-mode --build-for '${arch}' --verbosity verbose && cp -f /project/*.snap /out/"
 
-  # Collect the arch's snap (snapcraft names it urnetwork_<version>_<arch>.snap).
-  snap_file="$(ls -t "${LINUX_APP_DIR}/"*"_${arch}.snap" 2>/dev/null | head -1 || true)"
+  # The container copied the snap (urnetwork_<version>_<arch>.snap) into OUT_DIR.
+  snap_file="$(ls -t "${OUT_DIR}/"*"_${arch}.snap" 2>/dev/null | head -1 || true)"
   if [ -z "${snap_file}" ]; then
-    # fall back to any freshly built snap
-    snap_file="$(ls -t "${LINUX_APP_DIR}/"*.snap 2>/dev/null | head -1 || true)"
+    snap_file="$(ls -t "${OUT_DIR}/"*.snap 2>/dev/null | head -1 || true)"
   fi
   if [ -z "${snap_file}" ]; then
     echo "ERROR: no .snap produced for ${arch}" >&2
     exit 1
   fi
-  cp "${snap_file}" "${OUT_DIR}/"
-  echo ">>> ${arch} snap -> ${OUT_DIR}/$(basename "${snap_file}")"
-  rm -f "${LINUX_APP_DIR}/"*.snap
+  echo ">>> ${arch} snap -> ${snap_file}"
 done
 
 echo ">>> linux snaps built: $(ls "${OUT_DIR}/"*.snap | xargs -n1 basename | tr '\n' ' ')"

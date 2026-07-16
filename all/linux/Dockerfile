@@ -26,6 +26,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# snapcraft 8.11.1 in this rock is a pip install: its desktop/gnome extension data
+# (the command-chain launcher the `extensions: [gnome]` app uses) lives at
+# <site-packages>/extensions, but snapcraft resolves it to /usr/share/snapcraft/
+# extensions (which doesn't exist) -> "Failed to pull source: unable to determine
+# source type of '/usr/share/snapcraft/extensions/desktop/command-chain'". Symlink
+# the expected path to the real one so the gnome extension's part pulls.
+# NB: /usr/share/snapcraft/extensions already exists as an EMPTY dir in this rock,
+# so a plain `ln -sfn target dir` would nest the link INSIDE it. rm -rf it first,
+# then symlink, and verify the command-chain resolves (fail the build if not).
+RUN target="$(find /usr/lib/python3*/site-packages -maxdepth 1 -type d -name extensions | head -1)"; \
+    test -n "$target" || { echo "ERROR: snapcraft extensions dir not found under site-packages"; exit 1; }; \
+    rm -rf /usr/share/snapcraft/extensions; mkdir -p /usr/share/snapcraft; \
+    ln -s "$target" /usr/share/snapcraft/extensions; \
+    ls -d /usr/share/snapcraft/extensions/desktop/command-chain >/dev/null || { echo "ERROR: command-chain still not resolving"; exit 1; }; \
+    echo "linked $target -> /usr/share/snapcraft/extensions (command-chain OK)"
+
 # *important* gettext (msgfmt) is required, not optional: meson's i18n module
 # SILENTLY disables translations when msgfmt is missing — the build still
 # succeeds and the snap ships english-only, with no error to notice.

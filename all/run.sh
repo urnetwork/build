@@ -114,8 +114,8 @@ ANDROID_NDK_VERSION=29.0.14206865
 sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk'
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-if [[ ! `go version` =~ 'go version go1.26.4' ]]; then
-    builder_message 'go 1.26.4 required'
+if [[ ! `go version` =~ 'go version go1.26.5' ]]; then
+    builder_message 'go 1.26.5 required'
     exit 1
 fi
 if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
@@ -618,8 +618,14 @@ error_trap 'sdk build edit'
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk js edit'
 
-# TODO `-ldflags "-X sdk.Version=...` doesn't appear to work with gomobile
-# TODO we hardcode the sdk.Version for now
+# NOTE the sdk is a gomobile/cgo-bound *library*, so there is no `main` to carry
+# the version the way the sn cli tools do. sdk.Version is a `const`, which the
+# linker's -X cannot patch (it only rewrites writable `var`s) -- so instead of a
+# no-op -X we inject the version straight into the source below. This is
+# deliberate and fork-proof: baking it into the source sidesteps the module
+# rename (github.com/urnetwork/sdk -> .../sdk/v<N>) that would silently break a
+# hardcoded -X <pkgpath>.Version after the fork. Every sdk build path (android
+# aar, apple xcframework, cgo desktop) picks the version up from this one edit.
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
@@ -916,6 +922,39 @@ $a"
 }
 
 
+# Build an sn cli command (sn/cli/<pkg>) for the given GOOS/GOARCH targets and
+# package the binaries as <binary>.tar.gz under the command's build/ dir. The
+# output binary is named <binary>. Version is stamped into `main.Version`: each
+# thin cli/ main owns the Version var and hands it to its library at startup, so
+# the linker path is immune to the release module fork (main is always "main").
+#
+# The sn miner is the former connect/provider, so it is built and shipped as the
+# old `provider` binary/asset name that a bunch of downstream code still expects
+# (the provider install/uninstall scripts, router/edgeos docs).
+#
+#   sn_cli_release <cli-pkg> <binary> <goos/goarch>...
+sn_cli_release () {
+    local pkg="$1" binary="$2"
+    shift 2
+    local src="$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/$pkg"
+    local out="$src/build"
+    rm -rf "$out" || return 1
+    local osarch os arch gomips
+    for osarch in "$@"; do
+        os="${osarch%/*}"
+        arch="${osarch#*/}"
+        gomips=""
+        case "$arch" in mips*) gomips="GOMIPS=softfloat" ;; esac
+        (cd "$src" &&
+            env GOEXPERIMENT=greenteagc CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" $gomips \
+                go build -trimpath \
+                -ldflags "-w -s -X main.Version=${WARP_VERSION}" \
+                -o "$out/$os/$arch/$binary" .) || return 1
+    done
+    (cd "$out" && COPYFILE_DISABLE=1 tar -czf "$binary.tar.gz" */)
+}
+
+
 github_create_draft_release
 
 
@@ -930,13 +969,40 @@ github_release_upload "URnetworkSdkJs-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME
 builder_message "sdk \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-# TODO provider is moving to the sn repo
-# (cd $BUILD_HOME/connect${GO_MOD_SUFFIX}/provider && make)
-# error_trap 'build provider'
+# The sn miner is the former connect/provider. Build all three sn cli tools and
+# publish them as release artifacts. A bunch of downstream code still expects the
+# miner under the old `provider` name -- the provider install/uninstall scripts
+# pull a `urnetwork-provider-*.tar.gz` asset and run its `<os>/<arch>/provider`
+# binary -- so ship the miner as `provider` for now. Match the old provider's
+# full arch matrix so those installers keep working on every target.
+sn_cli_release miner provider \
+    linux/arm64 linux/arm linux/amd64 linux/386 \
+    linux/mips linux/mipsle linux/mips64 linux/mips64le \
+    darwin/arm64 darwin/amd64 windows/arm64 windows/amd64
+error_trap 'build provider (sn miner)'
 
-# github_release_upload "urnetwork-provider-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/connect${GO_MOD_SUFFIX}/provider/build/provider.tar.gz"
+github_release_upload "urnetwork-provider-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/miner/build/provider.tar.gz"
 
-# builder_message "provider \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+builder_message "provider (sn miner) \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+sn_cli_release validator validator \
+    darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+error_trap 'build validator'
+
+github_release_upload "urnetwork-validator-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/validator/build/validator.tar.gz"
+
+builder_message "validator \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+# snclaim signs + broadcasts the miner's on-chain claim actions.
+sn_cli_release snclaim snclaim \
+    darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+error_trap 'build snclaim'
+
+github_release_upload "urnetwork-snclaim-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/snclaim/build/snclaim.tar.gz"
+
+builder_message "snclaim \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 (cd $BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl && make)
@@ -1018,8 +1084,9 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.c
 # See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
 #
 # Each platform builds via its own script (all/build-windows.sh,
-# all/build-linux.sh): the cgo SDK zip cross-builds NATIVELY on this macOS host
-# (sdk/cgo: mingw-w64 + llvm-mingw for Windows, zig for Linux), then the app
+# all/build-linux.sh). The Windows cgo SDK builds INSIDE the QEMU/HVF ARM Windows
+# VM (sdk/cgo via Go + llvm-mingw); the Linux cgo SDK cross-builds natively on
+# this macOS host (sdk/cgo via zig). Then the app
 # *bundle* is produced LOCALLY on this host via virtualization — the MSI in a
 # QEMU/HVF ARM Windows VM (build/all/windows, image built once by setup.sh);
 # the snap in a Docker container (build/all/linux, Canonical snapcraft rock,
@@ -1229,12 +1296,6 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build web/app'
 builder_message "service web/app \`${EXTERNAL_WARP_VERSION}\` available"
 
-# if [ $BUILD_ENV = 'main' ]; then
-#     (cd $BUILD_HOME && warpctl build community connect${GO_MOD_SUFFIX}/provider/Makefile)
-#     error_trap 'warpctl build community provider'
-#     builder_message "service community provider \`${EXTERNAL_WARP_VERSION}\` available"
-# fi
-
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
@@ -1265,10 +1326,6 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[25%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=25 --only-older
     builder_message "${BUILD_ENV}[25%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # if [ $BUILD_ENV = 'main' ]; then
-    #     warpctl deploy community provider ${WARP_VERSION} --percent=25 --only-older --timeout=0
-    #     builder_message "community[25%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # fi
 
     builder_message "${BUILD_ENV}[25%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
@@ -1292,10 +1349,6 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[50%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=50 --only-older
     builder_message "${BUILD_ENV}[50%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # if [ $BUILD_ENV = 'main' ]; then
-    #     warpctl deploy community provider ${WARP_VERSION} --percent=50 --only-older --timeout=0
-    #     builder_message "community[50%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # fi
 
     builder_message "${BUILD_ENV}[50%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
@@ -1319,10 +1372,6 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[75%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=75 --only-older
     builder_message "${BUILD_ENV}[75%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # if [ $BUILD_ENV = 'main' ]; then
-    #     warpctl deploy community provider ${WARP_VERSION} --percent=75 --only-older --timeout=0
-    #     builder_message "community[75%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # fi
 
     builder_message "${BUILD_ENV}[75%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 
@@ -1346,10 +1395,6 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     builder_message "${BUILD_ENV}[100%] mcp \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
     warpctl deploy $BUILD_ENV proxy ${WARP_VERSION} --percent=100 --only-older
     builder_message "${BUILD_ENV}[100%] proxy \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # if [ $BUILD_ENV = 'main' ]; then
-    #     warpctl deploy community provider ${WARP_VERSION} --percent=100 --only-older --timeout=0 --set-latest
-    #     builder_message "community[100%] provider \`${EXTERNAL_WARP_VERSION}\` deployed (only older)"
-    # fi
 
     builder_message "${BUILD_ENV}[100%] services: \`\`\`$(warpctl ls versions $BUILD_ENV --sample)\`\`\`"
 fi

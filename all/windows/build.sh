@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build the URnetwork Windows MSI by booting a LOCAL QEMU ARM Windows VM (the
-# image built by Packer / setup.sh) on the Apple-Silicon build host and running
-# the existing windows/app/build.ps1 over ssh. Replaces the remote
-# WINDOWS_BUILD_HOST ssh flow with a local, HVF-accelerated VM.
+# Build the URnetwork Windows cgo SDK + MSI by booting a LOCAL QEMU ARM Windows
+# VM (the image built by Packer / setup.sh) on the Apple-Silicon build host and
+# running windows/build-sdk.ps1 (native cgo SDK) then windows/app/build.ps1 over
+# ssh. Replaces the remote WINDOWS_BUILD_HOST ssh flow with a local, HVF VM.
 #
 # Each run boots a copy-on-write OVERLAY of the base image, so the base stays
 # pristine. The VM lifecycle helpers are shared with setup.sh via lib.sh.
@@ -12,9 +12,9 @@
 #   BUILD_HOME  the build server's local build dir (all repos, on their correct
 #               branches) — rsync'd into the VM at $WIN_DIR so it builds the exact
 #               local state, exactly like the Linux container's bind mount
-#   SDK_ZIP     path to URnetworkSdkWindows.zip (cgo build output)
 #   OUT_DIR     where to copy the resulting .msi files
-#   VERSION     release version (passed to build.ps1)
+#   VERSION     release version, EXTERNAL_WARP_VERSION (passed to build.ps1)
+#   SDK_VERSION WARP_VERSION, baked into the SDK DLL (passed to build-sdk.ps1)
 #   WIN_DIR     (optional) build root inside the VM (default C:/build/urnetwork)
 #   IMAGE       (optional) base qcow2 (default output/windows-arm64.qcow2)
 #   SSH_KEY     (optional) private key matching the image's authorized key
@@ -27,14 +27,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/lib.sh"
 
 : "${BUILD_HOME:?set BUILD_HOME}"
-: "${SDK_ZIP:?set SDK_ZIP}"
 : "${OUT_DIR:?set OUT_DIR}"
-: "${VERSION:?set VERSION}"
+: "${VERSION:?set VERSION}"           # EXTERNAL_WARP_VERSION, for the app/MSI
+: "${SDK_VERSION:?set SDK_VERSION}"   # WARP_VERSION, baked into the SDK DLL
 win_init
 
-for f in "$UEFI_CODE" "$SDK_ZIP"; do
-  [ -e "$f" ] || win_die "missing $f"
-done
+[ -e "$UEFI_CODE" ] || win_die "missing $UEFI_CODE"
 mkdir -p "$OUT_DIR"
 
 win_ensure_ssh_key
@@ -55,11 +53,23 @@ echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # branches from run.sh) into the VM — no clone, no GitHub, no ssh key.
 win_sync_source "$BUILD_HOME"
 
-echo ">>> delivering the SDK zip"
-win_scp_to "$SDK_ZIP" "$WIN_DIR/URnetworkSdkWindows.zip"
+# The cgo SDK builds natively in the VM now (Go + llvm-mingw, provisioned into
+# the image), replacing the old macOS cross-build. build-sdk.ps1 writes the zip
+# to sdk/cgo/build/ inside the VM; pull it back so run.sh uploads it as the
+# URnetworkSdkWindows artifact (the app build below consumes it in place).
+sdk_zip_vm="$WIN_DIR/sdk/cgo/build/URnetworkSdkWindows.zip"
+echo ">>> building the cgo SDK in the VM (build-sdk.ps1)"
+win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/build-sdk.ps1 -Version $SDK_VERSION -SdkDir $WIN_DIR/sdk/cgo"
 
-echo ">>> building the MSI (build.ps1)"
-win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/app/build.ps1 -Version $VERSION -SdkZip $WIN_DIR/URnetworkSdkWindows.zip"
+echo ">>> retrieving the SDK zip -> sdk/cgo/build/"
+mkdir -p "$BUILD_HOME/sdk/cgo/build"
+win_scp_from "$sdk_zip_vm" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
+
+echo ">>> building the MSI (build.ps1, with split-tunnel driver)"
+# -IncludeDriver builds driver/SplitTunnel.vcxproj (SplitTunnel.sys) and harvests it
+# into the MSI. build.ps1 installs the WDK MSBuild toolset (from the WDK.vsix) on
+# demand and copies the .sys into $bin for WiX. See windows/app/build.ps1.
+win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/app/build.ps1 -Version $VERSION -SdkZip $sdk_zip_vm -IncludeDriver"
 
 echo ">>> retrieving MSIs"
 win_scp_from "$WIN_DIR/windows/app/build/out/*.msi" "$OUT_DIR/"

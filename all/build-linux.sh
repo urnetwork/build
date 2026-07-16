@@ -53,8 +53,27 @@ rm -f "$OUT_DIR"/*.snap
 
 # SDK desktop library — cross-builds natively on this macOS host (zig cc,
 # pinning the glibc floor). One-time toolchain install: (cd sdk/cgo && make init)
+#
+# sdk/cgo/go.sum is git-ignored and generated (run.sh regenerates it at version
+# staging via `go mod tidy`). A standalone build from main skips staging, so it
+# can be absent — regenerate it here or the cgo `go build` fails with "missing
+# go.sum entry". `go mod download all` is build-complete and leaves the tracked
+# go.mod untouched.
+if [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
+  echo ">>> sdk/cgo/go.sum missing — generating it (go mod download all)"
+  (cd "$BUILD_HOME/sdk/cgo" && PATH="$PATH:/usr/local/go/bin:$HOME/go/bin" go mod download all)
+fi
+
 echo ">>> building the linux cgo sdk ($WARP_VERSION)"
 (cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_linux)
+
+# make chains recipe commands with ';', so a failed cross-compile does not stop
+# the zip step — verify both .so's exist before feeding the snap build (a partial
+# zip would otherwise sail through to a broken snap).
+for a in amd64 arm64; do
+  so="$BUILD_HOME/sdk/cgo/build/linux/$a/libURnetworkSdk.so"
+  [ -f "$so" ] || { echo "ERROR: $so not built — is the linux cross toolchain installed? (cd sdk/cgo && make init)" >&2; exit 1; }
+done
 
 # Snaps — built per arch in the snapcraft rock container (--destructive-mode);
 # arm64 native, amd64 under qemu emulation. See linux/README.md.

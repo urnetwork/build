@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Build the URnetwork Windows artifacts from the LOCAL working tree: the cgo SDK
-# zip (sdk/cgo cross-build, native on this macOS host) and the app MSIs (x64 +
-# arm64, built in the local QEMU/HVF ARM Windows VM via windows/build.sh).
+# Build the URnetwork Windows artifacts from the LOCAL working tree, entirely
+# inside the local QEMU/HVF ARM Windows VM (via all/windows/build.sh): the cgo
+# SDK DLLs (sdk/cgo, built natively with Go + llvm-mingw) AND the app MSIs (x64 +
+# arm64). The build home is rsync'd into the VM, so it builds the exact local
+# state — the mac needs no Windows cross-toolchain.
 #
 # This is the windows build part of run.sh, extracted so it can also run
 # standalone. It uses the local branches AS-IS — no pulls, no checkouts, no
@@ -50,15 +52,13 @@ OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/windows}"
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/*.msi
 
-# SDK desktop library — cross-builds natively on this macOS host (mingw-w64 +
-# llvm-mingw). One-time toolchain install: (cd sdk/cgo && make init)
-echo ">>> building the windows cgo sdk ($WARP_VERSION)"
-(cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_windows)
-
-# App MSIs — built in the local QEMU ARM Windows VM (image built once by
-# windows/setup.sh, booted here as a CoW overlay). See windows/README.md.
-echo ">>> building the windows app MSIs ($EXTERNAL_WARP_VERSION)"
-SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip" \
+# Everything builds inside the QEMU ARM Windows VM (image built once by
+# all/windows/setup.sh, booted here as a CoW overlay): build.sh rsyncs the build
+# home in, builds the cgo SDK DLLs natively (windows/build-sdk.ps1, Go +
+# llvm-mingw) and pulls the SDK zip back to sdk/cgo/build/ (so run.sh uploads
+# it), then builds the app MSIs (windows/app/build.ps1). See all/windows/README.md.
+echo ">>> building the windows cgo SDK + app MSIs in the VM ($EXTERNAL_WARP_VERSION)"
 OUT_DIR="$OUT_DIR" \
 VERSION="$EXTERNAL_WARP_VERSION" \
+SDK_VERSION="$WARP_VERSION" \
     "$here/windows/build.sh"

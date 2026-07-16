@@ -3,9 +3,10 @@
 #
 # Installs, via direct download: Visual Studio 2022 Build Tools (native ARM64 +
 # x64 cross toolset, so one ARM VM cross-builds both MSIs), the Windows Driver Kit
-# (for the WFP split-tunnel driver), WiX v5, git, and rsync. The build source is
-# rsync'd in from the build server at build time (build.sh win_sync_source), not
-# cloned here - no GitHub auth needed.
+# (for the WFP split-tunnel driver), WiX v5, git, rsync, and the cgo SDK toolchain
+# (Go + llvm-mingw, so the URnetwork SDK DLLs build natively here instead of being
+# cross-built on the mac). The build source is rsync'd in from the build server at
+# build time (build.sh win_sync_source), not cloned here - no GitHub auth needed.
 #
 # SPDX-License-Identifier: MPL-2.0
 $ErrorActionPreference = "Stop"
@@ -25,7 +26,21 @@ $vsArgs = @(
   "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
   "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621",
   "--add", "Microsoft.VisualStudio.Component.VC.ATL",
-  "--add", "Microsoft.VisualStudio.Component.VC.ATL.ARM64"
+  "--add", "Microsoft.VisualStudio.Component.VC.ATL.ARM64",
+  # ".NET WinUI app development build tools": brings the AppxPackage MSBuild tasks
+  # (Microsoft.Build.AppxPackage.dll / Microsoft.Build.Packaging.Pri.Tasks.dll, staged
+  # under MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\) that the default MrtCore PRI
+  # path (MrtCore.PriGen.targets -> ExpandPriContent / GenerateProjectPriFile) needs to
+  # generate resources.pri. IMPORTANT: it must be the NON-VC group. The ".VC" variant
+  # (Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools, "C++ v143 UWP tools") is the
+  # C++ UWP *compiler* support and does NOT ship these managed (AnyCPU) tasks - only this
+  # group does (per the VS Build Tools component-ID docs). Without it the App must fall
+  # back to the self-contained EnableMsixTooling PRI path; with it, the standard MrtCore path.
+  "--add", "Microsoft.VisualStudio.ComponentGroup.UWP.BuildTools",
+  # The VCTools workload pulls in the "Vcpkg" component by default. We vendor
+  # nlohmann/json and use no vcpkg packages, so keep the unused component out of
+  # the image (smaller image; no dormant MSBuild auto-integration to reason about).
+  "--remove", "Microsoft.VisualStudio.Component.Vcpkg"
 )
 $p = Start-Process -FilePath $vsBootstrap -ArgumentList $vsArgs -Wait -PassThru -NoNewWindow
 if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "VS Build Tools install failed ($($p.ExitCode))" }
@@ -107,6 +122,41 @@ if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
     }
   }
 }
+
+# --- Go + llvm-mingw (URnetwork cgo SDK build) ------------------------------
+# The cgo SDK (sdk/cgo -> URnetworkSdk.dll) builds natively in this VM now (was
+# cross-built on the mac). Pin Go to the sdk module's toolchain (go1.26.4) so
+# GOTOOLCHAIN=auto doesn't pull a second one at build time. llvm-mingw supplies
+# x86_64-/aarch64-w64-mingw32-clang for the c-shared DLLs (no Homebrew formula
+# exists; this is the upstream prebuilt, Windows-ARM64 host build, targets both).
+$goVersion = "1.26.4"
+$goRoot = "C:\go"
+if (-not (Test-Path "$goRoot\bin\go.exe")) {
+  Log "installing Go $goVersion (windows/arm64)"
+  $goZip = "$env:TEMP\go-$goVersion.zip"
+  Invoke-WebRequest -Uri "https://go.dev/dl/go$goVersion.windows-arm64.zip" -OutFile $goZip
+  Expand-Archive -Path $goZip -DestinationPath "C:\" -Force   # -> C:\go
+}
+
+$llvmVersion = "20260616"
+$llvmDir = "C:\llvm-mingw"
+if (-not (Test-Path "$llvmDir\bin\clang.exe")) {
+  Log "installing llvm-mingw $llvmVersion (ucrt, windows/arm64 host)"
+  $llvmZip = "$env:TEMP\llvm-mingw-$llvmVersion.zip"
+  Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$llvmVersion/llvm-mingw-$llvmVersion-ucrt-aarch64.zip" -OutFile $llvmZip
+  Expand-Archive -Path $llvmZip -DestinationPath "C:\" -Force  # -> C:\llvm-mingw-<ver>-ucrt-aarch64
+  if (Test-Path $llvmDir) { Remove-Item -Recurse -Force $llvmDir }
+  Rename-Item "C:\llvm-mingw-$llvmVersion-ucrt-aarch64" $llvmDir
+}
+
+# Persist on the MACHINE PATH so ssh build sessions (cmd default shell then
+# `powershell -File build-sdk.ps1`) resolve go + the mingw clang wrappers.
+$machPath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+foreach ($p in @("$goRoot\bin", "$llvmDir\bin")) {
+  if ($machPath -notlike "*$p*") { $machPath = "$p;$machPath" }
+}
+[Environment]::SetEnvironmentVariable('Path', $machPath, 'Machine')
+$env:PATH = "$goRoot\bin;$llvmDir\bin;$env:PATH"
 
 # OpenSSH default shell -> cmd (override the autounattend's PowerShell). cmd passes
 # args verbatim, so incoming `rsync --server /cygdrive/c/...` reaches the cygwin

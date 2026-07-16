@@ -7,16 +7,17 @@ snap, and the answers to the "what runs where" questions.
 
 | Artifact | Native on macOS? | Why |
 |---|---|---|
-| SDK Windows DLL (`URnetworkSdk.dll`, amd64+arm64) | **Yes** | `sdk/cgo` cross-compiles via mingw-w64 (amd64) + llvm-mingw (arm64); Go + cgo, no Windows needed |
+| SDK Windows DLL (`URnetworkSdk.dll`, amd64+arm64) | **No** | built in the Windows VM — `sdk/cgo` via Go + llvm-mingw (both arches); see below |
 | SDK Linux `.so` (amd64+arm64) | **Yes** | `sdk/cgo` cross-compiles via `zig cc` (pins the 22.04 glibc floor) |
 | Linux headless core (`cmd/urnetworkd`) | **Yes** | pure Go, `CGO_ENABLED=0`, cross-compiles |
 | **Windows app MSI** (WinUI 3 C++, WDK driver, WiX) | **No** | MSVC, WinUI 3, the WDK, and WiX are Windows-only |
 | **Linux snap** (GTK4 GUI + snapcraft) | **No (natively)** | the GTK GUI needs cgo+GTK4 for the linux target; snapcraft needs Linux |
 
-So the SDK libraries are cross-built on the mac and shipped **into** the app
-builds as prebuilt per-arch binaries. The two final *bundles* each need their
-own OS: a Windows host for the MSI, a Linux environment (or Launchpad) for the
-snap.
+So the **Linux** SDK `.so` is cross-built on the mac (zig) and shipped **into**
+the snap build. The **Windows** SDK DLL builds inside the Windows VM (Go +
+llvm-mingw), alongside the app — the mac needs no Windows toolchain. Either way
+the final *bundles* each need their own OS: a Windows host for the MSI, a Linux
+environment (or Launchpad) for the snap.
 
 ## Windows: an ARM Windows 11 VM on the Apple Silicon mac
 
@@ -30,9 +31,10 @@ ARM64 Visual Studio 2022 ships the cross toolsets:
   Windows; and Windows 11 ARM has x64 emulation as a fallback for any tool
   without a native arm64 build.
 
-The VM does **not** build the Go SDK — it consumes the per-arch `URnetworkSdk.dll`
-that the mac cross-built. So the VM only compiles the C++/driver/MSI for each
-arch, which native ARM64 VS does directly.
+The VM builds the Go SDK too: `windows/build-sdk.ps1` (Go + llvm-mingw) produces
+the per-arch `URnetworkSdk.dll`, then native ARM64 VS compiles the C++/driver/MSI
+for each arch against it. The SDK zip is also pulled back to the mac so run.sh
+uploads it as a release artifact.
 
 Recommended VM: Parallels or VMware Fusion (good Windows-on-ARM support + host
 folder sharing) or UTM. Provision once with: VS 2022 (v143, "Desktop C++"),
@@ -99,8 +101,8 @@ Each platform's build lives in its own script — `all/build-windows.sh` and
 warns and skips that platform's artifacts instead of sinking the release):
 
 ```sh
-# all/build-windows.sh: cgo SDK zip (native macOS cross-build: mingw/llvm-mingw)
-#                       + MSIs (x64+arm64) in the local QEMU/HVF ARM Windows VM
+# all/build-windows.sh: cgo SDK DLLs (Go + llvm-mingw) + MSIs (x64+arm64), all
+#                       built in the local QEMU/HVF ARM Windows VM
 if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
     github_release_upload "URnetworkSdkWindows-${V}.zip" ...
     github_release_upload URnetwork-*.msi ...   # (then submit to the Store manually)

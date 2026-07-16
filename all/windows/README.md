@@ -117,9 +117,10 @@ boots the same working VM.
 
 ### Per release (automatic)
 
-`build/all/build-windows.sh` (run.sh's windows build part — it builds the cgo
-SDK zip first, and also runs standalone on the local branches as-is) calls
-`build.sh` with `SDK_ZIP`/`OUT_DIR`/`VERSION` (and the exported `BUILD_HOME`).
+`build/all/build-windows.sh` (run.sh's windows build part, which also runs
+standalone on the local branches as-is) calls `build.sh` with
+`OUT_DIR`/`VERSION`/`SDK_VERSION` (and the exported `BUILD_HOME`). The cgo SDK
+builds in the VM (`windows/build-sdk.ps1`), then the MSIs.
 It boots a copy-on-write overlay of the image (base stays pristine) and rsyncs
 the build home in, so releases build the exact local state. MSIs are uploaded
 to the GitHub release; **Store submission is manual.**
