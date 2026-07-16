@@ -43,10 +43,16 @@ win_ensure_ssh_key
 
 trap win_shutdown_vm EXIT
 
-echo ">>> booting Windows ARM VM (headless, HVF) on ssh port $SSH_PORT"
+echo ">>> booting Windows ARM VM (headless, HVF) on ssh port $SSH_PORT — watch: open vnc://127.0.0.1:5901 (pw 'windows')"
 win_boot_vm
 echo ">>> waiting for the VM ssh service"
-win_wait_ssh || win_die "VM ssh did not come up"
+if ! win_wait_ssh; then
+  # Grab what the VM was showing before the EXIT trap tears it down, so a
+  # headless failure is diagnosable later (same as the install path).
+  mkdir -p "$here/output"
+  win_mon "$WIN_MON_SOCK" "screendump $here/output/build-fail.ppm"
+  win_die "VM ssh did not come up — last screen saved to $here/output/build-fail.ppm"
+fi
 
 echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # rsync the build server's whole local tree (all repos, already on the correct

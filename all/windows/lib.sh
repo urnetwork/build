@@ -23,8 +23,19 @@ win_init() {
   WIN_DIR="${WIN_DIR:-C:/build/urnetwork}"
   # Same dir in cwRsync's cygwin path form, for rsync's remote target.
   WIN_DIR_UNIX="${WIN_DIR_UNIX:-/cygdrive/c/build/urnetwork}"
+  # Every ssh/scp/rsync to the VM is strictly non-interactive: publickey only,
+  # with exactly the build key (IdentitiesOnly — an ssh-agent's keys are
+  # otherwise offered first and can exhaust the server's MaxAuthTries before
+  # the -i key is tried), and BatchMode so a rejected key FAILS the call
+  # instead of falling back to Windows OpenSSH's password prompt — that prompt
+  # goes to /dev/tty, survives >/dev/null redirects, and blocks forever, which
+  # turned win_wait_ssh's bounded loop into an unbounded silent hang.
+  WIN_SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes -o IdentitiesOnly=yes
+    -o PreferredAuthentications=publickey -o NumberOfPasswordPrompts=0)
   WIN_QEMU_PID=""
   WIN_RUN_DIR=""
+  WIN_MON_SOCK=""
 }
 
 # Mirror the build server's whole build home into the VM verbatim — the VM builds
@@ -47,7 +58,7 @@ win_sync_source() {
   rsync -a --delete --progress \
     --exclude=.git \
     --exclude=node_modules \
-    -e "ssh -i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
+    -e "ssh -i $SSH_KEY -p $SSH_PORT ${WIN_SSH_OPTS[*]}" \
     "$src/windows" "$src/sdk" "$src/connect" "$src/glog" \
     "builder@127.0.0.1:$WIN_DIR_UNIX/"
 }
@@ -70,14 +81,13 @@ win_ensure_ssh_key() {
   fi
 }
 
-# ssh/scp to the VM (builder@127.0.0.1:$SSH_PORT). Throwaway host key.
+# ssh/scp to the VM (builder@127.0.0.1:$SSH_PORT). Throwaway host key;
+# non-interactive by construction (WIN_SSH_OPTS, see win_init).
 win_ssh() {
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=5 -o LogLevel=ERROR builder@127.0.0.1 "$@"
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" "${WIN_SSH_OPTS[@]}" builder@127.0.0.1 "$@"
 }
-win_scp_to()   { scp -i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$1" "builder@127.0.0.1:$2"; }
-win_scp_from() { scp -i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "builder@127.0.0.1:$1" "$2"; }
+win_scp_to()   { scp -i "$SSH_KEY" -P "$SSH_PORT" "${WIN_SSH_OPTS[@]}" "$1" "builder@127.0.0.1:$2"; }
+win_scp_from() { scp -i "$SSH_KEY" -P "$SSH_PORT" "${WIN_SSH_OPTS[@]}" "builder@127.0.0.1:$1" "$2"; }
 
 # Build a small CD image carrying autounattend.xml (rendered with the ssh key).
 # Windows scans removable media for autounattend.xml at the root.
@@ -144,7 +154,8 @@ win_press_any_key() {  # win_press_any_key MON_SOCK
 win_install_image() {
   local wiso="$1" viso="$2"
   WIN_RUN_DIR="$(mktemp -d)"
-  local efivars="$WIN_RUN_DIR/efivars.fd" mon="$WIN_RUN_DIR/mon.sock"
+  local efivars="$WIN_RUN_DIR/efivars.fd"
+  WIN_MON_SOCK="$WIN_RUN_DIR/mon.sock"
   cp "$UEFI_VARS_TEMPLATE" "$efivars"
   mkdir -p "$(dirname "$IMAGE")"
   rm -f "$IMAGE"
@@ -174,17 +185,17 @@ win_install_image() {
     -device virtio-net-pci,netdev=net0 \
     -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
     -object secret,id=vncpw,data=windows -vnc 127.0.0.1:1,password-secret=vncpw \
-    -monitor "unix:$mon,server,nowait" -serial null &
+    -monitor "unix:$WIN_MON_SOCK,server,nowait" -serial null &
   WIN_QEMU_PID=$!
 
   # Answer the boot prompt in the background while the install runs.
-  ( win_press_any_key "$mon" ) &
+  ( win_press_any_key "$WIN_MON_SOCK" ) &
 
   echo ">>> waiting for the unattended install to finish (install + OOBE + first logon; can take a while)"
   if ! win_wait_ssh 480; then
     # Grab what the VM was showing so a headless failure is diagnosable later.
     mkdir -p "$WIN_HERE/output"
-    win_mon "$mon" "screendump $WIN_HERE/output/install-fail.ppm"
+    win_mon "$WIN_MON_SOCK" "screendump $WIN_HERE/output/install-fail.ppm"
     echo "install did not come up; last screen saved to $WIN_HERE/output/install-fail.ppm" >&2
     return 1
   fi
@@ -195,10 +206,15 @@ win_install_image() {
 }
 
 # Boot a copy-on-write overlay of the installed $IMAGE headless (release builds).
-# Same device model as the install (minus the CDs), so it boots.
+# Same device model as the install (minus the CDs), so it boots — including the
+# monitor socket + password VNC (5901, pw 'windows'): a boot that never reaches
+# ssh is undiagnosable on a headless host without them, so build.sh screendumps
+# over the monitor when win_wait_ssh times out, and an operator can watch a live
+# build VM with  open vnc://127.0.0.1:5901  at any time.
 win_boot_vm() {
   WIN_RUN_DIR="$(mktemp -d)"
   local overlay="$WIN_RUN_DIR/overlay.qcow2" efivars="$WIN_RUN_DIR/efivars.fd"
+  WIN_MON_SOCK="$WIN_RUN_DIR/mon.sock"
   qemu-img create -f qcow2 -F qcow2 -b "$IMAGE" "$overlay" >/dev/null
   cp "$UEFI_VARS_TEMPLATE" "$efivars"
   qemu-system-aarch64 \
@@ -210,7 +226,8 @@ win_boot_vm() {
     -drive if=none,id=sysdisk,file="$overlay",format=qcow2 \
     -device virtio-net-pci,netdev=net0 \
     -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
-    -display none -serial null &
+    -object secret,id=vncpw,data=windows -vnc 127.0.0.1:1,password-secret=vncpw \
+    -monitor "unix:$WIN_MON_SOCK,server,nowait" -serial null &
   WIN_QEMU_PID=$!
 }
 
@@ -220,6 +237,7 @@ win_boot_vm() {
 win_boot_image_rw() {
   WIN_RUN_DIR="$(mktemp -d)"
   local efivars="$WIN_RUN_DIR/efivars.fd"
+  WIN_MON_SOCK="$WIN_RUN_DIR/mon.sock"
   cp "$UEFI_VARS_TEMPLATE" "$efivars"
   qemu-system-aarch64 \
     -machine virt -accel hvf -cpu host -smp "$CPUS" -m "$MEM" \
@@ -230,18 +248,45 @@ win_boot_image_rw() {
     -drive if=none,id=sysdisk,file="$IMAGE",format=qcow2 \
     -device virtio-net-pci,netdev=net0 \
     -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
-    -object secret,id=vncpw,data=windows -vnc 127.0.0.1:1,password-secret=vncpw &
+    -object secret,id=vncpw,data=windows -vnc 127.0.0.1:1,password-secret=vncpw \
+    -monitor "unix:$WIN_MON_SOCK,server,nowait" &
   WIN_QEMU_PID=$!
 }
 
-# Wait for the VM ssh service. Arg: tries (default 180, x5s). Non-zero on timeout.
+# Run one win_ssh command under a hard deadline (seconds). ConnectTimeout only
+# bounds connect + banner; a stalled kex/auth (half-up sshd in a still-booting
+# guest) otherwise blocks the client forever. Returns 124 on timeout, else the
+# ssh exit code. stdin is detached so a backgrounded probe never reads the tty.
+win_ssh_probe() {  # win_ssh_probe DEADLINE CMD...
+  local deadline="$1" pid t=0
+  shift
+  win_ssh "$@" </dev/null & pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$t" -ge "$deadline" ]; then
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    t=$((t + 1))
+  done
+  wait "$pid"
+}
+
+# Wait for the VM ssh service. Arg: tries (default 180, x5s). Non-zero on
+# timeout. Every probe is hard-bounded (win_ssh_probe), so the loop itself can
+# never wedge; on timeout the last probe reruns unsuppressed so the log names
+# the cause (Connection refused/timeout = guest or sshd never came up;
+# Permission denied = the local key doesn't match the image's baked key).
 win_wait_ssh() {
   local tries="${1:-180}" i
   for ((i = 0; i < tries; i++)); do
     kill -0 "$WIN_QEMU_PID" 2>/dev/null || { echo "qemu exited early" >&2; return 1; }
-    if win_ssh "echo ok" >/dev/null 2>&1; then return 0; fi
+    if win_ssh_probe 15 "echo ok" >/dev/null 2>&1; then return 0; fi
     sleep 5
   done
+  echo "VM ssh still failing after $tries tries; last probe error:" >&2
+  win_ssh_probe 15 "echo ok" >/dev/null || true
   return 1
 }
 
@@ -256,4 +301,5 @@ win_shutdown_vm() {
   [ -n "${WIN_RUN_DIR:-}" ] && rm -rf "$WIN_RUN_DIR"
   WIN_QEMU_PID=""
   WIN_RUN_DIR=""
+  WIN_MON_SOCK=""
 }

@@ -90,7 +90,7 @@ explicitly, so they're unaffected.
 |---|---|
 | `setup.sh` | **one-time setup + smoke test** — installs Windows unattended, provisions the toolchain, verifies it. Run this first. |
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
-| `build.sh` | per-release: boot a CoW overlay, **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down |
+| `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
 | `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, WiX, git, **rsync + the `cmd` ssh shell** |
 | `packer/http/Autounattend.pkrtpl.xml` | unattended install; bakes the stable ssh key, sets locale, enables OpenSSH, installs NetKVM at first logon |
 | `packer/scripts/provision.ps1` | installs VS Build Tools (ARM64+x64) + WDK + WiX + git + a pinned cwRsync; sets the `cmd` ssh shell |
@@ -124,6 +124,15 @@ builds in the VM (`windows/build-sdk.ps1`), then the MSIs.
 It boots a copy-on-write overlay of the image (base stays pristine) and rsyncs
 the build home in, so releases build the exact local state. MSIs are uploaded
 to the GitHub release; **Store submission is manual.**
+
+The release VM is headless but not blind: watch it live on
+`open vnc://127.0.0.1:5901` (pw `windows`), and if ssh never comes up the
+last screen is saved to `output/build-fail.ppm` and the log prints the final
+ssh error — `Connection refused`/timeout means the guest (or sshd) never came
+up; `Permission denied` means `all/windows/.ssh/id_ed25519` doesn't match the
+key baked into the image (regenerate the image with `setup.sh`, or restore the
+original keypair). All VM ssh is BatchMode/publickey-only, so a bad key fails
+fast instead of wedging the build on an invisible password prompt.
 
 ### First-run tuning (cannot be verified on the macOS host)
 

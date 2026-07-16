@@ -622,7 +622,7 @@ error_trap 'sdk build edit'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk)
-error_trap 'sdk build edit'
+error_trap 'sdk cgo edit'
 
 (cd $BUILD_HOME/sdk/js &&
     go_mod_edit_require github.com/urnetwork/connect &&
