@@ -27,6 +27,16 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 
+# Optionally stage local working-tree repos over the build root so this builds
+# LOCAL (possibly uncommitted) changes. No-op unless SRC_HOME / SRC_<REPO> is set
+# (release builds via run.sh stage BUILD_HOME themselves and pass no SRC_*).
+# shellcheck source=stage-local-repos.sh
+# sdk/cgo/go.mod replaces sdk, connect, AND glog with local paths, so all three
+# must be staged together or the module graph mismatches (a stale glog vs the
+# staged sdk breaks resolution).
+source "$here/stage-local-repos.sh"
+stage_local_repos sdk connect glog windows
+
 # The local branches are the source of truth: when the caller doesn't pass the
 # version (run.sh exports it), read it off the windows repo's v<version> branch.
 if [ -z "${EXTERNAL_WARP_VERSION:-}" ]; then

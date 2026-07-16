@@ -106,33 +106,50 @@
         <LogonCount>1</LogonCount>
       </AutoLogon>
       <FirstLogonCommands>
+        <!-- FIRST: disable Windows Update auto-servicing. This build VM is
+             hermetic and disposable (each release boots a throwaway CoW overlay),
+             so servicing only ever costs us: TrustedInstaller reboots the guest
+             mid-build and kills the release's artifacts, and an update staged
+             before the image is finalized re-applies on EVERY later overlay boot.
+             provision.ps1 sets this too, but provisioning starts minutes after
+             first logon — long enough for a scan to stage one (observed). Shut it
+             off here, before anything else runs, so the image never stages an
+             update at all. Updates are taken deliberately: rebuild/re-provision. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v NoAutoUpdate /t REG_DWORD /d 1 /f</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <CommandLine>cmd /c "sc config wuauserv start= disabled &amp; sc stop wuauserv &amp; sc config UsoSvc start= disabled &amp; sc stop UsoSvc"</CommandLine>
+        </SynchronousCommand>
         <!-- Install the virtio-net (NetKVM) driver so the VM gets networking (the
              NIC is virtio-net; everything else is inbox). Search CD/removable
              drives for the ARM64 netkvm.inf — no hard-coded drive letter. -->
         <SynchronousCommand wcm:action="add">
-          <Order>1</Order>
+          <Order>3</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_LogicalDisk | ? { $_.DriveType -eq 5 -or $_.DriveType -eq 2 } | % { Get-ChildItem ($_.DeviceID + '\') -Recurse -Filter netkvm.inf -ErrorAction SilentlyContinue } | ? { $_.FullName -match 'ARM64' } | Select-Object -First 1 | % { pnputil /add-driver $_.FullName /install }"</CommandLine>
         </SynchronousCommand>
         <!-- Enable OpenSSH Server and authorize the stable build key. This is the
              transport build.sh uses. -->
         <SynchronousCommand wcm:action="add">
-          <Order>2</Order>
+          <Order>4</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0"</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
-          <Order>3</Order>
+          <Order>5</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Service -Name sshd -StartupType Automatic; Start-Service sshd"</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
-          <Order>4</Order>
+          <Order>6</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -PropertyType String -Force"</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
-          <Order>5</Order>
+          <Order>7</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "$k='${ssh_public_key}'; $f='C:\ProgramData\ssh\administrators_authorized_keys'; New-Item -ItemType Directory -Force 'C:\ProgramData\ssh' | Out-Null; Set-Content -Path $f -Value $k -Encoding ascii; icacls $f /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F'"</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
-          <Order>6</Order>
+          <Order>8</Order>
           <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>

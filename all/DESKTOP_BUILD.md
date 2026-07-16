@@ -120,6 +120,32 @@ Both scripts use the local branches AS-IS (run.sh configures the `v<version>`
 branches earlier in the run) and also run standalone — see
 `all/{windows,linux}/README.md`.
 
+### Building local (uncommitted) changes
+
+By default the scripts build whatever is already staged under `BUILD_HOME`
+(`build/{sdk,connect,glog,linux,windows}` — the release copies run.sh set up).
+To instead compile a **local working tree** (e.g. to verify uncommitted SDK/app
+changes before committing), point the scripts at the local repos and they
+rsync them into `BUILD_HOME` first (source tree only — `.git` and build
+artifacts are skipped). Set either:
+
+- `SRC_HOME=<monorepo root>` — stages every needed repo from `$SRC_HOME/<repo>`, or
+- `SRC_<REPO>=<path>` per repo (e.g. `SRC_SDK=/path/to/sdk`), which overrides `SRC_HOME`.
+
+Each script stages the repos its cgo build's `go.mod` replaces — **`sdk`,
+`connect`, and `glog`** (all three, or the module graph mismatches) — plus its
+own app repo (`linux` / `windows`). A locally-staged repo usually isn't on a
+`v<version>` branch, so pass `EXTERNAL_WARP_VERSION` explicitly. Example:
+
+```bash
+SRC_HOME=/Users/you/urnetwork EXTERNAL_WARP_VERSION=0.0.0-0 \
+  ARCHES=arm64 OUT_DIR=/tmp/linux-out ./all/build-linux.sh
+```
+
+Note this **overwrites** the release copies under `BUILD_HOME` with the local
+source; re-run run.sh's version staging before a real release. Implemented in
+`all/stage-local-repos.sh`.
+
 ## Store submission: manual for now
 
 The pipeline **builds the bundles and attaches them to the GitHub release**; a

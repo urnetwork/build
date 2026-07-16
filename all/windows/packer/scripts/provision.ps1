@@ -14,6 +14,55 @@ Set-StrictMode -Version Latest
 
 function Log($m) { Write-Host "[provision] $m" }
 
+# --- build-VM hygiene (FIRST, before any install) ---------------------------
+# This is a hermetic, throwaway-overlay build VM: each release boots a fresh CoW
+# copy, builds for ~an hour over one ssh session, and is discarded. Windows
+# Update gains nothing here, and actively breaks builds: observed (System log
+# 1074/7034) TrustedInstaller rebooting the guest mid `go build`, killing sshd
+# and with it the release's windows artifacts. Worse, an update staged but not
+# finished before the image is finalized re-applies on EVERY later overlay boot,
+# so one poisoned image breaks every subsequent build.
+#
+# This block runs FIRST, deliberately: the installs below take ~an hour, and
+# with WU live that is an hour in which a new update can be staged behind our
+# backs — leaving the "hermetic" image poisoned exactly as before. Disable the
+# servicing stack up front, then install into a quiet machine. OS updates are
+# taken deliberately, by rebuilding the image (setup.sh) or re-provisioning it
+# (setup.sh --reprovision).
+Log "disabling Windows Update auto-servicing + auto-reboot (hermetic build VM)"
+$au = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+New-Item -Path $au -Force | Out-Null
+New-ItemProperty -Path $au -Name NoAutoUpdate -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty -Path $au -Name NoAutoRebootWithLoggedOnUsers -Value 1 -PropertyType DWord -Force | Out-Null
+# Disable then stop the update services. Order matters (disable first, so a
+# stopped service can't be demand-restarted), and both use sc.exe rather than
+# Set-Service/Stop-Service: Stop-Service BLOCKS while a busy wuauserv finishes
+# what it's doing ("WARNING: Waiting for service 'Windows Update' to stop...")
+# and hung provisioning here, while sc.exe stop is asynchronous and returns at
+# once. A service that refuses to stop is fine — disabled means it stays down
+# from the next boot, and this image is finalized by a reboot-free shutdown.
+# WaaSMedicSvc (the "medic" that re-enables the others) is access-protected on
+# some builds, so failures are ignored: the policy keys above are the primary
+# control, these are belt + braces. Native exit codes don't throw in Windows
+# PowerShell, so no -ErrorAction is needed.
+foreach ($s in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
+  & sc.exe config $s start= disabled 2>&1 | Out-Null
+  & sc.exe stop   $s              2>&1 | Out-Null
+}
+
+# Defender real-time scanning churns CPU over the rsync'd build tree, the go
+# module cache, and the toolchains (it can't be fully disabled headless -
+# tamper protection - but path exclusions work and are enough). Set before the
+# installs below so the toolchains land in already-excluded paths.
+Log "adding Defender exclusions for the build + toolchain paths"
+foreach ($p in @('C:\build', 'C:\go', 'C:\llvm-mingw', "$env:USERPROFILE\go")) {
+  Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue
+}
+
+# Never sleep mid-build.
+powercfg /change standby-timeout-ac 0 | Out-Null
+powercfg /change hibernate-timeout-ac 0 | Out-Null
+
 # --- Visual Studio 2022 Build Tools -----------------------------------------
 # Native ARM64 toolset + the x64 cross tools + ATL/MFC (WiX/driver need them).
 Log "installing VS 2022 Build Tools (ARM64 + x64 cross)"

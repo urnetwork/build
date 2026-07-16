@@ -33,6 +33,18 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 : "${WARP_HOME:?set WARP_HOME}"
 
+# Optionally stage local working-tree repos over the build root so this builds
+# LOCAL (possibly uncommitted) changes. No-op unless SRC_HOME / SRC_<REPO> is set
+# (release builds via run.sh stage BUILD_HOME themselves and pass no SRC_*).
+# The gradle `buildSdk` task builds the aar from sdk (whose go.mod replaces sdk,
+# connect, AND glog), so all three must be staged together, plus the android app
+# repo. NOTE: the android repo must already carry the ungoogle gradle settings +
+# app/local.properties (warp.version/warp.version_code); staging copies your local
+# android working tree AS-IS, so configure it before building.
+# shellcheck source=stage-local-repos.sh
+source "$here/stage-local-repos.sh"
+stage_local_repos sdk connect glog android
+
 echo ">>> building the android github flavor in the fdroid buildserver container (android on branch $(git -C "$BUILD_HOME/android" branch --show-current))"
 docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver
 docker run --oom-kill-disable --memory="8192m" --rm -u vagrant \

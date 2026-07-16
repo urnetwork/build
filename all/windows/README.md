@@ -88,7 +88,7 @@ explicitly, so they're unaffected.
 
 | File | Role |
 |---|---|
-| `setup.sh` | **one-time setup + smoke test** — installs Windows unattended, provisions the toolchain, verifies it. Run this first. |
+| `setup.sh` | **one-time setup + smoke test** — verifies the ISO is 24H2/Pro (see "Windows ISO"), installs Windows unattended, provisions the toolchain, verifies it. Run this first. |
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
 | `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
 | `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, WiX, git, **rsync + the `cmd` ssh shell** |
@@ -103,9 +103,11 @@ The `packer/` directory name is vestigial — only the autounattend template and
 ```bash
 brew install qemu
 # installs Windows unattended, provisions the toolchain, smoke-tests it
-# (autogenerates the VM ssh key). Watch on  open vnc://127.0.0.1:5901  (pw windows):
+# (autogenerates the VM ssh key). The ISO MUST be 24H2 (build 26100) — setup.sh
+# verifies this up front and refuses anything else; see "Windows ISO" below.
+# Watch on  open vnc://127.0.0.1:5901  (pw windows):
 ./setup.sh \
-  --windows-iso ~/isos/Win11_ARM64.iso \
+  --windows-iso ~/isos/Win11_24H2_English_Arm64.iso \
   --virtio-iso  ~/isos/virtio-win.iso
 # re-run just the smoke test on an existing image:   ./setup.sh --skip-build
 # re-provision without reinstalling Windows:         ./setup.sh --reprovision
@@ -153,6 +155,31 @@ aarch64 Windows-on-QEMU is finicky; the knobs most likely to need adjusting:
 
 Microsoft publishes an official **Windows 11 ARM64 ISO** (Software Download site).
 Activation for a private build VM is the operator's call.
+
+**`setup.sh` enforces this — you cannot start an install with the wrong ISO.** The
+preflight reads the *real* build number out of the ISO (never its filename) and
+refuses anything but **24H2 = build 26100**, before it deletes an existing image
+or spends ~40 min installing:
+
+```
+>>> checking the Windows ISO (Win11_25H2_English_Arm64_v2.iso)
+    build 26200 (25H2); editions: Windows 11 Home, Windows 11 Home Single Language, Windows 11 Pro
+ERROR: wrong Windows ISO: ... is build 26200 (25H2), but this VM stack requires build 26100 (24H2).
+```
+
+It also verifies the ISO contains the **`Windows 11 Pro`** edition the unattend
+installs (`/IMAGE/NAME`) — a missing edition otherwise fails inside Setup,
+headless, with no useful signal.
+
+How, and why not something simpler: `sources/idwbinfo.txt` and `cversion.ini` are
+**byte-identical** between the 24H2 and 25H2 ARM64 ISOs (verified), so the only
+authoritative source is the XML metadata resource of `sources/install.wim` —
+located via the WIM header (`rhXmlData` at 0x48) and read directly, no wimlib
+needed. See `win_iso_probe` in `lib.sh`.
+
+Overrides, for a deliberate re-test of a newer build (see the hang below):
+`WIN_REQUIRED_BUILD=26200 ./setup.sh …`, `WIN_REQUIRED_EDITION='…'`, or
+`WINDOWS_ISO_SKIP_CHECK=1` to bypass the gate entirely.
 
 **Use the 24H2 ARM64 ISO, not 25H2.** The **25H2** ARM64 build (e.g.
 `Win11_25H2_English_Arm64_v2.iso`) installs its first phase fine but then

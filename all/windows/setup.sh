@@ -7,7 +7,16 @@
 # (build.sh win_sync_source), not baked into the image. Run once on the
 # Apple-Silicon build host before a release.
 #
-#   ./setup.sh --windows-iso ~/isos/Win11_ARM64.iso --virtio-iso ~/isos/virtio-win.iso
+#   ./setup.sh --windows-iso ~/isos/Win11_24H2_English_Arm64.iso \
+#              --virtio-iso ~/isos/virtio-win.iso
+#
+# REQUIRES THE WINDOWS 11 *24H2* ARM64 ISO (build 26100). 25H2 (build 26200)
+# installs its first phase fine and then hangs FOREVER at the first boot of the
+# installed OS on this QEMU/edk2 device layout — the install never reaches OOBE
+# or ssh (see README "Windows ISO"). That failure surfaces ~40 min in, as a
+# silent wait-for-ssh timeout, so the ISO is verified up front instead: the
+# preflight reads the real build number out of the ISO (not its filename) and
+# refuses anything but 26100. Get 24H2 from Microsoft's Software Download site.
 #
 # Shares the exact boot path with build.sh (via lib.sh), so a green smoke test
 # means build.sh boots the same working VM. Watch the install on VNC:
@@ -27,7 +36,11 @@ Builds the local QEMU ARM Windows build image (unattended install + toolchain)
 and smoke-tests it.
 
 Required (unless --skip-build reuses an existing image):
-  --windows-iso PATH   Windows 11 ARM64 ISO (Microsoft's official ARM64 ISO)
+  --windows-iso PATH   Windows 11 *24H2* ARM64 ISO, Pro edition (build 26100).
+                       REQUIRED: 25H2 (26200) installs but then hangs forever at
+                       the first boot of the installed OS on this QEMU/edk2
+                       layout. The build number is read from the ISO itself and
+                       anything but 24H2 is refused up front — see README.
   --virtio-iso PATH    virtio-win.iso (only the NetKVM NIC driver is used)
 
 Options:
@@ -42,7 +55,51 @@ Options:
 
 One-time prep: brew install qemu
 Env overrides: IMAGE, SSH_KEY, UEFI_CODE, UEFI_VARS_TEMPLATE, CPUS, MEM, DISK_SIZE.
+ISO gate overrides (deliberate use only): WIN_REQUIRED_BUILD / WIN_REQUIRED_EDITION
+to target a different build, or WINDOWS_ISO_SKIP_CHECK=1 to bypass the check.
 EOF
+}
+
+# Refuse a Windows ISO that isn't the one this VM stack is known to work with,
+# BEFORE burning ~40 min on an install that can only fail. The wrong-ISO failure
+# is invisible and expensive: 25H2 installs its first phase, then hangs at the
+# first boot of the installed OS, and all the operator sees is a wait-for-ssh
+# timeout (and, historically, a poisoned image that breaks every later build).
+# The edition matters too: the unattend selects it by /IMAGE/NAME, and an ISO
+# without it fails in Setup, headless, with no useful signal.
+# Join the newline-separated edition list for display. NOTE: `paste -sd', '`
+# looks right and is not — -d takes a LIST of delimiters used cyclically, so it
+# emits "A,B C". Join on one char, then expand.
+win_iso_editions_str() { printf '%s' "$WIN_ISO_EDITIONS" | paste -sd'|' - | sed 's/|/, /g'; }
+
+check_windows_iso() {
+  local iso="$1" found_release
+  if [ -n "${WINDOWS_ISO_SKIP_CHECK:-}" ]; then
+    echo ">>> WARNING: WINDOWS_ISO_SKIP_CHECK set — not verifying $(basename "$iso")."
+    echo "    If this is not build $WIN_REQUIRED_BUILD ($(win_build_release "$WIN_REQUIRED_BUILD")), expect the install to hang at first boot."
+    return 0
+  fi
+  echo ">>> checking the Windows ISO ($(basename "$iso"))"
+  if ! win_iso_probe "$iso"; then
+    win_die "could not identify $iso (no readable sources/install.wim metadata).
+  This gate exists because the wrong ISO wastes ~40 min and yields an unbootable image.
+  Verify it is the Windows 11 $(win_build_release "$WIN_REQUIRED_BUILD") ARM64 ISO, then re-run with WINDOWS_ISO_SKIP_CHECK=1 to bypass."
+  fi
+  found_release="$(win_build_release "$WIN_ISO_BUILD")"
+  echo "    build $WIN_ISO_BUILD ($found_release); editions: $(win_iso_editions_str)"
+  if [ "$WIN_ISO_BUILD" != "$WIN_REQUIRED_BUILD" ]; then
+    win_die "wrong Windows ISO: $(basename "$iso") is build $WIN_ISO_BUILD ($found_release), but this VM stack requires build $WIN_REQUIRED_BUILD ($(win_build_release "$WIN_REQUIRED_BUILD")).
+  25H2/26xx installs its first phase and then hangs FOREVER at the first boot of the installed OS
+  on this QEMU/edk2 device layout (verified; see README.md \"Windows ISO\"). Use the 24H2 ARM64 ISO.
+  To re-test a newer build deliberately: WIN_REQUIRED_BUILD=$WIN_ISO_BUILD ./setup.sh ..."
+  fi
+  if ! printf '%s\n' "$WIN_ISO_EDITIONS" | grep -qxF "$WIN_REQUIRED_EDITION"; then
+    win_die "$(basename "$iso") does not contain the '$WIN_REQUIRED_EDITION' edition the unattend installs
+  (it has: $(win_iso_editions_str)).
+  Setup would fail headless with no useful signal. Use an ISO with that edition, or set
+  WIN_REQUIRED_EDITION='<one of the above>' and match /IMAGE/NAME in packer/http/Autounattend.pkrtpl.xml."
+  fi
+  echo "    ok: $found_release + '$WIN_REQUIRED_EDITION' present"
 }
 
 WINDOWS_ISO="${WINDOWS_ISO:-}"
@@ -91,7 +148,12 @@ if [ -n "$REPROVISION" ]; then
   [ -f "$IMAGE" ] || win_die "no image to reprovision ($IMAGE) — run without --reprovision to build it first"
   echo ">>> re-provisioning the existing image in place (watch: open vnc://127.0.0.1:5901  pw 'windows')"
   win_boot_image_rw
-  win_wait_ssh || win_die "VM ssh did not come up (watch on VNC 5901)"
+  # 90 min: this boots the BASE image, which — unlike a hermetic post-provision
+  # image — may still have a pending Windows update to apply before sshd serves
+  # (an image built before the WU-disable below, or one whose provisioning
+  # session staged one). That boot is slow but legitimate, and timing out on it
+  # hard-kills the guest mid-servicing and damages the base image.
+  win_wait_ssh 1080 || win_die "VM ssh did not come up (watch on VNC 5901)"
   win_scp_to "$here/packer/scripts/provision.ps1" "C:/Windows/Temp/provision.ps1"
   win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/provision.ps1" \
     || win_die "provisioning failed — see output above"
@@ -100,11 +162,14 @@ if [ -n "$REPROVISION" ]; then
 elif [ -n "$SKIP_BUILD" ] && [ -f "$IMAGE" ]; then
   echo ">>> reusing existing image: $IMAGE (--skip-build)"
 else
-  [ -f "$WINDOWS_ISO" ] || win_die "Windows 11 ARM64 ISO required — pass --windows-iso PATH"
+  [ -f "$WINDOWS_ISO" ] || win_die "Windows 11 $(win_build_release "$WIN_REQUIRED_BUILD") ARM64 ISO required — pass --windows-iso PATH"
   [ -f "$VIRTIO_ISO" ]  || win_die "virtio-win.iso required — pass --virtio-iso PATH"
   if [ -f "$IMAGE" ] && [ -z "$FORCE" ]; then
     win_die "image already exists: $IMAGE — use --skip-build to reuse, or --force to rebuild"
   fi
+  # Gate the ISO BEFORE --force deletes the existing image: a wrong ISO must not
+  # cost the operator the image they already had.
+  check_windows_iso "$WINDOWS_ISO"
   [ -n "$FORCE" ] && rm -f "$IMAGE"
 
   # 1. unattended Windows install (leaves the VM running).

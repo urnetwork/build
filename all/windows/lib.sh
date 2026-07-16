@@ -20,6 +20,14 @@ win_init() {
   CPUS="${CPUS:-6}"
   MEM="${MEM:-8192}"
   DISK_SIZE="${DISK_SIZE:-90G}"
+  # The Windows ISO this VM stack REQUIRES: 11 24H2 == build 26100, Pro edition.
+  # 25H2 (26200) installs fine and then hangs forever at the first boot of the
+  # installed OS on this exact edk2/device layout (README "Windows ISO"), and the
+  # edition must exist in the ISO or Setup fails — the unattend selects it by
+  # /IMAGE/NAME. setup.sh gates on both via win_iso_probe. Overridable for a
+  # future deliberate re-test of a newer build.
+  WIN_REQUIRED_BUILD="${WIN_REQUIRED_BUILD:-26100}"
+  WIN_REQUIRED_EDITION="${WIN_REQUIRED_EDITION:-Windows 11 Pro}"
   WIN_DIR="${WIN_DIR:-C:/build/urnetwork}"
   # Same dir in cwRsync's cygwin path form, for rsync's remote target.
   WIN_DIR_UNIX="${WIN_DIR_UNIX:-/cygdrive/c/build/urnetwork}"
@@ -30,9 +38,14 @@ win_init() {
   # instead of falling back to Windows OpenSSH's password prompt — that prompt
   # goes to /dev/tty, survives >/dev/null redirects, and blocks forever, which
   # turned win_wait_ssh's bounded loop into an unbounded silent hang.
+  # ServerAlive*: without keepalives an ESTABLISHED session whose guest dies
+  # underneath it (observed: Windows servicing rebooting the VM mid-build)
+  # hangs the client forever on the dead TCP — the build wedges silently
+  # instead of failing. 15s x 4 = dead sessions fail within ~60s.
   WIN_SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
     -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes -o IdentitiesOnly=yes
-    -o PreferredAuthentications=publickey -o NumberOfPasswordPrompts=0)
+    -o PreferredAuthentications=publickey -o NumberOfPasswordPrompts=0
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
   WIN_QEMU_PID=""
   WIN_RUN_DIR=""
   WIN_MON_SOCK=""
@@ -149,6 +162,70 @@ win_press_any_key() {  # win_press_any_key MON_SOCK
   done
 }
 
+# Map a Windows build number to its marketing release name, for readable errors.
+win_build_release() {
+  case "$1" in
+    26200) echo "25H2" ;;
+    26100) echo "24H2" ;;
+    22631) echo "23H2" ;;
+    22621) echo "22H2" ;;
+    22000) echo "21H2" ;;
+    *)     echo "unknown release" ;;
+  esac
+}
+
+# Read a little-endian uint64 out of a file at a byte offset. `od -tu8` decodes
+# in HOST byte order, which is little-endian on the Apple-Silicon build host —
+# the same order WIM stores these fields in, so no swapping is needed.
+win_le64() { dd if="$1" bs=1 skip="$2" count=8 2>/dev/null | od -An -tu8 | tr -d ' \n'; }
+
+# Identify a Windows install ISO: which build it carries, and which editions.
+# Sets WIN_ISO_BUILD (e.g. 26100) + WIN_ISO_EDITIONS (newline-separated /IMAGE/NAME
+# values, what the unattend selects on). Non-zero if the ISO can't be identified.
+#
+# The build number is NOT in any text file on the media — sources/idwbinfo.txt and
+# cversion.ini are byte-identical between the 24H2 and 25H2 ARM64 ISOs (verified),
+# and filenames are operator-chosen, so neither can be trusted. The authoritative
+# source is the XML metadata resource of sources/install.wim, whose location is in
+# the WIM header: rhXmlData at 0x48 is {size:56 bits, flags:8 bits} then offset at
+# 0x50. The blob is UTF-16LE. It sits ~5GB into the file, so seek by 512-byte
+# blocks (a bs=1 skip would read gigabytes byte-by-byte) and trim the remainder.
+win_iso_probe() {  # win_iso_probe ISO
+  local iso="$1" mp wim raw off size flags blk rem xml
+  WIN_ISO_BUILD=""
+  WIN_ISO_EDITIONS=""
+  mp="$(mktemp -d)" || return 1
+  if ! hdiutil attach -readonly -nobrowse -mountpoint "$mp" "$iso" >/dev/null 2>&1; then
+    rmdir "$mp" 2>/dev/null
+    return 1
+  fi
+  wim="$mp/sources/install.wim"
+  [ -f "$wim" ] || wim="$mp/sources/install.esd"
+  if [ -f "$wim" ]; then
+    raw="$(win_le64 "$wim" 72)"   # 0x48: size + flags
+    off="$(win_le64 "$wim" 80)"   # 0x50: offset
+    if [ -n "$raw" ] && [ -n "$off" ] && [ "$off" -gt 0 ] 2>/dev/null; then
+      size=$(( raw & 0x00FFFFFFFFFFFFFF ))
+      flags=$(( (raw >> 56) & 0xFF ))
+      # bit 0x04 = compressed. The XML resource is stored raw in practice; if a
+      # future image compresses it we cannot inflate it here (no wimlib on macOS)
+      # and the caller falls back to its skip/override path rather than guessing.
+      if [ $(( flags & 0x04 )) -eq 0 ] && [ "$size" -gt 0 ] && [ "$size" -le 10485760 ]; then
+        blk=$(( off / 512 ))
+        rem=$(( off % 512 ))
+        xml="$(dd if="$wim" bs=512 skip="$blk" count=$(( (rem + size + 511) / 512 )) 2>/dev/null \
+               | tail -c +$(( rem + 1 )) | head -c "$size" \
+               | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\r')"
+        WIN_ISO_BUILD="$(printf '%s' "$xml" | grep -oE '<BUILD>[0-9]+</BUILD>' | head -1 | tr -dc '0-9')"
+        WIN_ISO_EDITIONS="$(printf '%s' "$xml" | grep -oE '<NAME>[^<]*</NAME>' | sed -E 's|</?NAME>||g' | sort -u)"
+      fi
+    fi
+  fi
+  hdiutil detach "$mp" >/dev/null 2>&1 || hdiutil detach -force "$mp" >/dev/null 2>&1
+  rmdir "$mp" 2>/dev/null
+  [ -n "$WIN_ISO_BUILD" ]
+}
+
 # One-time: install Windows unattended into $IMAGE. Needs the two ISOs.
 # Args: WINDOWS_ISO VIRTIO_ISO. Leaves the installed image at $IMAGE.
 win_install_image() {
@@ -192,7 +269,13 @@ win_install_image() {
   ( win_press_any_key "$WIN_MON_SOCK" ) &
 
   echo ">>> waiting for the unattended install to finish (install + OOBE + first logon; can take a while)"
-  if ! win_wait_ssh 480; then
+  # 3h budget (nominal ~5s/try). The install legitimately runs long: phase 1
+  # streams the ~5GB ISO through the emulated usb-bot CD, and phase 2 + OOBE +
+  # first logon vary a lot with host speed/load. A 480-try (~40 min) budget
+  # killed a REAL mid-phase-2 install on the production build host — leaving a
+  # half-installed image that every later build.sh boot then hung on — so err
+  # far on the side of patience; a wedged install is cheap to abort by hand.
+  if ! win_wait_ssh 2160; then
     # Grab what the VM was showing so a headless failure is diagnosable later.
     mkdir -p "$WIN_HERE/output"
     win_mon "$WIN_MON_SOCK" "screendump $WIN_HERE/output/install-fail.ppm"
@@ -273,13 +356,20 @@ win_ssh_probe() {  # win_ssh_probe DEADLINE CMD...
   wait "$pid"
 }
 
-# Wait for the VM ssh service. Arg: tries (default 180, x5s). Non-zero on
-# timeout. Every probe is hard-bounded (win_ssh_probe), so the loop itself can
+# Wait for the VM ssh service. Arg: tries (default 360, x5s = 30 min). Non-zero
+# on timeout. Every probe is hard-bounded (win_ssh_probe), so the loop itself can
 # never wedge; on timeout the last probe reruns unsuppressed so the log names
 # the cause (Connection refused/timeout = guest or sshd never came up;
-# Permission denied = the local key doesn't match the image's baked key).
+# "timed out during banner exchange" = the guest is up but sshd isn't serving
+# yet, classically a boot still applying Windows updates; Permission denied =
+# the local key doesn't match the image's baked key).
+#
+# The default is deliberately generous. A hermetic image boots in well under a
+# minute, so a long ceiling costs nothing on the happy path — but a boot that
+# has to chew through a pending update can take 30+ min, and the old 15-min
+# ceiling turned that into a teardown that killed the guest MID-UPDATE.
 win_wait_ssh() {
-  local tries="${1:-180}" i
+  local tries="${1:-360}" i
   for ((i = 0; i < tries; i++)); do
     kill -0 "$WIN_QEMU_PID" 2>/dev/null || { echo "qemu exited early" >&2; return 1; }
     if win_ssh_probe 15 "echo ok" >/dev/null 2>&1; then return 0; fi
@@ -291,11 +381,18 @@ win_wait_ssh() {
 }
 
 # Graceful shutdown, then hard kill; always removes the run dir. Idempotent.
+# The graceful window is 5 min, not 60s: a hard kill is a yanked power cord to
+# the guest, and win_install_image/win_boot_image_rw write to the BASE image, so
+# a kill during a Windows servicing pass can leave it half-updated (recoverable
+# only by a slow "undoing changes" boot, or not at all). A guest that is merely
+# slow to shut down must not be killed; 5 min of patience is far cheaper than
+# reinstalling the image. The loop exits as soon as qemu does, so a healthy
+# shutdown still returns in seconds.
 win_shutdown_vm() {
   if [ -n "${WIN_QEMU_PID:-}" ] && kill -0 "$WIN_QEMU_PID" 2>/dev/null; then
     win_ssh "shutdown /s /t 0 /f" 2>/dev/null || true
     local _
-    for _ in $(seq 1 60); do kill -0 "$WIN_QEMU_PID" 2>/dev/null || break; sleep 1; done
+    for _ in $(seq 1 300); do kill -0 "$WIN_QEMU_PID" 2>/dev/null || break; sleep 1; done
     kill -0 "$WIN_QEMU_PID" 2>/dev/null && kill -TERM "$WIN_QEMU_PID" 2>/dev/null || true
   fi
   [ -n "${WIN_RUN_DIR:-}" ] && rm -rf "$WIN_RUN_DIR"
