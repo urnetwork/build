@@ -646,7 +646,7 @@ error_trap 'sdk js edit'
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
-    go_mod_fork 'build' 'js')
+    go_mod_fork 'build' 'cgo' 'js')
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
