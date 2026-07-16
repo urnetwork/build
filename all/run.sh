@@ -618,6 +618,12 @@ error_trap 'proxy push branch'
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
+(cd $BUILD_HOME/sdk/cgo &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/sdk)
+error_trap 'sdk build edit'
+
 (cd $BUILD_HOME/sdk/js &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
@@ -647,6 +653,7 @@ error_trap 'sdk edit'
     git_commit &&
     git_tag &&
     go_mod_fork_update 'build' &&
+    go_mod_fork_update 'cgo' &&
     go_mod_fork_update 'js' &&
     npm_fork_update 'js' &&
     git_commit &&
