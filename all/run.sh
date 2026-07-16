@@ -81,6 +81,8 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf sdk)
     (cd $BUILD_HOME && rm -rf android)
     (cd $BUILD_HOME && rm -rf apple)
+    (cd $BUILD_HOME && rm -rf windows)
+    (cd $BUILD_HOME && rm -rf linux)
     (cd $BUILD_HOME && rm -rf sn)
     (cd $BUILD_HOME && rm -rf server)
     (cd $BUILD_HOME && rm -rf web)
@@ -92,8 +94,6 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf extension)
     (cd $BUILD_HOME && rm -rf elements)
     (cd $BUILD_HOME && rm -rf localizations)
-    (cd $BUILD_HOME && rm -rf windows)
-    (cd $BUILD_HOME && rm -rf linux)
     (cd $BUILD_HOME && 
         git stash -u && 
         git reset --hard && 
@@ -142,6 +142,10 @@ error_trap 'pull sdk'
 error_trap 'pull android'
 (cd $BUILD_HOME/apple && git_main)
 error_trap 'pull apple'
+(cd $BUILD_HOME/windows && git_main)
+error_trap 'pull windows'
+(cd $BUILD_HOME/linux && git_main)
+error_trap 'pull linux'
 (cd $BUILD_HOME/sn && git_main)
 error_trap 'pull sn'
 (cd $BUILD_HOME/server && git_main)
@@ -164,10 +168,6 @@ error_trap 'pull extension'
 error_trap 'pull elements'
 (cd $BUILD_HOME/localizations && git_main)
 error_trap 'pull localizations'
-(cd $BUILD_HOME/windows && git_main)
-error_trap 'pull windows'
-(cd $BUILD_HOME/linux && git_main)
-error_trap 'pull linux'
 
 # refresh the generated connect IP tables from the live threat feeds:
 # security/main.go -> ip_security_cfaa_block.go, blocker/main.go -> ip_blocker_block.go.
@@ -393,10 +393,6 @@ error_trap 'extension prepare branch'
 error_trap 'elements prepare branch'
 (cd $BUILD_HOME/localizations && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'localizations prepare branch'
-(cd $BUILD_HOME/windows && git checkout -b v${EXTERNAL_WARP_VERSION})
-error_trap 'windows prepare branch'
-(cd $BUILD_HOME/linux && git checkout -b v${EXTERNAL_WARP_VERSION})
-error_trap 'linux prepare branch'
 
 
 # apple branch, edit xcodeproject
@@ -767,18 +763,6 @@ error_trap 'localizations edit'
 (cd $BUILD_HOME/localizations &&
     npm_publish)
 error_trap 'localizations push branch'
-
-
-(cd $BUILD_HOME/windows && 
-    git_commit &&
-    git_tag)
-error_trap 'windows push branch'
-
-
-(cd $BUILD_HOME/linux && 
-    git_commit &&
-    git_tag)
-error_trap 'linux push branch'
 
 
 # give npm a bit of time to ingest the latest packages before we link against them
