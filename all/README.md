@@ -70,3 +70,6 @@ flaked. Uploading to the GitHub release stays in `run.sh`.
 - `build-fdroid.sh` — the android github/ungoogle flavor APKs, built in the
   F-Droid buildserver container. Needs `WARP_HOME` and the android repo on its
   `v<version>-ungoogle` branch; APKs land in the android gradle outputs dir.
+  The script is both the host launcher and the container entrypoint (its
+  `container-build` phase), and the fdroiddata recipe seds the pinned go
+  version out of it — keep the recipe's prebuild path in sync if it moves.

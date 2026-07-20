@@ -92,7 +92,6 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf proxy)
     (cd $BUILD_HOME && rm -rf userwireguard)
     (cd $BUILD_HOME && rm -rf extension)
-    (cd $BUILD_HOME && rm -rf elements)
     (cd $BUILD_HOME && rm -rf localizations)
     (cd $BUILD_HOME && 
         git stash -u && 
@@ -164,8 +163,6 @@ error_trap 'pull proxy'
 error_trap 'pull userwireguard'
 (cd $BUILD_HOME/extension && git_main)
 error_trap 'pull extension'
-(cd $BUILD_HOME/elements && git_main)
-error_trap 'pull elements'
 (cd $BUILD_HOME/localizations && git_main)
 error_trap 'pull localizations'
 
@@ -389,8 +386,6 @@ error_trap 'proxy prepare branch'
 error_trap 'userwireguard prepare branch'
 (cd $BUILD_HOME/extension && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'extension prepare branch'
-(cd $BUILD_HOME/elements && git checkout -b v${EXTERNAL_WARP_VERSION})
-error_trap 'elements prepare branch'
 (cd $BUILD_HOME/localizations && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'localizations prepare branch'
 
@@ -749,19 +744,7 @@ error_trap 'docs push branch'
 error_trap 'warp push branch'
 
 
-(cd $BUILD_HOME/elements &&
-    npm_fork)
-error_trap 'elements edit'
-
-(cd $BUILD_HOME/elements && 
-    git_commit &&
-    git_tag)
-(cd $BUILD_HOME/elements && 
-    npm_publish)
-error_trap 'elements push branch'
-
-
-(cd $BUILD_HOME/localizations && 
+(cd $BUILD_HOME/localizations &&
     npm_fork &&
     git_commit &&
     git_tag)
@@ -777,7 +760,6 @@ sleep 30
 
 
 (cd $BUILD_HOME/extension &&
-    npm_edit_module @urnetwork/elements &&
     npm_edit_module @urnetwork/localizations &&
     npm_edit_module @urnetwork/sdk-js &&
     npm_fork_version "$EXTENSION_VERSION")

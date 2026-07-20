@@ -34,7 +34,7 @@ _stage_src_for() {
 
 stage_local_repos() {
   : "${BUILD_HOME:?stage_local_repos: set BUILD_HOME}"
-  local repo src dest any=0
+  local repo src dest f any=0
   for repo in "$@"; do
     src="$(_stage_src_for "$repo")"
     [ -z "$src" ] && continue
@@ -65,6 +65,21 @@ stage_local_repos() {
       --exclude='*.o' \
       --exclude='*.a' \
       "$src/" "$dest/"
+    # The blanket 'build/' exclude above (any depth — it must skip gradle/app
+    # build dirs) also skips SOURCE files that live in sdk/build, the gomobile
+    # build module (Makefile, go.mod, go.sum, main.go). A release run rewrites
+    # that go.mod to pin the PUBLISHED /vYYYY modules, so a stale preserved
+    # copy makes a staged build silently compile the published sdk instead of
+    # the staged local trees. Re-sync those source files explicitly; the
+    # output dirs (android/, apple/, ios/) stay preserved.
+    if [ "$repo" = sdk ]; then
+      mkdir -p "$dest/build"
+      for f in Makefile makefile go.mod go.sum main.go; do
+        if [ -f "$src/build/$f" ]; then
+          cp -p "$src/build/$f" "$dest/build/$f"
+        fi
+      done
+    fi
     any=1
   done
   if [ "$any" = 1 ] && [ -z "${EXTERNAL_WARP_VERSION:-}" ]; then
