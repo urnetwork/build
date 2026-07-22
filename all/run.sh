@@ -1168,9 +1168,15 @@ done
 # typically this is because we've already submitting a release for this build version
 warn_trap 'ios deploy'
 
-github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
+# the deploy above is allowed to soft-fail, so the .ipa may not exist (e.g. the
+# export could not sign); skip the dependent uploads instead of hard-failing them
+if [ -f "$BUILD_HOME/apple/app/build/URnetwork.ipa" ]; then
+    github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
 
-builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+    builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+else
+    builder_message "warning: no ios .ipa artifact (deploy soft-failed above); skipping its release upload. Build will continue."
+fi
 
 
 (cd $BUILD_HOME/apple/app &&
@@ -1183,9 +1189,13 @@ builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com
 # typically this is because we've already submitting a release for this build version
 warn_trap 'macos deploy'
 
-github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+if [ -f "$BUILD_HOME/apple/app/build/URnetwork.pkg" ]; then
+    github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
 
-builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+    builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+else
+    builder_message "warning: no macos .pkg artifact (deploy soft-failed above); skipping its release upload. Build will continue."
+fi
 
 
 # =============================================================================
