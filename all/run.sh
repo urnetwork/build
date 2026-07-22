@@ -187,7 +187,17 @@ fi
 
 
 BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
-(cd $BUILD_HOME && git_main)
+# rebase-pull (not plain pull) for the build repo itself: a failed prior run
+# can strand its machine-generated version-stamp commit on local main (the
+# stamp push raced another push or the network), and a plain pull then fails
+# on the divergence — every later run would fail here until someone
+# intervened. Rebasing carries the stray stamp forward; the next successful
+# stamp push includes it.
+(cd $BUILD_HOME &&
+    git diff --quiet && git diff --cached --quiet &&
+    git checkout main &&
+    git pull --rebase &&
+    git submodule update --init --recursive)
 error_trap 'pull'
 BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
 if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
@@ -882,7 +892,7 @@ error_trap 'extension push branch'
 (cd $BUILD_HOME &&
     git add . &&
     git commit -m "${EXTERNAL_WARP_VERSION}" &&
-    git push &&
+    (git push || (git pull --rebase && git push)) &&
     git_tag)
 error_trap 'push branch'
 # version code variants for the github flavor
