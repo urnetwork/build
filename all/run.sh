@@ -944,16 +944,25 @@ github_release_upload () {
     error_trap "github release upload $1"
 }
 
+# virustotal analysis is best-effort context for the release notes: a
+# malicious/suspicious VERDICT is fatal (virustotal_verify exits), but failing
+# to GET a verdict — api quota (429 QuotaExceededError), transport errors, or
+# analysis latency — must not block the release. Once the quota trips, later
+# artifacts skip the scan entirely instead of each burning the retry window.
+VIRUSTOTAL_QUOTA_EXCEEDED=""
 virustotal () {
     SHA256=`shasum -a 256 "$2" | awk '{ print $1 }'`
 
-    if [ "$VIRUSTOTAL_API_KEY" ]; then
+    if [ "$VIRUSTOTAL_API_KEY" ] && [ ! "$VIRUSTOTAL_QUOTA_EXCEEDED" ]; then
         VIRUSTOTAL_PREPARE_UPLOAD=`$BUILD_CURL \
             -H 'Accept: application/json' \
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             https://www.virustotal.com/api/v3/files/upload_url`
-        error_trap "virustotal prepare upload $1"
         VIRUSTOTAL_UPLOAD_URL=`echo "$VIRUSTOTAL_PREPARE_UPLOAD" | jq -r .data`
+        if [ ! "$VIRUSTOTAL_UPLOAD_URL" ] || [ "$VIRUSTOTAL_UPLOAD_URL" = "null" ]; then
+            virustotal_unavailable "$1" "prepare upload failed ($VIRUSTOTAL_PREPARE_UPLOAD)"
+            return
+        fi
         VIRUSTOTAL_UPLOAD=`$BUILD_CURL \
             -X POST \
             -H 'Accept: application/json' \
@@ -961,16 +970,26 @@ virustotal () {
             -H "x-apikey: $VIRUSTOTAL_API_KEY" \
             "$VIRUSTOTAL_UPLOAD_URL" \
             -F "file=@$2"`
-        error_trap "virustotal upload $1"
         VIRUSTOTAL_ID=`echo "$VIRUSTOTAL_UPLOAD" | jq -r .data.id`
         # FIXME if the same file is uploaded multiple times, the VIRUSTOTAL_ID will need to be pulled from a different field (fix)
+        if [ ! "$VIRUSTOTAL_ID" ] || [ "$VIRUSTOTAL_ID" = "null" ]; then
+            virustotal_unavailable "$1" "upload failed ($VIRUSTOTAL_UPLOAD)"
+            return
+        fi
         echo "virustotal analysis https://www.virustotal.com/gui/file/$SHA256"
-        virustotal_verify "$1" "$VIRUSTOTAL_ID"
-
-        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/file/$SHA256)|")
+        if virustotal_verify "$1" "$VIRUSTOTAL_ID"; then
+            VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|[ok](https://www.virustotal.com/gui/file/$SHA256)|")
+        else
+            virustotal_unavailable "$1" "no verdict"
+        fi
     else
         VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|not submitted|")
     fi
+}
+
+virustotal_unavailable () {
+    builder_message "warning: virustotal $2 for $1; continuing without a verdict. Build will continue."
+    VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$SHA256\`|not analyzed|")
 }
 
 virustotal_verify () {
@@ -995,13 +1014,20 @@ virustotal_verify () {
             fi
         elif [ "$VIRUSTOTAL_ANALYSIS_STATUS" = "null" ]; then
             echo "virustotal analysis $1 ($2) unknown result ($VIRUSTOTAL_ANALYSIS) ..."
+            # quota exhaustion never resolves within this run; stop retrying
+            # here and skip the scan for every later artifact
+            if echo "$VIRUSTOTAL_ANALYSIS" | grep -q QuotaExceededError; then
+                VIRUSTOTAL_QUOTA_EXCEEDED=1
+                return 1
+            fi
         else
             echo "virustotal analysis $1 waiting for result ($VIRUSTOTAL_ANALYSIS_STATUS) ..."
         fi
         sleep 10
     done
-    builder_message "virustotal analysis $1 did not complete"
-    exit 1
+    # no verdict is a warning (the caller records "not analyzed"); only a
+    # malicious/suspicious verdict above is fatal
+    return 1
 }
 
 github_create_release () {
