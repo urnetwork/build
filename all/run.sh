@@ -111,18 +111,29 @@ if [ "$BUILD_APPLE_IDENTITY" ]; then
     trap cleanup_apple_identity EXIT
     security create-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" &&
         security set-keychain-settings -lut 21600 "$APPLE_IDENTITY_KC" &&
-        security unlock-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" &&
-        security import ~/.identity.p12 -P "$(cat ~/.p12-pw)" -f pkcs12 \
+        security unlock-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC"
+    error_trap 'apple identity keychain create'
+    # import every identity on the box (~/.identity.p12 plus optional extras
+    # like ~/.identity-dist.p12 / ~/.identity-installer.p12 — all share the
+    # ~/.p12-pw passphrase; see all/make-apple-dist-identity.sh). The archive
+    # signs with Apple Development; the store export additionally needs Apple
+    # Distribution (and Mac Installer Distribution for the macOS .pkg) when
+    # cloud signing is unavailable.
+    for identity_p12 in "$HOME"/.identity*.p12; do
+        security import "$identity_p12" -P "$(cat ~/.p12-pw)" -f pkcs12 \
             -T /usr/bin/codesign -T /usr/bin/security \
             -T /usr/bin/productbuild -T /usr/bin/productsign \
             -k "$APPLE_IDENTITY_KC"
-    error_trap 'apple identity keychain import'
+        error_trap "apple identity keychain import $(basename "$identity_p12")"
+    done
     # set-key-partition-list silently no-ops when the key is not in the targeted
     # keychain, so prove the import landed first (macOS 26 gotcha, REMOTEBUILD.md)
     security find-identity -v -p codesigning "$APPLE_IDENTITY_KC" | grep -q F7RQ5ZZ798
     error_trap 'apple identity missing from build keychain'
     security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" > /dev/null
     error_trap 'apple identity partition list'
+    # record what landed, so a missing distribution identity is obvious in the log
+    security find-identity -v "$APPLE_IDENTITY_KC"
     echo "$APPLE_IDENTITY_ORIG_KEYCHAINS" | xargs security list-keychains -d user -s "$APPLE_IDENTITY_KC"
     error_trap 'apple identity keychain search list'
     # prove signing works in THIS session before spending an hour building
