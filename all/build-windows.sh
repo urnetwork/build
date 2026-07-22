@@ -35,7 +35,7 @@ export BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 # must be staged together or the module graph mismatches (a stale glog vs the
 # staged sdk breaks resolution).
 source "$here/stage-local-repos.sh"
-stage_local_repos sdk connect glog windows
+stage_local_repos sdk connect glog goidenticons windows
 
 # The local branches are the source of truth: when the caller doesn't pass the
 # version (run.sh exports it), read it off the windows repo's v<version> branch.

@@ -46,3 +46,6 @@
 [submodule "windows"]
 	path = windows
 	url = git@github.com:urnetwork/windows.git
+[submodule "goidenticons"]
+	path = goidenticons
+	url = git@github.com:urnetwork/goidenticons.git

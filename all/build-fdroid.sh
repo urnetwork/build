@@ -126,7 +126,7 @@ BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 # android working tree AS-IS, so configure it before building.
 # shellcheck source=stage-local-repos.sh
 source "$here/stage-local-repos.sh"
-stage_local_repos sdk connect glog android
+stage_local_repos sdk connect glog goidenticons android
 
 echo ">>> building the android github flavor in the fdroid buildserver container (android on branch $(git -C "$BUILD_HOME/android" branch --show-current))"
 docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver

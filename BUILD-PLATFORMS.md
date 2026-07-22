@@ -38,7 +38,7 @@ them into `BUILD_HOME` first (via `build/all/stage-local-repos.sh`). Set either:
   `SRC_HOME` for that repo.
 
 Each script stages the repos its cgo/aar build's `go.mod` replaces — **`sdk`,
-`connect`, and `glog` (all three, or the module graph mismatches)** — plus its
+`connect`, `glog`, and `goidenticons` (all of them, or the module graph mismatches)** — plus its
 app repo (`linux` / `windows` / `android`). Only the source tree is copied;
 `.git`, `build/`, `out/`, `node_modules/`, and test binaries are skipped, and the
 destination's own build outputs and `.git` are preserved.

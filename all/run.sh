@@ -12,10 +12,34 @@
 #            tables (security + blocker) from the live feeds before the tests
 #            run, then push them to connect main (commit message stamped with
 #            the release version) before the version branches are cut
+# (optional) BUILD_APPLE_IDENTITY set (non-empty) to create a per-run apple
+#            signing keychain from ~/.identity.p12 + ~/.p12-pw (see the
+#            keychain note below and REMOTEBUILD.md option 1)
 #
 # The Windows build image is built once, out of band, by build/all/windows/setup.sh
 # (which takes the Windows 11 ARM64 + virtio-win ISOs). run.sh only boots that image
 # and rsyncs the build home into it, so it needs no ISO env vars here.
+#
+# The apple stages need a signing keychain that is unlocked *in this build's own
+# login session*: keychain unlock state is scoped to the audit session that ran
+# the unlock, so an unlock from any other ssh session is invisible here, CodeSign
+# fails with `errSecInternalComponent`, the ios/macos archives are skipped, and
+# the release then hard-fails uploading the missing .ipa. See REMOTEBUILD.md for
+# the full analysis and the ranked options.
+# With BUILD_APPLE_IDENTITY set, this script creates a throwaway per-run build
+# keychain (REMOTEBUILD.md option 1): it imports ~/.identity.p12 (passphrase in
+# ~/.p12-pw, both chmod 600, created by the one-time export in REMOTEBUILD.md),
+# grants non-interactive key access to the apple tools, prepends the keychain to
+# the user search list, smoke-tests codesign up front, and deletes the keychain +
+# restores the search list on exit. The login keychain is never touched.
+# Without BUILD_APPLE_IDENTITY (e.g. a GUI dev machine), the login keychain must
+# already be unlocked in this session with non-interactive key access granted
+# (REMOTEBUILD.md option 2 -- the builder's old ~/urnetwork/build.sh unlock +
+# keep-alive pattern). One-time per key in that mode:
+#   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PW" \
+#       ~/Library/Keychains/login.keychain-db
+# Verify signing works in the build session (should print no error):
+#   echo x > /tmp/t && codesign -f -s "Apple Development: Product Builder (F7RQ5ZZ798)" /tmp/t
 
 # note: if docker fails to build, try 1. removing all images then 2. pruning the build images:
 #       docker rmi `docker images -a -q`
@@ -60,6 +84,55 @@ if [ ! "$STAGE_SECONDS" ]; then
 fi
 
 
+# Per-run apple signing keychain (BUILD_APPLE_IDENTITY; see the header note and
+# REMOTEBUILD.md option 1). Runs before any long work so a signing problem fails
+# the build in seconds, not an hour in. The BUILD_TEST block below re-arms this
+# cleanup when it swaps the EXIT trap.
+cleanup_apple_identity () {
+    if [ "$APPLE_IDENTITY_KC" ]; then
+        echo "$APPLE_IDENTITY_ORIG_KEYCHAINS" | xargs security list-keychains -d user -s
+        security delete-keychain "$APPLE_IDENTITY_KC" 2>/dev/null
+        APPLE_IDENTITY_KC=""
+    fi
+}
+APPLE_IDENTITY_KC=""
+if [ "$BUILD_APPLE_IDENTITY" ]; then
+    if [ ! -f ~/.identity.p12 ] || [ ! -f ~/.p12-pw ]; then
+        builder_message 'BUILD_APPLE_IDENTITY is set but ~/.identity.p12 / ~/.p12-pw is missing (see REMOTEBUILD.md)'
+        exit 1
+    fi
+    # sweep a stale keychain left by a killed run (this also drops it from the
+    # search list), then capture the search list to restore on exit
+    security delete-keychain "$HOME/Library/Keychains/build.keychain-db" 2>/dev/null
+    APPLE_IDENTITY_ORIG_KEYCHAINS=`security list-keychains -d user`
+    APPLE_IDENTITY_KC="$HOME/Library/Keychains/build.keychain-db"
+    # throwaway keychain, throwaway password -- nothing stored
+    APPLE_IDENTITY_KC_PW=`openssl rand -base64 24`
+    trap cleanup_apple_identity EXIT
+    security create-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" &&
+        security set-keychain-settings -lut 21600 "$APPLE_IDENTITY_KC" &&
+        security unlock-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" &&
+        security import ~/.identity.p12 -P "$(cat ~/.p12-pw)" -f pkcs12 \
+            -T /usr/bin/codesign -T /usr/bin/security \
+            -T /usr/bin/productbuild -T /usr/bin/productsign \
+            -k "$APPLE_IDENTITY_KC"
+    error_trap 'apple identity keychain import'
+    # set-key-partition-list silently no-ops when the key is not in the targeted
+    # keychain, so prove the import landed first (macOS 26 gotcha, REMOTEBUILD.md)
+    security find-identity -v -p codesigning "$APPLE_IDENTITY_KC" | grep -q F7RQ5ZZ798
+    error_trap 'apple identity missing from build keychain'
+    security set-key-partition-list -S apple-tool:,apple: -s -k "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC" > /dev/null
+    error_trap 'apple identity partition list'
+    echo "$APPLE_IDENTITY_ORIG_KEYCHAINS" | xargs security list-keychains -d user -s "$APPLE_IDENTITY_KC"
+    error_trap 'apple identity keychain search list'
+    # prove signing works in THIS session before spending an hour building
+    echo x > /tmp/apple-identity-smoke &&
+        codesign -f -s "Apple Development: Product Builder (F7RQ5ZZ798)" /tmp/apple-identity-smoke
+    error_trap 'apple identity codesign smoke test'
+    rm -f /tmp/apple-identity-smoke
+fi
+
+
 git_main () {
     branch_name=main
     if [ $1 ]; then
@@ -91,6 +164,7 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf glog)
     (cd $BUILD_HOME && rm -rf proxy)
     (cd $BUILD_HOME && rm -rf userwireguard)
+    (cd $BUILD_HOME && rm -rf goidenticons)
     (cd $BUILD_HOME && rm -rf extension)
     (cd $BUILD_HOME && rm -rf localizations)
     (cd $BUILD_HOME && 
@@ -161,6 +235,8 @@ error_trap 'pull glog'
 error_trap 'pull proxy'
 (cd $BUILD_HOME/userwireguard && git_main master)
 error_trap 'pull userwireguard'
+(cd $BUILD_HOME/goidenticons && git_main)
+error_trap 'pull goidenticons'
 (cd $BUILD_HOME/extension && git_main)
 error_trap 'pull extension'
 (cd $BUILD_HOME/localizations && git_main)
@@ -220,7 +296,8 @@ if [ "$BUILD_TEST" ]; then
         fi
     }
     # Safety net: stop the env even if a test fails and error_trap exits the build.
-    trap stop_local_env EXIT
+    # (Setting EXIT replaces the apple identity cleanup trap, so chain it here.)
+    trap 'stop_local_env; cleanup_apple_identity' EXIT
 
     # Wait for the containers run-local.sh starts to become healthy (names are
     # fixed in that script). Bail if run-local dies early.
@@ -249,10 +326,11 @@ if [ "$BUILD_TEST" ]; then
         fi
     done
 
-    # Tests done — stop the local environment and clear the safety-net trap.
+    # Tests done — stop the local environment and re-arm the apple identity
+    # cleanup as the EXIT trap (a no-op when BUILD_APPLE_IDENTITY is unset).
     builder_message "stopping local test environment"
     stop_local_env
-    trap - EXIT
+    trap cleanup_apple_identity EXIT
 
     builder_message "Build all test candidate passed. A version number can now be assigned."
 fi
@@ -384,6 +462,8 @@ error_trap 'glog prepare branch'
 error_trap 'proxy prepare branch'
 (cd $BUILD_HOME/userwireguard && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'userwireguard prepare branch'
+(cd $BUILD_HOME/goidenticons && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'goidenticons prepare branch'
 (cd $BUILD_HOME/extension && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'extension prepare branch'
 (cd $BUILD_HOME/localizations && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -583,10 +663,21 @@ error_trap 'connect push branch'
     go_edit_require_subpackages github.com/urnetwork/userwireguard)
 error_trap 'userwireguard edit'
 
-(cd $BUILD_HOME/userwireguard && 
+(cd $BUILD_HOME/userwireguard &&
     git_commit &&
     git_tag)
 error_trap 'userwireguard push branch'
+
+
+(cd $BUILD_HOME/goidenticons &&
+    go_mod_edit_module github.com/urnetwork/goidenticons &&
+    go_edit_require_subpackages github.com/urnetwork/goidenticons)
+error_trap 'goidenticons edit'
+
+(cd $BUILD_HOME/goidenticons &&
+    git_commit &&
+    git_tag)
+error_trap 'goidenticons push branch'
 
 
 (cd $BUILD_HOME/proxy &&
@@ -610,12 +701,14 @@ error_trap 'proxy push branch'
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
 (cd $BUILD_HOME/sdk/cgo &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk cgo edit'
 
@@ -637,9 +730,11 @@ error_trap 'sdk js edit'
     go_mod_edit_module github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
     go_mod_fork 'build' 'cgo' 'js')
 error_trap 'sdk edit'
@@ -682,6 +777,7 @@ error_trap 'sn push branch'
     go_mod_edit_module github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk &&
@@ -689,6 +785,7 @@ error_trap 'sn push branch'
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
@@ -1042,11 +1139,28 @@ bug_fix_clean_ipa () {
     unzip -l "$1" | grep ._Symbols && zip -d "$1" ._Symbols/ || echo "No ._Symbols found. Nothing to clean up."
 }
 
+# Headless provisioning auth (REMOTEBUILD.md): hand -allowProvisioningUpdates the
+# App Store Connect API key explicitly (Xcode 13+) so profile downloads never
+# depend on Xcode-account GUI state. altool below discovers the same .p8 by key
+# id from these standard directories; when none is found the array stays empty
+# and xcodebuild behaves exactly as before.
+XCODEBUILD_AUTH=()
+for d in "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"; do
+    if [ -f "$d/AuthKey_${APPLE_API_KEY}.p8" ]; then
+        XCODEBUILD_AUTH=(
+            -authenticationKeyPath "$d/AuthKey_${APPLE_API_KEY}.p8"
+            -authenticationKeyID "$APPLE_API_KEY"
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER"
+        )
+        break
+    fi
+done
+
 
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
-    xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
-    xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
     bug_fix_clean_ipa build/URnetwork.ipa &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
@@ -1061,8 +1175,8 @@ builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com
 
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
-    xcodebuild archive -allowProvisioningUpdates -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
-    xcodebuild archive -allowProvisioningUpdates -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 # failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
