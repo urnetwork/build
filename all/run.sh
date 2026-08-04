@@ -1078,17 +1078,23 @@ sn_cli_release () {
     local src="$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/$pkg"
     local out="$src/build"
     rm -rf "$out" || return 1
-    local osarch os arch gomips
+    local osarch os arch gomips ext
     for osarch in "$@"; do
         os="${osarch%/*}"
         arch="${osarch#*/}"
         gomips=""
         case "$arch" in mips*) gomips="GOMIPS=softfloat" ;; esac
+        # `go build -o <file>` writes the name verbatim -- it only appends the
+        # platform exe suffix when it derives the name itself (`-o <dir>/`). The
+        # binary is renamed here (cli/miner -> provider), so the suffix has to be
+        # added by hand or windows ships an extensionless, unrunnable file.
+        ext=""
+        case "$os" in windows) ext=".exe" ;; esac
         (cd "$src" &&
             env GOEXPERIMENT=greenteagc CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" $gomips \
                 go build -trimpath \
                 -ldflags "-w -s -X main.Version=${WARP_VERSION}" \
-                -o "$out/$os/$arch/$binary" .) || return 1
+                -o "$out/$os/$arch/$binary$ext" .) || return 1
     done
     (cd "$out" && COPYFILE_DISABLE=1 tar -czf "$binary.tar.gz" */)
 }
