@@ -1,0 +1,77 @@
+# URnetwork Linux DAEMON build container — Ubuntu 22.04.
+#
+# WHY 22.04 AND NOT 24.04: this image's glibc IS the floor the package
+# declares. linux/packaging/deb/nfpm.yaml says `Depends: libc6 (>= 2.35)`, and
+# nfpm does not run dpkg-shlibdeps, so nothing but the build image couples that
+# hand-written dependency to reality. Measured on arm64 (2026-08-05): a daemon
+# built on Ubuntu 24.04 references __isoc23_strtoll/strtoul/strtoull@GLIBC_2.38
+# (glibc 2.38's C23 strtol redirect, reached through nlohmann/json's number
+# parser) and arc4random@GLIBC_2.36 — so a 24.04 daemon CANNOT honestly claim
+# 2.35: it installs on Ubuntu 22.04 / Debian 12 and then fails to exec. The
+# app's `glibc-floor` meson test catches exactly this and fails the build.
+#
+# 22.04 has no libgtkmm-4.0 at all, which is why linux/app's `gui` option is a
+# feature: -Dgui=disabled builds the daemon half only. The GUI/AppImage half
+# builds separately on 24.04 — see Dockerfile.gui.
+#
+# See build.sh (host orchestration), build-arch.sh (runs inside, ROLE=daemon),
+# verify.sh, and ../run.sh (Linux section).
+# SPDX-License-Identifier: MPL-2.0
+FROM ubuntu:22.04
+
+ENV LANG=C.UTF-8
+
+# - g++/meson/ninja/pkg-config + glib/json/gettext: the daemon half's build deps
+#   (NO GTK: the daemon links gio/glib + json + threads + the SDK, nothing else)
+# - binutils: readelf, which the glibc-floor gate uses
+# - dpkg-dev/fakeroot/tar: .deb + install-tarball packaging and its verification
+# - systemd: `systemd-analyze verify` (a static unit check; never booted here)
+# - libfuse2: satisfies the .deb's own `Depends: libfuse2t64 | libfuse2` so
+#   `dpkg -i` can CONFIGURE during verification (22.04 predates the t64 rename).
+#   Without it dpkg unpacks but never runs postinst, so the urnetwork group and
+#   the /etc conffiles never appear and the lifecycle test fails misleadingly.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends \
+        g++ \
+        meson \
+        ninja-build \
+        pkg-config \
+        libglib2.0-dev \
+        libglib2.0-bin \
+        nlohmann-json3-dev \
+        gettext \
+        binutils \
+        unzip \
+        dpkg-dev \
+        fakeroot \
+        file \
+        desktop-file-utils \
+        systemd \
+        libfuse2 \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# nfpm — make-deb.sh builds the .deb with it. Pinned and checksum-verified
+# against the release's checksums.txt; goreleaser's apt repo would need
+# [trusted=yes], which is strictly worse. v2.47 is what linux/packaging
+# verified against.
+ARG NFPM_VERSION=2.47.0
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) nfpm_deb="nfpm_${NFPM_VERSION}_amd64.deb" ;; \
+      arm64) nfpm_deb="nfpm_${NFPM_VERSION}_arm64.deb" ;; \
+      *) echo "ERROR: unsupported arch $(dpkg --print-architecture) for nfpm"; exit 1 ;; \
+    esac; \
+    base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"; \
+    curl -fsSL -o "/tmp/${nfpm_deb}" "${base}/${nfpm_deb}"; \
+    curl -fsSL -o /tmp/nfpm-checksums.txt "${base}/checksums.txt"; \
+    (cd /tmp && grep " ${nfpm_deb}\$" nfpm-checksums.txt | sha256sum -c -); \
+    dpkg -i "/tmp/${nfpm_deb}"; \
+    rm -f "/tmp/${nfpm_deb}" /tmp/nfpm-checksums.txt; \
+    nfpm --version
+
+# *important* gettext (msgfmt) is required, not optional: meson's i18n module
+# SILENTLY disables translations when msgfmt is missing — the build still
+# succeeds and the daemon ships english-only catalogs, with no error to notice.
+# build-arch.sh carries a matching tripwire on the staged *.mo files.

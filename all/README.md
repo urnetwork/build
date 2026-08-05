@@ -38,10 +38,10 @@ brew install gnu-sed         # run.sh uses BUILD_SED=gsed (GNU sed)
 - **qemu** — the Windows build (`build/all/windows`) boots a local ARM Windows VM
   (driven directly, not Packer). Run `windows/setup.sh` once to install + smoke-test
   the image (needs a Win11 ARM64 ISO + `virtio-win.iso`).
-- **Docker** (Docker Desktop) — the Linux snap builds in a container
-  (`build/all/linux`), and the local test env above also needs it. Usually already
-  installed; otherwise `brew install --cask docker`. Run `linux/setup.sh` once to
-  build + smoke-test the snap builder container.
+- **Docker** (Docker Desktop) — the Linux deb/tarball/AppImage artifacts build
+  in a container (`build/all/linux`), and the local test env above also needs it.
+  Usually already installed; otherwise `brew install --cask docker`. Run
+  `linux/setup.sh` once to build + smoke-test the Linux builder container.
 
 The language toolchains (`go 1.26.4`, `java 21`, `node`/`npm`, the Android SDK,
 `warpctl`) are validated by `run.sh` at startup — install those per the main build
@@ -62,8 +62,8 @@ checkouts, no version staging — so after a release run has configured the
 version branches, re-run one standalone, e.g. when a VM or container build
 flaked. Uploading to the GitHub release stays in `run.sh`.
 
-- `build-windows.sh` / `build-linux.sh` — the cgo SDK zip + the app bundle
-  (MSIs / snaps). The version comes off the `windows`/`linux` repo's
+- `build-windows.sh` / `build-linux.sh` — the cgo SDK zip + the app bundles
+  (MSIs / debs+install-tarballs+AppImages). The version comes off the `windows`/`linux` repo's
   `v<version>` branch (or `EXTERNAL_WARP_VERSION` / `WARP_VERSION` from the
   env); artifacts land in `${BUILD_OUT:-<build home>/out}/desktop/` (override
   with `OUT_DIR`).

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Build the URnetwork Linux artifacts from the LOCAL working tree: the cgo SDK
-# zip (sdk/cgo cross-build via zig, native on this macOS host) and the snaps
-# (amd64 + arm64, Canonical snapcraft rock container via linux/build.sh).
+# zip (sdk/cgo cross-build via zig, native on this macOS host) and, per arch
+# (amd64 + arm64, Ubuntu 24.04 container via linux/build.sh):
+#   urnetwork-daemon_<version>_<arch>.deb
+#   urnetwork-daemon-<version>-<arch>.install.tar.gz
+#   URnetwork-<version>-<arch>.AppImage (+ .AppImage.zsync)
 #
 # This is the linux build part of run.sh, extracted so it can also run
 # standalone. It uses the local branches AS-IS — no pulls, no checkouts, no
@@ -15,8 +18,9 @@
 #                          from the v<version> branch of $BUILD_HOME/linux)
 #   WARP_VERSION           internal version, e.g. 2026.7.6+985989570 (default:
 #                          EXTERNAL_WARP_VERSION with the last '-' as a '+')
-#   OUT_DIR                where the .snap files land; existing .snap files in it
-#                          are removed so the caller never picks up stale ones
+#   OUT_DIR                where the deb/tarball/AppImage artifacts land;
+#                          existing ones in it are removed so the caller never
+#                          picks up stale ones
 #                          (default: ${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux)
 #   ARCHES                 forwarded to linux/build.sh (default "amd64 arm64")
 #
@@ -59,7 +63,10 @@ export EXTERNAL_WARP_VERSION WARP_VERSION
 
 OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux}"
 mkdir -p "$OUT_DIR"
-rm -f "$OUT_DIR"/*.snap
+# Clear stale artifacts of every type this build produces (run.sh globs OUT_DIR
+# to upload, so anything left here would sail into the release).
+rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz \
+      "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.AppImage.zsync
 
 # SDK desktop library — cross-builds natively on this macOS host (zig cc,
 # pinning the glibc floor). One-time toolchain install: (cd sdk/cgo && make init)
@@ -78,17 +85,18 @@ echo ">>> building the linux cgo sdk ($WARP_VERSION)"
 (cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_linux)
 
 # make chains recipe commands with ';', so a failed cross-compile does not stop
-# the zip step — verify both .so's exist before feeding the snap build (a partial
-# zip would otherwise sail through to a broken snap).
+# the zip step — verify both .so's exist before feeding the packaging build (a
+# partial zip would otherwise sail through to broken artifacts).
 for a in amd64 arm64; do
   so="$BUILD_HOME/sdk/cgo/build/linux/$a/libURnetworkSdk.so"
   [ -f "$so" ] || { echo "ERROR: $so not built — is the linux cross toolchain installed? (cd sdk/cgo && make init)" >&2; exit 1; }
 done
 
-# Snaps — built per arch in the snapcraft rock container (--destructive-mode);
-# arm64 native, amd64 under qemu emulation. See linux/README.md.
-echo ">>> building the linux snaps ($EXTERNAL_WARP_VERSION)"
-LINUX_APP_DIR="$BUILD_HOME/linux/app" \
+# Deb + install tarball + AppImage — built per arch in the Ubuntu 24.04
+# container (meson build + the linux repo's packaging scripts); arm64 native,
+# amd64 under qemu emulation. See linux/README.md.
+echo ">>> building the linux deb/tarball/AppImage artifacts ($EXTERNAL_WARP_VERSION)"
+LINUX_DIR="$BUILD_HOME/linux" \
 SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip" \
 OUT_DIR="$OUT_DIR" \
 VERSION="$EXTERNAL_WARP_VERSION" \

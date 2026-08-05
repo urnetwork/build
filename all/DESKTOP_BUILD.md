@@ -1,7 +1,9 @@
-# Desktop build pipeline (Windows Store + Snap Store)
+# Desktop build pipeline (Windows MSI + Linux deb/AppImage)
 
-How `all/run.sh` on the macOS build server produces the Windows MSI and the Linux
-snap, and the answers to the "what runs where" questions.
+How `all/run.sh` on the macOS build server produces the Windows MSI and the
+Linux artifacts (daemon `.deb` + `install.sh` tarball, GUI AppImage + `.zsync`
+— names normative in `linux/MIGRATION.md`), and the answers to the "what runs
+where" questions.
 
 ## What builds natively on macOS, and what doesn't
 
@@ -11,13 +13,13 @@ snap, and the answers to the "what runs where" questions.
 | SDK Linux `.so` (amd64+arm64) | **Yes** | `sdk/cgo` cross-compiles via `zig cc` (pins the 22.04 glibc floor) |
 | Linux headless core (`cmd/urnetworkd`) | **Yes** | pure Go, `CGO_ENABLED=0`, cross-compiles |
 | **Windows app MSI** (WinUI 3 C++, WDK driver, WiX) | **No** | MSVC, WinUI 3, the WDK, and WiX are Windows-only |
-| **Linux snap** (GTK4 GUI + snapcraft) | **No (natively)** | the GTK GUI needs cgo+GTK4 for the linux target; snapcraft needs Linux |
+| **Linux artifacts** (GTK4 GUI AppImage + daemon deb/tarball) | **No (natively)** | the GTK GUI needs cgo+GTK4 for the linux target; deb/AppImage assembly needs a Linux userland |
 
 So the **Linux** SDK `.so` is cross-built on the mac (zig) and shipped **into**
-the snap build. The **Windows** SDK DLL builds inside the Windows VM (Go +
-llvm-mingw), alongside the app — the mac needs no Windows toolchain. Either way
-the final *bundles* each need their own OS: a Windows host for the MSI, a Linux
-environment (or Launchpad) for the snap.
+the Linux container build. The **Windows** SDK DLL builds inside the Windows VM
+(Go + llvm-mingw), alongside the app — the mac needs no Windows toolchain.
+Either way the final *bundles* each need their own OS: a Windows host for the
+MSI, a Linux container for the deb/tarball/AppImage.
 
 ## Windows: an ARM Windows 11 VM on the Apple Silicon mac
 
@@ -76,23 +78,17 @@ macOS run.sh                          Windows VM (arm64, ssh server)
   `windows-latest`, Azure). Same `build.ps1`; the tradeoff is signing secrets
   live in CI instead of a local VM.
 
-## Linux: `snapcraft remote-build` (no local Linux) or multipass
+## Linux: an Ubuntu 24.04 Docker container on the mac
 
-Two options for the mac build server:
-
-1. **`snapcraft remote-build`** (recommended for a mac host) — submits the source
-   to Canonical's Launchpad build farm, which builds amd64 **and** arm64 snaps and
-   returns them. No local Linux VM. Needs a Launchpad account and the project on a
-   git branch Launchpad can fetch; builds are public (fine for an app we ship).
-2. **multipass Ubuntu VM** on the mac + `snapcraft` inside it (`snapcraft` drives
-   an LXD/multipass build). Self-contained, private, but arm64+amd64 means either
-   an arm64 multipass VM (native arm64 snap; amd64 via emulation, slow) or two VMs.
-
-`remote-build` is the cleaner fit. Because snapcraft/remote-build only sees the
-`linux/app` tree (not the sibling `sdk`/`connect`/`glog` the `replace` directives
-point to), `run.sh` runs `go mod vendor` first — the replaces resolve against the
-alongside checkouts, vendoring the deps into `linux/app/vendor/` so the snap
-build is fully self-contained (no network module fetches on Launchpad).
+The Linux artifacts build in a plain `ubuntu:24.04` container per target arch
+(arm64 native on Apple Silicon; amd64 under Docker's qemu emulation) — no
+Launchpad, no VM. Per arch, `all/linux/build-arch.sh` runs the meson build,
+`meson install --destdir`s a staging tree, and then invokes the packaging
+scripts the **linux repo** ships (`linux/packaging/*`, `linux/app/scripts/*`) to
+produce the daemon `.deb`, the `install.sh` tarball, and the GUI AppImage +
+`.zsync`. The artifact filenames are normative (`linux/MIGRATION.md`); the
+pipeline fails loudly on a missing packaging script or a wrongly-named output
+rather than uploading nothing silently. Details: `all/linux/README.md`.
 
 ## run.sh flow (added after the macOS app build)
 
@@ -109,10 +105,12 @@ if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
 fi
 
 # all/build-linux.sh: cgo SDK zip (native macOS cross-build: zig)
-#                     + snaps (amd64+arm64) in the snapcraft rock container
+#                     + deb/install-tarball/AppImage (amd64+arm64) in the
+#                     Ubuntu 24.04 container
 if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     github_release_upload "URnetworkSdkLinux-${V}.zip" ...
-    github_release_upload urnetwork_*.snap ...  # (then submit to the Snap Store manually)
+    github_release_upload urnetwork-daemon_*.deb, *.install.tar.gz,
+                          URnetwork-*.AppImage + .AppImage.zsync
 fi
 ```
 
@@ -146,18 +144,22 @@ Note this **overwrites** the release copies under `BUILD_HOME` with the local
 source; re-run run.sh's version staging before a real release. Implemented in
 `all/stage-local-repos.sh`.
 
-## Store submission: manual for now
+## Store submission / publishing: manual for now
 
 The pipeline **builds the bundles and attaches them to the GitHub release**; a
-human then submits them:
+human then publishes them:
 
 - **Windows Store:** upload the MSI(s) to the Partner Center EXE/MSI listing.
-- **Snap Store:** `snapcraft upload --release=stable <snap>` (or the Snap Store
-  web dashboard).
+- **Linux:** no store. The `.deb`/tarball/AppImage ship from the release page;
+  publishing the `.deb` to the signed apt repo and re-hosting the AppImage +
+  `.zsync` on the self-hosted update endpoint (GitHub Releases can't serve the
+  multi-range requests zsync needs — `linux/APPIMAGE.md` §11f) are manual
+  follow-ups.
 
-Automated submission (the `msstore` CLI on the VM; `snapcraft upload` in the
-pipeline) is a later step — wire it in once the listings + credentials are set
-up. It was intentionally left out so a release never blocks on store APIs.
+Automated submission (the `msstore` CLI on the VM; apt-repo/update-endpoint
+publishing in the pipeline) is a later step — wire it in once the listings +
+credentials are set up. It was intentionally left out so a release never blocks
+on store APIs.
 
 ## Env vars
 
@@ -168,5 +170,5 @@ They require:
 - `WINDOWS_BUILD_DIR` — (optional) path on the VM where the repos are checked
   out; default `C:/build/urnetwork`.
 
-The snap builds via `snapcraft remote-build` (needs a configured Launchpad
-account on the build host).
+The Linux build needs Docker (Docker Desktop, with buildx + qemu) running on
+the build host — no other credentials.

@@ -1252,7 +1252,7 @@ fi
 
 
 # =============================================================================
-# Desktop apps: Windows Store (MSI) + Snap Store (snap).
+# Desktop apps: Windows Store (MSI) + Linux (deb + install tarball + AppImage).
 # See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
 #
 # Each platform builds via its own script (all/build-windows.sh,
@@ -1261,9 +1261,16 @@ fi
 # this macOS host (sdk/cgo via zig). Then the app
 # *bundle* is produced LOCALLY on this host via virtualization — the MSI in a
 # QEMU/HVF ARM Windows VM (build/all/windows, image built once by setup.sh);
-# the snap in a Docker container (build/all/linux, Canonical snapcraft rock,
-# --destructive-mode per arch). The scripts use the local branches as-is (the
-# version branches configured above) and inherit BUILD_HOME + the WARP_*
+# the Linux artifacts in Docker containers (build/all/linux; per arch TWO
+# images, because the halves cannot share one: the daemon builds on Ubuntu
+# 22.04, whose glibc 2.35 IS the floor the .deb declares, while the GTK4 GUI
+# needs 24.04, the oldest Ubuntu packaging GTK4 — so 22.04 has no GTK at all.
+# Each runs meson + the linux repo's packaging scripts, then verify.sh proves
+# the artifacts work: the AppImage extracts, bundles its GTK stack without
+# falling through to host libraries, and launches under xvfb; the .deb installs,
+# creates its group and purges cleanly; the install.sh tarball round-trips. The
+# artifact names are normative in linux/MIGRATION.md). The scripts use the local branches as-is
+# (the version branches configured above) and inherit BUILD_HOME + the WARP_*
 # versions exported above; they can also be re-run standalone after this
 # pipeline, e.g. when a flaky VM/container build needs a retry.
 #
@@ -1271,9 +1278,12 @@ fi
 # warn and skip that platform's artifacts (don't upload stale/partial ones);
 # the pipeline continues.
 #
-# Store SUBMISSION is manual for now: this pipeline builds the bundles and
+# SUBMISSION/PUBLISHING is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
-# Store (Partner Center) and the .snap to the Snap Store.
+# Store (Partner Center). Linux has no store — the deb/tarball/AppImage ship
+# from the release page, and re-hosting the AppImage + .zsync on the update
+# endpoint (GitHub Releases can't serve the multi-range requests zsync needs —
+# linux/APPIMAGE.md §11f) is likewise a manual follow-up.
 # =============================================================================
 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
@@ -1289,15 +1299,22 @@ else
     builder_message "warning: windows build did not finish — skipping the windows sdk + MSI artifacts (release continues)"
 fi
 
-builder_message "building linux snap (cgo sdk + C++/GTK4 snap via snapcraft rock container)"
+builder_message "building linux app (cgo sdk + deb/install-tarball on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container)"
 if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
-    for snap in "$DESKTOP_OUT/linux/"*.snap(N); do
-        github_release_upload "$(basename "$snap")" "$snap"
+    # Three artifact types per arch (names normative — linux/MIGRATION.md):
+    # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
+    # URnetwork-<v>-<arch>.AppImage + .AppImage.zsync. (N) nullglobs each
+    # pattern so a missing type uploads nothing rather than a literal '*'.
+    for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
+                    "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
+                    "$DESKTOP_OUT/linux/"*.AppImage(N) \
+                    "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
+        github_release_upload "$(basename "$artifact")" "$artifact"
     done
     builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 else
-    builder_message "warning: linux snap build did not finish — skipping the linux sdk + snap artifacts (release continues)"
+    builder_message "warning: linux build did not finish — skipping the linux sdk + deb/install-tarball/AppImage artifacts (release continues)"
 fi
 
 

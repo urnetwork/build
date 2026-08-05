@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# One-time setup + smoke test for the Linux snap build environment — the Linux
-# analog of windows/setup.sh. Builds the snapcraft builder container (one per
-# arch, from ./Dockerfile) and verifies it has snapcraft + the C++/GTK4 toolchain
-# the snap needs, WITHOUT running a full snap build. Run once on the build host
-# before a release to confirm build.sh will work.
+# One-time setup + smoke test for the Linux build environment — the Linux
+# analog of windows/setup.sh. Builds the builder container (one per arch, from
+# ./Dockerfile) and verifies it has the C++/GTK4 toolchain plus the deb /
+# install-tarball / AppImage packaging tools, WITHOUT running a full build. Run
+# once on the build host before a release to confirm build.sh will work.
 #
 #   ./setup.sh                        # smoke-test the native arch (arm64)
 #   ./setup.sh --arches "amd64 arm64" # smoke-test both (amd64 runs under emulation)
@@ -15,7 +15,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-image_base="urnetwork-snap-builder"
+image_base="urnetwork-linux-builder"
+# Two images per arch: daemon (Ubuntu 22.04, the declared glibc floor) and gui
+# (Ubuntu 24.04, the oldest with GTK4). See Dockerfile.daemon's header.
+roles="${ROLES:-daemon gui}"
 
 # Default to the arch that runs native on the Apple-Silicon host (fast). amd64
 # builds/tests under Docker's qemu emulation, so it's opt-in for the smoke test.
@@ -25,7 +28,7 @@ usage() {
   cat <<EOF
 Usage: setup.sh [--arches "amd64 arm64"]
 
-Builds the snap builder container(s) and smoke-tests the toolchain.
+Builds the Linux builder container(s) and smoke-tests the toolchain.
 
 Options:
   --arches "LIST"   space-separated arches to test (default "arm64"; amd64 is
@@ -55,19 +58,24 @@ docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not running — star
 # --- build + smoke-test each arch --------------------------------------------
 rc=0
 for arch in ${ARCHES}; do
-  echo ">>> building the snap builder image for ${arch} (deps baked in; layer-cached)"
-  docker build --platform "linux/${arch}" -t "${image_base}:${arch}" "${here}"
+  for role in ${roles}; do
+    echo ">>> building the Linux ${role} builder image for ${arch} (deps baked in; layer-cached)"
+    docker build --platform "linux/${arch}" \
+      -f "${here}/Dockerfile.${role}" \
+      -t "${image_base}-${role}:${arch}" "${here}"
 
-  echo ">>> smoke-testing the ${arch} container"
-  # Override the rock's snapcraft entrypoint to run our checks; mount the script ro.
-  if docker run --rm --platform "linux/${arch}" --entrypoint bash \
-       -v "${here}/smoke-test.sh:/smoke-test.sh:ro" \
-       "${image_base}:${arch}" /smoke-test.sh; then
-    echo ">>> ${arch}: SMOKE TEST PASSED"
-  else
-    echo ">>> ${arch}: SMOKE TEST FAILED" >&2
-    rc=1
-  fi
+    echo ">>> smoke-testing the ${arch}/${role} container"
+    # Mount the check script ro and run it with bash (mount perms may drop +x).
+    if docker run --rm --platform "linux/${arch}" \
+         -v "${here}/smoke-test.sh:/smoke-test.sh:ro" \
+         -e ROLE="${role}" \
+         "${image_base}-${role}:${arch}" bash /smoke-test.sh; then
+      echo ">>> ${arch}/${role}: SMOKE TEST PASSED"
+    else
+      echo ">>> ${arch}/${role}: SMOKE TEST FAILED" >&2
+      rc=1
+    fi
+  done
 done
 
 echo

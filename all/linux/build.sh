@@ -1,85 +1,128 @@
 #!/usr/bin/env bash
-# Build the URnetwork Linux snap for amd64 + arm64 in Docker (Canonical snapcraft
-# rock, --destructive-mode). Runs on the macOS build host; arm64 builds native,
+# Build the URnetwork Linux release artifacts for amd64 + arm64 in Docker (plain
+# Ubuntu 24.04 build image). Runs on the macOS build host; arm64 builds native,
 # amd64 builds under qemu emulation. Called by build/all/build-linux.sh
 # (run.sh's linux build part).
 #
+# Per arch this produces, in OUT_DIR (names are NORMATIVE — linux/MIGRATION.md
+# "Artifact filenames"; run.sh globs for exactly these):
+#   urnetwork-daemon_<version>_<arch>.deb
+#   urnetwork-daemon-<version>-<arch>.install.tar.gz
+#   URnetwork-<version>-<arch>.AppImage  (+ .AppImage.zsync)
+#
+# The heavy lifting happens inside the container: build-arch.sh (mounted in)
+# runs the meson build, stages an install tree, and invokes the packaging
+# scripts the linux repo ships (linux/packaging/*, linux/app/scripts/*). Those
+# scripts are owned by the linux repo (MIGRATION.md workstream B), not by this
+# one — build-arch.sh fails loudly, naming the expected path, if one is missing.
+#
 # Inputs (env):
-#   BUILD_HOME      the build server's local build dir (all repos) — bind-mounted
-#                   into the container at /build so the snap build sees the exact
-#                   local state run.sh set up, including any sibling repos it
-#                   references (../../sdk, etc.)
-#   LINUX_APP_DIR   path to linux/app (meson project + snap/snapcraft.yaml); must
-#                   live under BUILD_HOME
-#   SDK_ZIP         path to URnetworkSdkLinux.zip (cgo build output)
-#   OUT_DIR         where to copy the resulting .snap files
-#   VERSION         release version to stamp into snapcraft.yaml
-#   ARCHES          (optional) space-separated, default "amd64 arm64"
+#   BUILD_HOME   the build server's local build dir (all repos); LINUX_DIR must
+#                live under it so the build sees the exact local state run.sh
+#                set up
+#   LINUX_DIR    path to the linux repo root (app/ + packaging/)
+#   SDK_ZIP      path to URnetworkSdkLinux.zip (cgo build output)
+#   OUT_DIR      where the artifacts land; stale ones are cleared first
+#   VERSION      release version embedded in the artifact names
+#   ARCHES       (optional) space-separated, default "amd64 arm64"
+#
+# Optional, forwarded into the container (see build-arch.sh):
+#   UR_GLIBC_FLOOR    daemon glibc floor (default 2.35); must match the
+#                     `Depends: libc6 (>= x)` in linux/packaging/deb/nfpm.yaml
+#   UR_GLIBC_CEILING  the AppImage's own glibc gate (default: UR_GLIBC_FLOOR)
+#   UR_SKIP_VERIFY=1  build + package only, skip the verification stage
 #
 # SPDX-License-Identifier: MPL-2.0
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${BUILD_HOME:?set BUILD_HOME}"
-: "${LINUX_APP_DIR:?set LINUX_APP_DIR}"
+: "${LINUX_DIR:?set LINUX_DIR}"
 : "${SDK_ZIP:?set SDK_ZIP}"
 : "${OUT_DIR:?set OUT_DIR}"
 : "${VERSION:?set VERSION}"
 ARCHES="${ARCHES:-amd64 arm64}"
 
-# The container bind-mounts the whole build home at /build; the snap project is
-# LINUX_APP_DIR relative to it.
-proj_rel="${LINUX_APP_DIR#"$BUILD_HOME"/}"
-if [ "$proj_rel" = "$LINUX_APP_DIR" ]; then
-  echo "ERROR: LINUX_APP_DIR ($LINUX_APP_DIR) must live under BUILD_HOME ($BUILD_HOME)" >&2
+# The release stages every repo under BUILD_HOME; catch a stray path early.
+case "$LINUX_DIR" in
+  "$BUILD_HOME"/*) ;;
+  *)
+    echo "ERROR: LINUX_DIR ($LINUX_DIR) must live under BUILD_HOME ($BUILD_HOME)" >&2
+    exit 1
+    ;;
+esac
+if [ ! -d "${LINUX_DIR}/app" ]; then
+  echo "ERROR: LINUX_DIR ($LINUX_DIR) does not look like the linux repo root (no app/)" >&2
   exit 1
 fi
 
-image_base="urnetwork-snap-builder"
+# Two build images per arch, because the two halves cannot share one (see
+# Dockerfile.daemon's header): the daemon needs Ubuntu 22.04, whose glibc 2.35
+# IS the floor the .deb declares; the GUI needs Ubuntu 24.04, the oldest Ubuntu
+# packaging GTK4 + libadwaita.
+image_base="urnetwork-linux-builder"
+roles="daemon gui"
 
 mkdir -p "${OUT_DIR}"
 
-# Stamp the release version into the snap metadata.
-sed_i() { if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi; }
-sed_i "s/^version: .*/version: \"${VERSION}\"/" "${LINUX_APP_DIR}/snap/snapcraft.yaml"
+# Stage the cgo SDK into third_party/urnetwork-sdk/{amd64,arm64}/ (both arches)
+# BEFORE mounting: the linux repo is mounted read-only into the container, so
+# everything it needs must be in place on the host first.
+fetch_deps="${LINUX_DIR}/app/scripts/fetch-deps.sh"
+if [ ! -f "${fetch_deps}" ]; then
+  echo "ERROR: ${fetch_deps} missing — the linux repo's SDK vendoring script (MIGRATION.md workstream B)" >&2
+  exit 1
+fi
+"${fetch_deps}" "${SDK_ZIP}"
 
-# Stage the cgo SDK into third_party/urnetwork-sdk/{amd64,arm64}/ (both arches).
-"${LINUX_APP_DIR}/scripts/fetch-deps.sh" "${SDK_ZIP}"
-
-# Clean any stale snap output in the mounted project dir.
-rm -f "${LINUX_APP_DIR}/"*.snap
+# Clear any stale artifacts of the types we produce, so a partial rebuild can
+# never hand old files to the uploader. (Once per run, NOT per arch — the first
+# arch's output must survive the second arch's pass.)
+rm -f "${OUT_DIR}/"*.deb "${OUT_DIR}/"*.install.tar.gz \
+      "${OUT_DIR}/"*.AppImage "${OUT_DIR}/"*.AppImage.zsync
 
 for arch in ${ARCHES}; do
-  echo ">>> building linux snap for ${arch}"
-  # Build the per-arch builder image (deps baked in; layer-cached across runs).
-  docker build --platform "linux/${arch}" -t "${image_base}:${arch}" "${here}"
+  for role in ${roles}; do
+    echo ">>> building linux ${role} artifacts for ${arch}"
+    # Per-arch, per-role builder image (deps baked in; layer-cached across runs).
+    docker build --platform "linux/${arch}" \
+      -f "${here}/Dockerfile.${role}" \
+      -t "${image_base}-${role}:${arch}" "${here}"
 
-  # snapcraft (--destructive-mode) builds in-container and resolves the project at
-  # /project. /project must NOT be the Docker bind mount of the macOS source:
-  # craft-parts writes user.* xattrs into parts/ when extracting stage-packages, and
-  # the bind-mount FS (Docker virtiofs) rejects them ("Failed to write attribute
-  # 'user.craft_parts.origin_stage_package'"). So mount the source READ-ONLY at /src,
-  # copy it into a container-local /project (the overlay FS supports xattrs), build
-  # there, and copy the .snap out to the writable OUT_DIR mount. fetch-deps.sh already
-  # staged the cgo SDK into linux/app/third_party, so /project is self-contained.
-  # We override the rock entrypoint (run-snapcraft.sh) with bash, so do its `apt
-  # update` ourselves (the image cleared /var/lib/apt/lists).
-  docker run --rm --platform "linux/${arch}" -u root \
-    -v "${LINUX_APP_DIR}:/src:ro" -v "${OUT_DIR}:/out" \
-    --entrypoint /bin/bash \
-    "${image_base}:${arch}" \
-    -c "set -eu; mkdir -p /project && cp -a /src/. /project/ && cd /project && rm -rf parts stage prime ./*.snap; apt-get update >/dev/null 2>&1 || true; snapcraft pack --destructive-mode --build-for '${arch}' --verbosity verbose && cp -f /project/*.snap /out/"
+    # The linux repo is mounted READ-ONLY at /src and copied to a container-local
+    # /work by build-arch.sh. The snapcraft-era reason for that copy (craft-parts
+    # wrote user.* xattrs that Docker's virtiofs rejects) is gone with snapcraft;
+    # the copy is kept because the container runs as root and must never write
+    # build junk into the macOS checkout — the ro mount enforces it.
+    docker run --rm --platform "linux/${arch}" \
+      -v "${LINUX_DIR}:/src:ro" \
+      -v "${OUT_DIR}:/out" \
+      -v "${here}/build-arch.sh:/build-arch.sh:ro" \
+      -v "${here}/verify.sh:/verify.sh:ro" \
+      -e ARCH="${arch}" -e VERSION="${VERSION}" -e ROLE="${role}" \
+      -e UR_GLIBC_FLOOR -e UR_GLIBC_CEILING -e UR_SKIP_VERIFY \
+      "${image_base}-${role}:${arch}" \
+      bash /build-arch.sh
+  done
 
-  # The container copied the snap (urnetwork_<version>_<arch>.snap) into OUT_DIR.
-  snap_file="$(ls -t "${OUT_DIR}/"*"_${arch}.snap" 2>/dev/null | head -1 || true)"
-  if [ -z "${snap_file}" ]; then
-    snap_file="$(ls -t "${OUT_DIR}/"*.snap 2>/dev/null | head -1 || true)"
-  fi
-  if [ -z "${snap_file}" ]; then
-    echo "ERROR: no .snap produced for ${arch}" >&2
-    exit 1
-  fi
-  echo ">>> ${arch} snap -> ${snap_file}"
+  # build-arch.sh already asserted these in-container; re-check on the host so
+  # a mount/copy mishap can never sail through to the uploader.
+  for f in \
+    "urnetwork-daemon_${VERSION}_${arch}.deb" \
+    "urnetwork-daemon-${VERSION}-${arch}.install.tar.gz" \
+    "URnetwork-${VERSION}-${arch}.AppImage" \
+    "URnetwork-${VERSION}-${arch}.AppImage.zsync"; do
+    if [ ! -f "${OUT_DIR}/${f}" ]; then
+      echo "ERROR: expected artifact missing after the ${arch} build: ${OUT_DIR}/${f}" >&2
+      echo "       (artifact names are normative — linux/MIGRATION.md 'Artifact filenames')" >&2
+      exit 1
+    fi
+  done
+  echo ">>> ${arch} artifacts OK"
 done
 
-echo ">>> linux snaps built: $(ls "${OUT_DIR}/"*.snap | xargs -n1 basename | tr '\n' ' ')"
+echo ">>> linux artifacts built:"
+for f in "${OUT_DIR}"/*.deb "${OUT_DIR}"/*.install.tar.gz \
+         "${OUT_DIR}"/*.AppImage "${OUT_DIR}"/*.AppImage.zsync; do
+  if [ -f "$f" ]; then echo "    $(basename "$f")"; fi
+done

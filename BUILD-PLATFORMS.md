@@ -14,7 +14,7 @@ can verify a build on each platform before committing.
 
 | Platform | Script | Toolchain (macOS host) | Output |
 |---|---|---|---|
-| Linux | `build-linux.sh` | zig (cgo cross) + Docker (snapcraft) | `*.snap` (amd64, arm64) |
+| Linux | `build-linux.sh` | zig (cgo cross) + Docker (Ubuntu 24.04) | `*.deb`, `*.install.tar.gz`, `*.AppImage` + `.zsync` (amd64, arm64) |
 | Windows | `build-windows.sh` | QEMU/HVF Windows VM | `*.msi` (x64, arm64) |
 | Android (F-Droid) | `build-fdroid.sh` | Docker (F-Droid buildserver) | github/ungoogle `*.apk` |
 
@@ -66,11 +66,13 @@ off a `v<version>` branch otherwise). The F-Droid build takes its version from
   `warp.version`/`warp.version_code`). See the `build-fdroid.sh` FIXME re: Apple
   M4 + Docker.
 
-## Linux — snap
+## Linux — deb + install tarball + AppImage
 
-Cross-builds the cgo SDK `.so`s natively (zig), then builds the snaps in the
-Canonical snapcraft rock Docker container (arm64 native, amd64 under qemu
-emulation).
+Cross-builds the cgo SDK `.so`s natively (zig), then builds the daemon `.deb`,
+the daemon `install.sh` tarball, and the GUI AppImage (+ `.zsync`) in a plain
+Ubuntu 24.04 Docker container (arm64 native, amd64 under qemu emulation) —
+meson build + the linux repo's packaging scripts; artifact names are normative
+in `linux/MIGRATION.md`.
 
 ```bash
 SRC_HOME=/Users/you/urnetwork \
@@ -81,9 +83,12 @@ OUT_DIR=/tmp/linux-out \
 ```
 
 - `ARCHES` (default `"amd64 arm64"`) — set `arm64` for a faster native-only
-  build; the cgo SDK still cross-builds both arches (only the snap step is
+  build; the cgo SDK still cross-builds both arches (only the packaging step is
   limited).
-- Output: `.snap` files in `OUT_DIR` (default `$BUILD_HOME/out/desktop/linux`).
+- Output: `urnetwork-daemon_<v>_<arch>.deb`,
+  `urnetwork-daemon-<v>-<arch>.install.tar.gz`, and
+  `URnetwork-<v>-<arch>.AppImage` + `.AppImage.zsync` in `OUT_DIR` (default
+  `$BUILD_HOME/out/desktop/linux`).
 
 ## Windows — MSI
 
@@ -129,14 +134,14 @@ SRC_HOME=/Users/you/urnetwork \
 | `EXTERNAL_WARP_VERSION` | linux, windows | release version stamp (e.g. `0.0.0-0`); required when staging local |
 | `BUILD_HOME` | all | build root (default: `build/`); staging destination |
 | `OUT_DIR` | linux, windows | where artifacts land (existing ones are cleared) |
-| `ARCHES` | linux | snap arches (default `"amd64 arm64"`) |
+| `ARCHES` | linux | packaging arches (default `"amd64 arm64"`) |
 | `WARP_HOME` | fdroid | release signing config root |
 
 ## Caveats
 
 - Staging overwrites `BUILD_HOME/{sdk,connect,glog,<app>}`; re-stage via `run.sh`
   before a release.
-- These are full app builds (snap/MSI/APK), not just compiles — they take
+- These are full app builds (deb+AppImage/MSI/APK), not just compiles — they take
   minutes (Windows the longest). A failure at the app-compile step means your
   code doesn't compile against the SDK; a failure later (packaging/linter) does
   not.

@@ -1,0 +1,124 @@
+# URnetwork Linux GUI/AppImage build container — Ubuntu 24.04.
+#
+# Builds the GTK4 GUI half and packages it as the AppImage. (This replaces the
+# snapcraft-rock image from the snap era — Linux no longer ships as a snap; see
+# linux/MIGRATION.md + linux/APPIMAGE.md.)
+#
+# WHY THIS IS A SEPARATE IMAGE FROM Dockerfile.daemon: 24.04 is the oldest
+# Ubuntu that packages GTK4 + libadwaita, but its glibc (2.39) is newer than the
+# 2.35 floor the .deb declares — so the DAEMON must be built on 22.04 to keep
+# that declaration honest, and 22.04 has no libgtkmm-4.0 at all. linux/app's
+# `gui` feature exists precisely to let the two halves build on different
+# images. Consequence to keep in view: 24.04 IS the AppImage's ABI floor, since
+# glibc/libstdc++/Mesa are host-provided per the excludelist — the GUI therefore
+# requires a 24.04-or-newer host even though the daemon runs on 22.04.
+#
+# We build one container per target arch: arm64 runs native on the Apple-Silicon
+# build host; amd64 runs under Docker's qemu emulation. Pre-baking every build
+# dep turns the emulated pass's apt installs into cache hits.
+#
+# See build.sh (host orchestration), build-arch.sh (runs inside, ROLE=gui),
+# verify.sh, and ../run.sh (Linux section).
+# SPDX-License-Identifier: MPL-2.0
+FROM ubuntu:24.04
+
+ENV LANG=C.UTF-8
+
+# Build + packaging toolchain:
+# - meson/g++/GTK stack: what linux/app's meson build needs
+# - squashfs-tools/zsync/desktop-file-utils/patchelf/file: AppDir assembly +
+#   appimagetool helpers (zsyncmake produces the .zsync update feed)
+# - librsvg2-common/gtk-update-icon-cache: svg pixbuf loader + icon cache for
+#   the hand-rolled AppDir (APPIMAGE.md §11e)
+# - libgdk-pixbuf2.0-bin: gdk-pixbuf-query-loaders, which make-appimage.sh
+#   bundles so AppRun can regenerate the loader cache at launch
+# - glib-networking: the GIO TLS modules; the AppDir bundles the GLib family
+#   WITH its modules or not at all
+# - adwaita-icon-theme: make-appimage.sh hard-fails without /usr/share/icons/Adwaita
+# - xvfb/dbus-x11: the headless launch smoke test — a GTK/schema/pixbuf
+#   misconfiguration aborts on startup, and that is exactly what it catches
+# - libfuse2t64: the AppImage's own FUSE runtime, so the launch test exercises
+#   a real mount rather than only the extract path
+#
+# The .deb/tarball tooling (nfpm, dpkg, systemd) is deliberately NOT here — it
+# lives in Dockerfile.daemon, which owns those artifacts.
+#
+# NOTE libwebkitgtk-6.0-dev is deliberately ABSENT. meson picks webkitgtk-6.0 up
+# whenever it is installed (`required : false`, no opt-out option), and
+# make-appimage.sh then REFUSES to package: WebKitGTK hardcodes absolute paths
+# to its multi-process helpers, so no tool can relocate it into an AppDir
+# (APPIMAGE.md §4). The upgrade sheet falls back to the hosted checkout in the
+# system browser, which is the documented decision. Installing it here would
+# fail every AppImage build.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends \
+        g++ \
+        meson \
+        ninja-build \
+        pkg-config \
+        libgtkmm-4.0-dev \
+        libadwaita-1-dev \
+        libglib2.0-dev \
+        libglib2.0-bin \
+        libgdk-pixbuf2.0-bin \
+        glib-networking \
+        adwaita-icon-theme \
+        nlohmann-json3-dev \
+        gettext \
+        unzip \
+        squashfs-tools \
+        zsync \
+        file \
+        binutils \
+        desktop-file-utils \
+        patchelf \
+        librsvg2-common \
+        gtk-update-icon-cache \
+        xvfb \
+        dbus-x11 \
+        libfuse2t64 \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# appimagetool + linuxdeploy (core only — its GTK plugin is deliberately NOT
+# installed: the AppDir is hand-rolled per APPIMAGE.md §4/§11e, and the plugin's
+# GTK_THEME/GDK_BACKEND exports actively break a libadwaita app). Both ship as
+# per-arch AppImages; Docker has no FUSE, so extract them at image-build time
+# and put thin wrappers on PATH. APPIMAGE_EXTRACT_AND_RUN covers any AppImage
+# tool a packaging script fetches itself. `continuous` is the only release
+# channel either project publishes aarch64 builds on; the layer is cached until
+# a `docker build --no-cache` refreshes it.
+ENV APPIMAGE_EXTRACT_AND_RUN=1
+ARG TARGETARCH
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) aiarch=x86_64 ;; \
+      arm64) aiarch=aarch64 ;; \
+      *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}' (need BuildKit + --platform linux/{amd64,arm64})"; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/appimagetool.AppImage \
+      "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${aiarch}.AppImage"; \
+    curl -fsSL -o /tmp/linuxdeploy.AppImage \
+      "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${aiarch}.AppImage"; \
+    for tool in appimagetool linuxdeploy; do \
+      chmod +x "/tmp/${tool}.AppImage"; \
+      # --appimage-extract unpacks the embedded squashfs (no FUSE needed) and
+      # doubles as the download-integrity check: a truncated file fails here.
+      (cd /opt && "/tmp/${tool}.AppImage" --appimage-extract >/dev/null && mv squashfs-root "${tool}"); \
+      rm "/tmp/${tool}.AppImage"; \
+      printf '#!/bin/sh\nexec /opt/%s/AppRun "$@"\n' "${tool}" > "/usr/local/bin/${tool}"; \
+      chmod +x "/usr/local/bin/${tool}"; \
+      test -x "/opt/${tool}/AppRun"; \
+    done; \
+    appimagetool --version
+
+# *important* gettext (msgfmt) is required, not optional: meson's i18n module
+# SILENTLY disables translations when msgfmt is missing — the build still
+# succeeds and the app ships english-only, with no error to notice.
+# build-arch.sh carries a matching tripwire on the staged *.mo files.
+#
+# *important* the GUI is likewise soft: meson's `gui` feature defaults to
+# `auto`, which silently skips urnetwork-gui when gtkmm-4.0/libadwaita-1 are
+# missing — producing a daemon-only build and no AppImage, with no error.
+# build-arch.sh passes -Dgui=enabled so that is a hard failure instead.
