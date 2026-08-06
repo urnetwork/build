@@ -61,12 +61,50 @@ if [ -z "${WARP_VERSION:-}" ]; then
 fi
 export EXTERNAL_WARP_VERSION WARP_VERSION
 
+# Preflight the packaging scripts HERE, before the (expensive) container image
+# build, and diagnose the overwhelmingly common cause: this pipeline builds
+# $BUILD_HOME/linux, a release-staged checkout, NOT your working tree. Anything
+# uncommitted — which packaging/ is, while the AppImage migration lands — is
+# absent there unless stage_local_repos copied it in, and that is a no-op until
+# SRC_HOME/SRC_LINUX is set. Without this check the failure surfaces deep inside
+# the container as "the linux repo is missing packaging scripts", which reads as
+# "they were never written" rather than "they were never staged".
+for _p in packaging/make-deb.sh packaging/make-install-tarball.sh packaging/make-appimage.sh; do
+  [ -f "$BUILD_HOME/linux/$_p" ] && continue
+  {
+    echo "ERROR: $BUILD_HOME/linux/$_p is missing."
+    if [ -f "${SRC_HOME:-/nonexistent}/linux/$_p" ] || [ -f "${SRC_LINUX:-/nonexistent}/$_p" ]; then
+      echo "       It EXISTS in the local source you pointed at, so staging did not copy it."
+      echo "       Check the rsync excludes in all/stage-local-repos.sh."
+    else
+      echo "       This pipeline builds \$BUILD_HOME/linux (a release-staged checkout),"
+      echo "       not your working tree. Uncommitted files are only present there if"
+      echo "       stage_local_repos copied them in, which needs SRC_HOME or SRC_LINUX:"
+      echo ""
+      echo "         SRC_HOME=\$HOME/urnetwork EXTERNAL_WARP_VERSION=0.0.0-0 $0"
+      echo ""
+      echo "       (EXTERNAL_WARP_VERSION is required when staging local sources: the"
+      echo "       auto-detect reads a v<version> branch, which a working tree is not on.)"
+      echo "       Otherwise commit + push the linux repo so the release checkout has it."
+    fi
+  } >&2
+  exit 1
+done
+
 OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux}"
 mkdir -p "$OUT_DIR"
 # Clear stale artifacts of every type this build produces (run.sh globs OUT_DIR
 # to upload, so anything left here would sail into the release).
+#
+# Includes the .sha256/.asc SIDECARS: they carry the version in their name, so
+# a version change orphans the previous set rather than overwriting it, and an
+# orphaned checksum that no longer matches any artifact is worse than none.
+# Also sweeps *.snap — nothing produces those since the AppImage migration, but
+# a pre-migration tree still has them sitting next to the real artifacts.
 rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz \
-      "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.AppImage.zsync
+      "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.AppImage.zsync \
+      "$OUT_DIR"/*.sha256 "$OUT_DIR"/*.asc \
+      "$OUT_DIR"/*.snap
 
 # SDK desktop library — cross-builds natively on this macOS host (zig cc,
 # pinning the glibc floor). One-time toolchain install: (cd sdk/cgo && make init)

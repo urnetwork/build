@@ -102,10 +102,29 @@ RUN set -eu; \
     curl -fsSL -o /tmp/linuxdeploy.AppImage \
       "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${aiarch}.AppImage"; \
     for tool in appimagetool linuxdeploy; do \
-      chmod +x "/tmp/${tool}.AppImage"; \
-      # --appimage-extract unpacks the embedded squashfs (no FUSE needed) and
-      # doubles as the download-integrity check: a truncated file fails here.
-      (cd /opt && "/tmp/${tool}.AppImage" --appimage-extract >/dev/null && mv squashfs-root "${tool}"); \
+      # Unpack WITHOUT executing the AppImage. `--appimage-extract` would be the
+      # obvious way, but it runs the outer AppImage runtime — a *static-pie*
+      # x86-64 ELF — and Docker Desktop's amd64 emulation on an Apple Silicon
+      # host cannot exec those: "Exec format error" (exit 126), even though
+      # ordinary x86-64 binaries (apt, curl, and the tool's own inner binary)
+      # emulate fine. So the arm64 image built and the amd64 image did not.
+      #
+      # An AppImage type 2 is just an ELF with a squashfs appended, so compute
+      # where the ELF ends (end of its section-header table — the same sum
+      # appimage's own appimage_get_elf_size() uses) and unsquashfs from there.
+      # No execution, so it is emulator-independent. It keeps the integrity
+      # check too: a truncated download fails in unsquashfs.
+      # Split on ':' and take field 2 — NOT $NF. These readelf lines read
+      # "Start of section headers:  944440 (bytes into file)", so the last
+      # whitespace field is "file)", which strips to an empty string and
+      # silently yields offset 0 (unsquashfs then fails with no useful reason).
+      off=$(readelf -h "/tmp/${tool}.AppImage" | awk -F: '\
+        /Start of section headers/ {gsub(/[^0-9]/,"",$2); o=$2} \
+        /Size of section headers/  {gsub(/[^0-9]/,"",$2); s=$2} \
+        /Number of section headers/{gsub(/[^0-9]/,"",$2); n=$2} \
+        END {print o + s * n}'); \
+      test "${off}" -gt 0 || { echo "ERROR: could not read ELF size of ${tool}.AppImage"; exit 1; }; \
+      unsquashfs -q -o "${off}" -d "/opt/${tool}" "/tmp/${tool}.AppImage" >/dev/null; \
       rm "/tmp/${tool}.AppImage"; \
       printf '#!/bin/sh\nexec /opt/%s/AppRun "$@"\n' "${tool}" > "/usr/local/bin/${tool}"; \
       chmod +x "/usr/local/bin/${tool}"; \

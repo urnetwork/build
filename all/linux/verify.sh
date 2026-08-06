@@ -80,14 +80,39 @@ else
   pass "AppImage present ($(du -h "${APPIMAGE}" | cut -f1))"
   check "AppImage is executable" test -x "${APPIMAGE}"
 
-  # --appimage-extract needs no FUSE, so it works in a container. It is also
-  # the cheapest proof the embedded squashfs is intact.
-  if (cd "${WORK}" && "${APPIMAGE}" --appimage-extract >/dev/null 2>&1); then
-    pass "AppImage --appimage-extract"
-  else
-    fail "AppImage --appimage-extract"
-  fi
+  # Unpack WITHOUT executing the AppImage, and record whether the runtime is
+  # executable here at all (RUNTIME_EXECUTABLE, used by the launch test below).
+  #
+  # `--appimage-extract` would be the obvious call, but it runs the outer
+  # AppImage runtime — a *static-pie* ELF — and Docker Desktop's amd64
+  # emulation on an Apple Silicon host cannot exec those ("Exec format error"),
+  # even though ordinary x86-64 binaries emulate fine. Extracting by offset is
+  # emulator-independent, so the amd64 artifact gets the same structural
+  # verification the native arm64 one does instead of a spurious failure.
+  #
+  # An AppImage type 2 is an ELF with a squashfs appended; the squashfs starts
+  # at the end of the section-header table (the sum appimage's own
+  # appimage_get_elf_size() uses). Split readelf on ':' and take field 2 — NOT
+  # $NF, since those lines end in "(bytes into file)".
   APPDIR="${WORK}/squashfs-root"
+  ai_off=$(readelf -h "${APPIMAGE}" | awk -F: '
+    /Start of section headers/ {gsub(/[^0-9]/,"",$2); o=$2}
+    /Size of section headers/  {gsub(/[^0-9]/,"",$2); s=$2}
+    /Number of section headers/{gsub(/[^0-9]/,"",$2); n=$2}
+    END {print o + s * n}')
+  if [ "${ai_off:-0}" -gt 0 ] && unsquashfs -q -o "${ai_off}" -d "${APPDIR}" "${APPIMAGE}" >/dev/null 2>&1; then
+    pass "AppImage squashfs extracts (offset ${ai_off}, no exec required)"
+  else
+    fail "AppImage squashfs extracts (offset ${ai_off:-unreadable})"
+  fi
+
+  # Can the runtime actually exec on THIS host? Native arm64: yes. amd64 under
+  # emulation: no. Not a defect in the artifact — it is a limit of the builder.
+  if "${APPIMAGE}" --appimage-version >/dev/null 2>&1; then
+    RUNTIME_EXECUTABLE=1
+  else
+    RUNTIME_EXECUTABLE=0
+  fi
 
   if [ -d "${APPDIR}" ]; then
     # The hand-rolled AppDir owes all of this by hand (APPIMAGE.md §11e).
@@ -180,23 +205,37 @@ else
       skip "headless launch" "xvfb-run not installed in the builder image"
     else
       LAUNCH_LOG="${WORK}/launch.log"
-      # Run the AppImage itself (exercising AppRun's env setup), not the raw
-      # binary. HOME must be writable: AppRun caches the pixbuf loader index.
+      # Prefer the AppImage itself (it exercises the runtime's mount + AppRun's
+      # env setup). Where the runtime cannot exec — amd64 under emulation on an
+      # Apple Silicon host — fall back to the extracted AppRun, which still
+      # exercises everything we actually bundle: AppRun's env setup, the GTK4
+      # stack, GSettings schemas and the pixbuf loaders. Only the upstream
+      # runtime's self-mount goes untested, and that is not our code.
       export HOME="${WORK}/home"; mkdir -p "${HOME}"
+      if [ "${RUNTIME_EXECUTABLE}" = 1 ]; then
+        LAUNCH_TARGET="${APPIMAGE}"
+        LAUNCH_WHAT="AppImage"
+      else
+        LAUNCH_TARGET="${APPDIR}/AppRun"
+        LAUNCH_WHAT="extracted AppRun"
+        export APPDIR
+        echo "       note: the ${ARCH} AppImage runtime cannot exec on this builder" >&2
+        echo "       (static-pie under emulation) — launching the extracted AppRun instead" >&2
+      fi
       set +e
       timeout 25 xvfb-run -a --server-args='-screen 0 1024x768x24' \
-        dbus-run-session -- "${APPIMAGE}" >"${LAUNCH_LOG}" 2>&1 &
+        dbus-run-session -- "${LAUNCH_TARGET}" >"${LAUNCH_LOG}" 2>&1 &
       launch_pid=$!
       sleep 12
       if kill -0 "${launch_pid}" 2>/dev/null; then
-        pass "AppImage launched and stayed alive 12s under xvfb (no startup abort)"
+        pass "${LAUNCH_WHAT} launched and stayed alive 12s under xvfb (no startup abort)"
         # SIGTERM the whole tree; the AppImage runtime forks a mount helper.
         pkill -TERM -P "${launch_pid}" 2>/dev/null
         kill -TERM "${launch_pid}" 2>/dev/null
         wait "${launch_pid}" 2>/dev/null
       else
         wait "${launch_pid}"; rc=$?
-        fail "AppImage launch (exited ${rc} within 12s)"
+        fail "${LAUNCH_WHAT} launch (exited ${rc} within 12s)"
         echo "       --- last 30 lines of launch output ---" >&2
         tail -30 "${LAUNCH_LOG}" | sed 's/^/       /' >&2
       fi
