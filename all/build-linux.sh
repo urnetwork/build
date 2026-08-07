@@ -109,14 +109,25 @@ rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz \
 # SDK desktop library — cross-builds natively on this macOS host (zig cc,
 # pinning the glibc floor). One-time toolchain install: (cd sdk/cgo && make init)
 #
-# sdk/cgo/go.sum is git-ignored and generated (run.sh regenerates it at version
-# staging via `go mod tidy`). A standalone build from main skips staging, so it
-# can be absent — regenerate it here or the cgo `go build` fails with "missing
-# go.sum entry". `go mod download all` is build-complete and leaves the tracked
-# go.mod untouched.
+# This script BUILDS; it must never modify the sources it is handed. Module
+# preparation (`go mod tidy` for the sibling-replace graph, which regenerates
+# the git-ignored sdk/cgo/go.sum) belongs to run.sh's version staging, upstream
+# of here — so a build can never silently move a dependency version, and the
+# artifact always corresponds to the tree as given. Check and fail with the
+# command to run; do not run it.
 if [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
-  echo ">>> sdk/cgo/go.sum missing — generating it (go mod download all)"
-  (cd "$BUILD_HOME/sdk/cgo" && PATH="$PATH:/usr/local/go/bin:$HOME/go/bin" go mod download all)
+  {
+    echo "ERROR: $BUILD_HOME/sdk/cgo/go.sum is missing."
+    echo "       It is git-ignored and generated, normally by run.sh's version"
+    echo "       staging. This script does not modify sources, so prepare the"
+    echo "       module graph first:"
+    echo ""
+    echo "         (cd $BUILD_HOME/sdk/cgo && go mod tidy)"
+    echo ""
+    echo "       Review the go.mod diff before you keep it — a tidy here also"
+    echo "       upgrades indirect deps (quic-go, gvisor, x/crypto, …)."
+  } >&2
+  exit 1
 fi
 
 echo ">>> building the linux cgo sdk ($WARP_VERSION)"

@@ -37,6 +37,21 @@ export BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 source "$here/stage-local-repos.sh"
 stage_local_repos sdk connect glog goidenticons windows
 
+# Say plainly WHICH tree is about to be built. This script builds
+# $BUILD_HOME/windows — a release-staged checkout — and stage_local_repos is a
+# no-op until SRC_HOME/SRC_WINDOWS is set, so a bare invocation silently
+# compiles committed-only code and misses every uncommitted change. That is
+# invisible in the output otherwise, and the VM build is slow enough that
+# finding out afterwards is expensive.
+if [ -n "${SRC_HOME:-}${SRC_WINDOWS:-}" ]; then
+  echo ">>> source: LOCAL working tree (${SRC_WINDOWS:-${SRC_HOME}/windows}) staged into $BUILD_HOME/windows"
+else
+  echo ">>> source: $BUILD_HOME/windows (release-staged checkout — NOT your working tree)" >&2
+  echo "    to build local, possibly uncommitted changes instead:" >&2
+  echo "      SRC_HOME=\$HOME/urnetwork EXTERNAL_WARP_VERSION=0.0.0-0 $0" >&2
+  echo "    (or just run windows/build.sh, which sets SRC_HOME for you)" >&2
+fi
+
 # The local branches are the source of truth: when the caller doesn't pass the
 # version (run.sh exports it), read it off the windows repo's v<version> branch.
 if [ -z "${EXTERNAL_WARP_VERSION:-}" ]; then
@@ -61,6 +76,30 @@ export EXTERNAL_WARP_VERSION WARP_VERSION
 OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/windows}"
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/*.msi
+
+# The module graph must already be prepared: this script BUILDS and never
+# modifies the sources it is handed, and the rsync into the VM is a straight
+# copy — whatever go.mod/go.sum is here is what the VM compiles. `go mod tidy`
+# belongs to run.sh's version staging, upstream of here, so a build can never
+# silently move a dependency version.
+#
+# Catch it on THIS side of the rsync: inside the VM the same problem costs a
+# full sync plus a Go build before surfacing as the opaque
+# "go: updates to go.mod needed" / "go build failed for windows/amd64".
+if [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
+  {
+    echo "ERROR: $BUILD_HOME/sdk/cgo/go.sum is missing."
+    echo "       It is git-ignored and generated, normally by run.sh's version"
+    echo "       staging. This script does not modify sources, so prepare the"
+    echo "       module graph first:"
+    echo ""
+    echo "         (cd $BUILD_HOME/sdk/cgo && go mod tidy)"
+    echo ""
+    echo "       Review the go.mod diff before you keep it — a tidy here also"
+    echo "       upgrades indirect deps (quic-go, gvisor, x/crypto, …)."
+  } >&2
+  exit 1
+fi
 
 # Everything builds inside the QEMU ARM Windows VM (image built once by
 # all/windows/setup.sh, booted here as a CoW overlay): build.sh rsyncs the build

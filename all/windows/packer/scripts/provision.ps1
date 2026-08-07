@@ -174,17 +174,44 @@ if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
 
 # --- Go + llvm-mingw (URnetwork cgo SDK build) ------------------------------
 # The cgo SDK (sdk/cgo -> URnetworkSdk.dll) builds natively in this VM now (was
-# cross-built on the mac). Pin Go to the sdk module's toolchain (go1.26.4) so
+# cross-built on the mac). Pin Go to the sdk module's toolchain so
 # GOTOOLCHAIN=auto doesn't pull a second one at build time. llvm-mingw supplies
 # x86_64-/aarch64-w64-mingw32-clang for the c-shared DLLs (no Homebrew formula
 # exists; this is the upstream prebuilt, Windows-ARM64 host build, targets both).
-$goVersion = "1.26.4"
+#
+# KEEP IN SYNC with the `go` directive in sdk/cgo/go.mod. When it drifts the
+# build still works but silently pays a toolchain download EVERY run, on the
+# slowest builder we have — "go: downloading go1.26.5 (windows/arm64)" in the
+# build log is the tell. (It drifted to 1.26.4 vs the module's 1.26.5 exactly
+# this way.) Provisioning has no repo checkout to read the version from, so it
+# is hardcoded here on purpose.
+$goVersion = "1.26.5"
 $goRoot = "C:\go"
-if (-not (Test-Path "$goRoot\bin\go.exe")) {
-  Log "installing Go $goVersion (windows/arm64)"
+# Version-aware, not merely existence-aware: a plain Test-Path would leave an
+# already-provisioned image on the OLD Go forever, so bumping $goVersion above
+# would have no effect on --reprovision — the one path used to fix a stale image.
+$goInstalled = ""
+if (Test-Path "$goRoot\bin\go.exe") {
+  # "go version go1.26.5 windows/arm64" -> "1.26.5"
+  $goInstalled = (& "$goRoot\bin\go.exe" version) -replace '^go version go([^\s]+).*$', '$1'
+}
+if ($goInstalled -ne $goVersion) {
+  if ($goInstalled) {
+    Log "replacing Go $goInstalled with $goVersion (windows/arm64)"
+    Remove-Item -Recurse -Force $goRoot
+  } else {
+    Log "installing Go $goVersion (windows/arm64)"
+  }
   $goZip = "$env:TEMP\go-$goVersion.zip"
   Invoke-WebRequest -Uri "https://go.dev/dl/go$goVersion.windows-arm64.zip" -OutFile $goZip
   Expand-Archive -Path $goZip -DestinationPath "C:\" -Force   # -> C:\go
+  $check = (& "$goRoot\bin\go.exe" version)
+  if ($check -notmatch [regex]::Escape("go$goVersion")) {
+    throw "Go $goVersion install failed: 'go version' reports '$check'"
+  }
+  Log "Go pinned: $check"
+} else {
+  Log "Go $goVersion already installed"
 }
 
 $llvmVersion = "20260616"

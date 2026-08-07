@@ -130,7 +130,18 @@ RUN set -eu; \
       chmod +x "/usr/local/bin/${tool}"; \
       test -x "/opt/${tool}/AppRun"; \
     done; \
-    appimagetool --version
+    appimagetool --version; \
+    # Bake the type2 runtime in. appimagetool otherwise fetches it from GitHub
+    # on every single invocation with no retry, so one blip kills a build that
+    # has already done all the AppDir work ("Failed to download runtime: server
+    # returned status code 0"). Baking it also pins exactly which runtime ships
+    # instead of whatever `continuous` serves that minute. make-appimage.sh
+    # passes it via --runtime-file when UR_APPIMAGE_RUNTIME is set.
+    curl -fsSL -o /opt/appimage-runtime \
+      "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${aiarch}"; \
+    test -s /opt/appimage-runtime; \
+    chmod +x /opt/appimage-runtime
+ENV UR_APPIMAGE_RUNTIME=/opt/appimage-runtime
 
 # *important* gettext (msgfmt) is required, not optional: meson's i18n module
 # SILENTLY disables translations when msgfmt is missing — the build still

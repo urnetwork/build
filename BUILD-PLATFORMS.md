@@ -28,6 +28,70 @@ For the pipeline internals (VM/container plumbing, store submission), see
 
 ## Local-repo staging (the shared mechanism)
 
+> ### ⚠️ When testing, always build the LOCAL repos — never the copies under `build/`.
+>
+> **Staging is a no-op unless you set `SRC_HOME` (or `SRC_<REPO>`).** A bare
+> `./build-linux.sh` / `./build-windows.sh` therefore builds
+> `$BUILD_HOME/<repo>`, the release-staged checkout, which contains only
+> **committed** code — it silently misses every uncommitted change, and nothing
+> in the output says so. Use:
+>
+> ```sh
+> SRC_HOME=$HOME/urnetwork EXTERNAL_WARP_VERSION=0.0.0-0 ./build-linux.sh
+> ```
+>
+> or simply run the app repo's own `<app>/build.sh`, which sets `SRC_HOME` for
+> you and is the preferred entry point for a smoketest.
+>
+> How it bites: uncommitted files are absent from the staged tree, so the build
+> fails on something that plainly exists in your working copy — e.g. Linux's
+> "the linux repo is missing packaging scripts", which are right there in
+> `linux/packaging/`. `build-linux.sh` now preflights that case and prints the
+> exact command; `build-windows.sh` announces which tree it is about to build.
+
+> ### ⚠️ Never run two desktop builds at once.
+>
+> They share `OUT_DIR` (`<app>/out/smoketest`) and clear stale artifacts at
+> start, so the second run **deletes the first run's finished artifacts
+> mid-flight**. The victim then fails its own
+> `expected artifact missing after the <arch> build` assertion — which reads
+> like a packaging bug and is not one. Windows additionally shares a single
+> QEMU VM. Check first:
+>
+> ```sh
+> pgrep -f "build-windows.sh|build-linux.sh|build.ps1|qemu"
+> ```
+>
+> Pass a distinct `OUT_DIR=` if two builds genuinely must overlap.
+
+> ### The `build-*.sh` scripts BUILD; they never modify the sources they are given.
+>
+> `build-linux.sh`, `build-windows.sh` and `build-fdroid.sh` compile the tree
+> exactly as handed to them. **No `go mod tidy`, no version stamping, no
+> regeneration.** Source preparation happens *before* the build — in `run.sh`'s
+> version staging, or by you — so an artifact always corresponds to the tree it
+> was built from, and a build can never silently move a dependency.
+>
+> The one thing that bites: `sdk/cgo/go.sum` is git-ignored and generated, so a
+> standalone build from a fresh checkout may not have it. Both desktop scripts
+> now **check and fail** with the command to run rather than running it:
+>
+> ```sh
+> (cd $BUILD_HOME/sdk/cgo && go mod tidy)
+> ```
+>
+> **Review that diff before keeping it.** A tidy on this module does not merely
+> add a missing require — it upgrades indirect dependencies across the crypto
+> and networking stack (quic-go, gvisor, `x/crypto`, `x/net`, `x/sys`, pion/*).
+> That is a deliberate decision, not build housekeeping. Windows fails this the
+> hard way if unprepared: the check is on the host side, because inside the VM
+> the same problem costs a full rsync plus a Go build before surfacing as
+> `go: updates to go.mod needed` / `go build failed for windows/amd64`.
+>
+> (Staging the cgo SDK zip into `linux/app/third_party/urnetwork-sdk/` is not an
+> exception to this rule — that path is a build input, git-ignored and excluded
+> from the staging rsync, not source.)
+
 Each `build-*.sh` builds from `$BUILD_HOME/{sdk,connect,glog,<app>}`. To build
 your local working tree instead, point the script at your repos and it rsyncs
 them into `BUILD_HOME` first (via `build/all/stage-local-repos.sh`). Set either:

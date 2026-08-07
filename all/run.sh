@@ -293,6 +293,101 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# Dependency vulnerability gate. osv-scanner reports what the OSV database knows
+# about every module in the dependency graph; this fails the build on CRITICAL or
+# HIGH findings and reports the rest.
+#
+# Severity resolution is deliberate, not incidental: the Go vulnerability database
+# (GO-* records) carries NO severity field, so the scanner's own max_severity is
+# empty for pure-Go findings and a naive "fail if any vulnerability" gate would
+# block every build on known-LOW advisories. Each finding's GHSA alias does carry
+# a rating, so severities come from the OSV API by alias. A finding whose severity
+# cannot be resolved is reported and does NOT fail the build — an unknown rating is
+# not evidence of a high one, and a network hiccup must not become a release veto.
+# Set BUILD_SKIP_VULN_SCAN to skip (intended for offline/dev runs only).
+scan_vulnerabilities () {
+    scan_dir="$1"
+    scan_out="$BUILD_HOME/.osv-$scan_dir.json"
+
+    # rc 1 means "vulnerabilities found", which is not a scanner failure; any
+    # other non-zero rc is (bad flags, unreadable tree, network down)
+    osv-scanner scan source -r "$BUILD_HOME/$scan_dir" \
+        --data-source native \
+        --format json \
+        --output-file "$scan_out" >/dev/null 2>&1
+    scan_code=$?
+    if [ $scan_code != 0 ] && [ $scan_code != 1 ]; then
+        builder_message "error($scan_code): osv-scanner failed to scan $scan_dir"
+        exit $scan_code
+    fi
+
+    # id<TAB>package<TAB>aliases, one line per finding
+    findings=$(jq -r '
+        .results[]?.packages[]? |
+        .package.name as $pkg |
+        .vulnerabilities[]? |
+        [.id, $pkg, ((.aliases // []) | join(","))] | @tsv
+    ' "$scan_out" 2>/dev/null | sort -u)
+
+    if [ -z "$findings" ]; then
+        builder_message "$scan_dir: no known dependency vulnerabilities."
+        return 0
+    fi
+
+    # the resolved severities are accumulated in a file: the read loop below
+    # runs in a subshell under a pipe, so variables set inside it would not
+    # survive to the checks after it
+    severities_file="$BUILD_HOME/.osv-$scan_dir.severities"
+    rm -f "$severities_file"
+    echo "$findings" | while IFS=$'\t' read -r vuln_id pkg vuln_aliases; do
+        severity=""
+        # the finding's own id first (npm/other ecosystems report GHSA ids
+        # directly and those records carry the rating), then its aliases (a
+        # GO-* record has no severity of its own but aliases a GHSA that does)
+        for lookup_id in "$vuln_id" ${(s:,:)vuln_aliases}; do
+            case "$lookup_id" in
+                GHSA-*)
+                    severity=$(curl -s --max-time 20 "https://api.osv.dev/v1/vulns/$lookup_id" |
+                        jq -r '.database_specific.severity // empty' 2>/dev/null)
+                    ;;
+            esac
+            if [ "$severity" ]; then
+                break
+            fi
+        done
+        if [ -z "$severity" ]; then
+            severity="UNKNOWN"
+        fi
+        echo "$severity\t$vuln_id\t$pkg" >> "$severities_file"
+    done
+
+    blocking=$(grep -E '^(CRITICAL|HIGH)\t' "$severities_file" 2>/dev/null)
+    reported=$(sort "$severities_file" 2>/dev/null)
+    rm -f "$severities_file"
+
+    builder_message "$scan_dir dependency vulnerabilities:\n$reported"
+
+    if [ "$blocking" ]; then
+        builder_message "error: $scan_dir has critical/high dependency vulnerabilities:\n$blocking"
+        exit 1
+    fi
+    builder_message "$scan_dir: no critical or high dependency vulnerabilities."
+}
+
+if [ ! "$BUILD_SKIP_VULN_SCAN" ]; then
+    builder_message "scanning dependencies for known vulnerabilities"
+    if ! which osv-scanner > /dev/null; then
+        builder_message "installing osv-scanner"
+        go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+        error_trap 'install osv-scanner'
+        export PATH="$(go env GOPATH)/bin:$PATH"
+    fi
+    for scan_dir in warp sdk server; do
+        scan_vulnerabilities "$scan_dir"
+    done
+    builder_message "dependency vulnerability scan passed."
+fi
+
 if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate"
 
