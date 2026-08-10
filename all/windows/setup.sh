@@ -24,6 +24,7 @@
 #
 # SPDX-License-Identifier: MPL-2.0
 set -euo pipefail
+umask 077
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/lib.sh"
@@ -44,6 +45,8 @@ Required (unless --skip-build reuses an existing image):
   --virtio-iso PATH    virtio-win.iso (only the NetKVM NIC driver is used)
 
 Options:
+  --ensure             reuse and smoke-test an existing image, or build it from
+                       WINDOWS_ISO and VIRTIO_ISO when it is missing
   --skip-build         reuse the existing image; only run the smoke test
   --reprovision        reuse the installed image, re-run provisioning (no OS
                        reinstall) then smoke-test — for iterating on provision.ps1
@@ -105,6 +108,7 @@ check_windows_iso() {
 WINDOWS_ISO="${WINDOWS_ISO:-}"
 VIRTIO_ISO="${VIRTIO_ISO:-}"
 SKIP_BUILD=""
+ENSURE=""
 FORCE=""
 KEEP_UP=""
 REPROVISION=""
@@ -120,6 +124,7 @@ while [ $# -gt 0 ]; do
     --ssh-port)      SSH_PORT="$2"; shift 2 ;;
     --ssh-port=*)    SSH_PORT="${1#*=}"; shift ;;
     --skip-build)    SKIP_BUILD=1; shift ;;
+    --ensure)        ENSURE=1; shift ;;
     --reprovision)   REPROVISION=1; shift ;;
     --force)         FORCE=1; shift ;;
     --keep-up)       KEEP_UP=1; shift ;;
@@ -133,6 +138,7 @@ win_init
 # --- preflight ---------------------------------------------------------------
 echo ">>> preflight: checking tools + firmware"
 win_require_tools qemu-system-aarch64 qemu-img ssh scp ssh-keygen nc hdiutil \
+  rsync timeout node go shasum \
   || win_die "missing tools above — install qemu with: brew install qemu"
 [ -f "$UEFI_CODE" ] || win_die "UEFI code firmware not found: $UEFI_CODE (brew install qemu, or pass --uefi-code)"
 [ -f "$UEFI_VARS_TEMPLATE" ] || win_die "UEFI vars template not found: $UEFI_VARS_TEMPLATE (override with UEFI_VARS_TEMPLATE=...)"
@@ -159,8 +165,8 @@ if [ -n "$REPROVISION" ]; then
     || win_die "provisioning failed — see output above"
   win_shutdown_vm
   echo ">>> re-provisioned: $IMAGE"
-elif [ -n "$SKIP_BUILD" ] && [ -f "$IMAGE" ]; then
-  echo ">>> reusing existing image: $IMAGE (--skip-build)"
+elif { [ -n "$SKIP_BUILD" ] || [ -n "$ENSURE" ]; } && [ -f "$IMAGE" ]; then
+  echo ">>> reusing existing image: $IMAGE"
 else
   [ -f "$WINDOWS_ISO" ] || win_die "Windows 11 $(win_build_release "$WIN_REQUIRED_BUILD") ARM64 ISO required — pass --windows-iso PATH"
   [ -f "$VIRTIO_ISO" ]  || win_die "virtio-win.iso required — pass --virtio-iso PATH"

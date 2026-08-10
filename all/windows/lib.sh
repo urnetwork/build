@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the local QEMU ARM Windows build VM. Sourced by build.sh
 # (per-release MSI build) and setup.sh (one-time image build + smoke test).
 #
@@ -218,6 +219,8 @@ win_iso_probe() {  # win_iso_probe ISO
                | tail -c +$(( rem + 1 )) | head -c "$size" \
                | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\r')"
         WIN_ISO_BUILD="$(printf '%s' "$xml" | grep -oE '<BUILD>[0-9]+</BUILD>' | head -1 | tr -dc '0-9')"
+        # setup.sh consumes this global after sourcing lib.sh.
+        # shellcheck disable=SC2034
         WIN_ISO_EDITIONS="$(printf '%s' "$xml" | grep -oE '<NAME>[^<]*</NAME>' | sed -E 's|</?NAME>||g' | sort -u)"
       fi
     fi
@@ -391,7 +394,7 @@ win_wait_ssh() {
 # shutdown still returns in seconds.
 win_shutdown_vm() {
   if [ -n "${WIN_QEMU_PID:-}" ] && kill -0 "$WIN_QEMU_PID" 2>/dev/null; then
-    win_ssh "shutdown /s /t 0 /f" 2>/dev/null || true
+    win_ssh_probe 30 "shutdown /s /t 0 /f" 2>/dev/null || true
     local _
     for _ in $(seq 1 300); do kill -0 "$WIN_QEMU_PID" 2>/dev/null || break; sleep 1; done
     kill -0 "$WIN_QEMU_PID" 2>/dev/null && kill -TERM "$WIN_QEMU_PID" 2>/dev/null || true

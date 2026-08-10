@@ -47,6 +47,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         file \
         desktop-file-utils \
         systemd \
+        iproute2 \
         libfuse2 \
         curl \
         ca-certificates \

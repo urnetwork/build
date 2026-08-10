@@ -13,6 +13,7 @@
 #
 # SPDX-License-Identifier: MPL-2.0
 set -euo pipefail
+umask 077
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 image_base="urnetwork-linux-builder"
@@ -52,7 +53,12 @@ done
 
 # --- preflight ---------------------------------------------------------------
 echo ">>> preflight: checking docker"
-command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found — install Docker Desktop" >&2; exit 1; }
+for command_name in docker timeout node go git make rsync zip zig; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    echo "ERROR: $command_name is required by the Linux acceptance build" >&2
+    exit 1
+  }
+done
 docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not running — start Docker Desktop" >&2; exit 1; }
 
 # --- build + smoke-test each arch --------------------------------------------
@@ -60,13 +66,15 @@ rc=0
 for arch in ${ARCHES}; do
   for role in ${roles}; do
     echo ">>> building the Linux ${role} builder image for ${arch} (deps baked in; layer-cached)"
-    docker build --platform "linux/${arch}" \
+    timeout --signal=TERM --kill-after=60s 3600 \
+      docker build --platform "linux/${arch}" \
       -f "${here}/Dockerfile.${role}" \
       -t "${image_base}-${role}:${arch}" "${here}"
 
     echo ">>> smoke-testing the ${arch}/${role} container"
     # Mount the check script ro and run it with bash (mount perms may drop +x).
-    if docker run --rm --platform "linux/${arch}" \
+    if timeout --signal=TERM --kill-after=30s 600 \
+         docker run --rm --platform "linux/${arch}" \
          -v "${here}/smoke-test.sh:/smoke-test.sh:ro" \
          -e ROLE="${role}" \
          "${image_base}-${role}:${arch}" bash /smoke-test.sh; then
@@ -74,6 +82,19 @@ for arch in ${ARCHES}; do
     else
       echo ">>> ${arch}/${role}: SMOKE TEST FAILED" >&2
       rc=1
+    fi
+    if [ "$role" = daemon ]; then
+      echo ">>> smoke-testing the acceptance tunnel privileges for ${arch}"
+      if timeout --signal=TERM --kill-after=30s 120 \
+           docker run --rm --platform "linux/${arch}" \
+           --cap-add NET_ADMIN --device /dev/net/tun \
+           "${image_base}-${role}:${arch}" \
+           bash -euc 'test -c /dev/net/tun; ip tuntap add dev uraccept0 mode tun; ip link show dev uraccept0 >/dev/null; ip link delete uraccept0'; then
+        echo ">>> ${arch}/${role}: NET_ADMIN + /dev/net/tun PASSED"
+      else
+        echo ">>> ${arch}/${role}: NET_ADMIN + /dev/net/tun FAILED" >&2
+        rc=1
+      fi
     fi
   done
 done
