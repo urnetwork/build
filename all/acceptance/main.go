@@ -388,31 +388,59 @@ func guestCredentialLifecycle(path, stateDir string) error {
 		}
 	}
 
-	// Exercise the SDK-owned session state: install the first login, log out by
-	// clearing it, and require the second request to authenticate from the saved
-	// credential alone.
-	api.SetByJwt(firstJwt)
-	if api.GetByJwt() != firstJwt {
-		return errors.New("SDK did not install the instant-account session")
+	return verifyGuestSessionRecovery(api, firstJwt, func() (string, error) {
+		return loginSecret(api, secret)
+	})
+}
+
+// Provides the SDK session operations needed to verify login and logout
+// without coupling the deterministic lifecycle tests to the main API.
+type guestSession interface {
+	SetByJwt(string)
+	GetByJwt() string
+}
+
+// Installs the initial guest session, logs out, recovers from the saved secret,
+// verifies the network identity, and always logs out of the recovered session.
+func verifyGuestSessionRecovery(session guestSession, firstJwt string, recoverJwt func() (string, error)) error {
+	if err := useGuestSessionAndLogout(session, firstJwt, "initial", nil); err != nil {
+		return err
 	}
-	api.SetByJwt("")
-	if api.GetByJwt() != "" {
-		return errors.New("SDK did not clear the instant-account session on logout")
-	}
-	secondJwt, err := loginSecret(api, secret)
+	secondJwt, err := recoverJwt()
 	if err != nil {
 		return err
 	}
-	firstNetwork, err := jwtStringClaim(firstJwt, "network_id")
-	if err != nil {
-		return err
+	return useGuestSessionAndLogout(session, secondJwt, "recovered", func() error {
+		firstNetwork, err := jwtStringClaim(firstJwt, "network_id")
+		if err != nil {
+			return err
+		}
+		secondNetwork, err := jwtStringClaim(secondJwt, "network_id")
+		if err != nil {
+			return err
+		}
+		if firstNetwork != secondNetwork {
+			return errors.New("secret-key login returned a different network")
+		}
+		return nil
+	})
+}
+
+// Makes one JWT the active SDK session while the check runs and verifies that
+// logout clears it even when the check fails.
+func useGuestSessionAndLogout(session guestSession, networkJwt string, phase string, check func() error) (returnErr error) {
+	session.SetByJwt(networkJwt)
+	defer func() {
+		session.SetByJwt("")
+		if session.GetByJwt() != "" {
+			returnErr = errors.Join(returnErr, fmt.Errorf("SDK did not clear the %s instant-account session on logout", phase))
+		}
+	}()
+	if session.GetByJwt() != networkJwt {
+		return fmt.Errorf("SDK did not install the %s instant-account session", phase)
 	}
-	secondNetwork, err := jwtStringClaim(secondJwt, "network_id")
-	if err != nil {
-		return err
-	}
-	if firstNetwork != secondNetwork {
-		return errors.New("secret-key login returned a different network")
+	if check != nil {
+		return check()
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ umask 077
 
 avd_name="${UR_ACCEPT_ANDROID_AVD:-urnetwork-acceptance}"
 api="${UR_ACCEPT_ANDROID_API:-36}"
+build_tools_version="${UR_ACCEPT_ANDROID_BUILD_TOOLS:-36.0.0}"
 ndk_version="${UR_ACCEPT_ANDROID_NDK:-29.0.14206865}"
 recreate=0
 headless=0
@@ -64,9 +65,17 @@ echo ">>> installing Android ${api} arm64 acceptance dependencies"
 timeout 1800 "$sdkmanager" \
   platform-tools \
   emulator \
+  "build-tools;$build_tools_version" \
   "platforms;android-${api}" \
   "ndk;$ndk_version" \
   "$image"
+build_tools_dir="$sdk_root/build-tools/$build_tools_version"
+for tool in aapt2 apksigner zipalign; do
+  [ -x "$build_tools_dir/$tool" ] || {
+    echo "ERROR: Android build-tools;$build_tools_version is missing $tool" >&2
+    exit 1
+  }
+done
 ndk_objcopy="$(find "$sdk_root/ndk/$ndk_version" -type f -name llvm-objcopy -perm -111 -print -quit)"
 [ -n "$ndk_objcopy" ] || {
   echo "ERROR: Android NDK $ndk_version has no llvm-objcopy" >&2
@@ -232,4 +241,5 @@ done
 
 echo ">>> SMOKE TEST PASSED"
 echo "AVD: $avd_name"
+echo "Build tools: $build_tools_version"
 echo "ABI: $abi (required by the github, Solana, Ethos, and F-Droid targets)"

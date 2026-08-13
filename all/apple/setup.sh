@@ -11,6 +11,7 @@ set -euo pipefail
 umask 077
 
 device_name="${UR_ACCEPT_APPLE_SIMULATOR:-urnetwork-acceptance}"
+development_team="6BGU69Q742"
 recreate=0
 for arg in "$@"; do
   case "$arg" in
@@ -112,16 +113,17 @@ timeout 180 xcrun simctl bootstatus "$existing_udid" -b
 timeout 30 xcrun simctl spawn "$existing_udid" launchctl print system >/dev/null
 
 echo ">>> code-signing identities"
-identity_count="$(security find-identity -v -p codesigning | awk '/valid identities found/ { print $1 }')"
-security find-identity -v -p codesigning
-if [ "${identity_count:-0}" -eq 0 ]; then
-  echo "ERROR: no Apple development identity is available; the macOS tunnel acceptance test must be signed." >&2
+signing_identities="$(security find-identity -v -p codesigning)"
+printf '%s\n' "$signing_identities"
+if ! grep -Eq '"(Apple Development|iPhone Developer): .+ \('"$development_team"'\)"$' <<<"$signing_identities"; then
+  echo "ERROR: no Apple development identity for team $development_team is available; the macOS tunnel acceptance test must use that exact team." >&2
   exit 1
 fi
 
 cat <<EOF
 >>> SMOKE TEST PASSED
 Simulator: $device_name ($existing_udid)
+Signing team: $development_team
 
 macOS acceptance prerequisite:
   The signed app must be allowed to add/use its Network Extension VPN

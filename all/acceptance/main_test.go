@@ -6,9 +6,28 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// Records every SDK session transition made by the guest lifecycle verifier.
+type recordingGuestSession struct {
+	value       string
+	transitions []string
+}
+
+// Sets the current test session and retains the transition for exact ordering
+// assertions.
+func (self *recordingGuestSession) SetByJwt(value string) {
+	self.value = value
+	self.transitions = append(self.transitions, value)
+}
+
+// Returns the current test session.
+func (self *recordingGuestSession) GetByJwt() string {
+	return self.value
+}
 
 // Covers whitespace normalization and strict word-count rejection.
 func TestNormalizeSecret(t *testing.T) {
@@ -123,6 +142,56 @@ func TestRetainGuestFixtureReportsPersistenceAndCleanupFailures(t *testing.T) {
 	}
 }
 
+// Requires the guest lifecycle to log out before recovery and to log out again
+// after the recovered session has been installed and verified.
+func TestVerifyGuestSessionRecoveryLogsOutBothSessions(t *testing.T) {
+	firstJwt := testNetworkJwt("network-1")
+	secondJwt := testNetworkJwt("network-1")
+	session := &recordingGuestSession{}
+	recoveryCalls := 0
+	err := verifyGuestSessionRecovery(session, firstJwt, func() (string, error) {
+		recoveryCalls++
+		if session.GetByJwt() != "" {
+			t.Fatalf("recovery started with active session %q", session.GetByJwt())
+		}
+		return secondJwt, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recoveryCalls != 1 {
+		t.Fatalf("recovery calls = %d, want 1", recoveryCalls)
+	}
+	wantTransitions := []string{firstJwt, "", secondJwt, ""}
+	if !reflect.DeepEqual(session.transitions, wantTransitions) {
+		t.Fatalf("session transitions = %q, want %q", session.transitions, wantTransitions)
+	}
+	if session.GetByJwt() != "" {
+		t.Fatalf("recovered session remained active: %q", session.GetByJwt())
+	}
+}
+
+// Requires a failed network-identity assertion to log out of the recovered
+// session before returning the failure.
+func TestVerifyGuestSessionRecoveryLogsOutAfterNetworkMismatch(t *testing.T) {
+	firstJwt := testNetworkJwt("network-1")
+	secondJwt := testNetworkJwt("network-2")
+	session := &recordingGuestSession{}
+	err := verifyGuestSessionRecovery(session, firstJwt, func() (string, error) {
+		return secondJwt, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "different network") {
+		t.Fatalf("network mismatch error = %v", err)
+	}
+	wantTransitions := []string{firstJwt, "", secondJwt, ""}
+	if !reflect.DeepEqual(session.transitions, wantTransitions) {
+		t.Fatalf("session transitions = %q, want %q", session.transitions, wantTransitions)
+	}
+	if session.GetByJwt() != "" {
+		t.Fatalf("mismatched recovered session remained active: %q", session.GetByJwt())
+	}
+}
+
 // Prevents malformed mounted credentials from shifting password boundaries.
 func TestReadCredentialsRejectsExtraLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials")
@@ -136,8 +205,7 @@ func TestReadCredentialsRejectsExtraLines(t *testing.T) {
 
 // Covers claim extraction and required-claim rejection.
 func TestJwtStringClaim(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"network_id":"network-1"}`))
-	token := "header." + payload + ".signature"
+	token := testNetworkJwt("network-1")
 	got, err := jwtStringClaim(token, "network_id")
 	if err != nil {
 		t.Fatal(err)
@@ -148,4 +216,10 @@ func TestJwtStringClaim(t *testing.T) {
 	if _, err := jwtStringClaim(token, "client_id"); err == nil {
 		t.Fatal("missing claim was accepted")
 	}
+}
+
+// Creates a structurally valid test JWT with the requested network claim.
+func testNetworkJwt(networkId string) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"network_id":"` + networkId + `"}`))
+	return "header." + payload + ".signature"
 }
