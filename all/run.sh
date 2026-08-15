@@ -1308,6 +1308,10 @@ done
 (cd $BUILD_HOME/apple/app &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
+    $BUILD_HOME/sdk/build/check_apple_size.sh \
+        --sdk $BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework \
+        --extension-sdk $BUILD_HOME/sdk/build/apple/URnetworkExtensionSdk.xcframework \
+        --extension build.xcarchive/Products/Applications/URnetwork.app/PlugIns/URnetworkVPN.appex &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
     bug_fix_clean_ipa build/URnetwork.ipa &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
