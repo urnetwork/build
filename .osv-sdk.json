@@ -1,0 +1,1352 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/sdk/build/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "golang.org/x/crypto",
+            "version": "0.54.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-5932"
+              ],
+              "aliases": [
+                "GO-2026-5932"
+              ],
+              "experimental_analysis": {
+                "GO-2026-5932": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/openpgp"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/packet"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/armor"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/clearsign"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/errors"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/elgamal"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/s2k"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5932"
+              },
+              "details": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
+              "id": "GO-2026-5932",
+              "modified": "2026-07-10T05:44:31.101996029Z",
+              "published": "2026-07-07T22:15:29Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/44226"
+                }
+              ],
+              "related": [
+                "CGA-485h-x96h-hqh7"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/image",
+            "version": "0.44.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6222"
+              ],
+              "aliases": [
+                "CVE-2026-46603",
+                "GO-2026-6222"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6222": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6222.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/image/vp8l",
+                        "symbols": [
+                          "Decode",
+                          "decoder.decodeHuffmanGroups",
+                          "decoder.decodeHuffmanTree"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/image",
+                    "purl": "pkg:golang/golang.org/x/image"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-46603"
+              ],
+              "credits": [
+                {
+                  "name": "Daniele Ballarini"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6222"
+              },
+              "details": "VP8L decoding in golang.org/x/image/vp8l can allocate an excessive amount of memory when processing a crafted VP8L image containing many unused Huffman tree groups. This allows a remote attacker to cause a denial of service via memory exhaustion.",
+              "id": "GO-2026-6222",
+              "modified": "2026-08-15T09:41:53.891904586Z",
+              "published": "2026-08-14T16:22:50Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80069"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/793460"
+                }
+              ],
+              "related": [
+                "CGA-hm5h-v84j-m3gx"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/mod",
+            "version": "0.38.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6179"
+              ],
+              "aliases": [
+                "CVE-2026-56865",
+                "GO-2026-6179"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6179": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6180"
+              ],
+              "aliases": [
+                "CVE-2026-56864",
+                "GO-2026-6180"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6180": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb/tlog",
+                        "symbols": [
+                          "tileHashReader.ReadHashes"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56865"
+              ],
+              "credits": [
+                {
+                  "name": "Filippo Valsorda (Geomys)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6179"
+              },
+              "details": "A malicious GOPROXY was previously capable of forging up to two sumdb tiles that allow for a requested module to bypass the GOSUMDB check and persist attacker-controlled module content to a local Go module cache.\n\nThis attack allows for a malicious GOPROXY to serve malicious module content that cannot be detected by evaluating the transparency log.\n\nAll tiles are now correctly verified against their parents.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6179",
+              "modified": "2026-08-14T09:41:58.033362708Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80744"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/814960"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jw38-qq2g-45fw"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Fix transparency log tile verification bypass in golang.org/x/mod/sumdb/tlog"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb",
+                        "symbols": [
+                          "Client.Lookup"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56864"
+              ],
+              "credits": [
+                {
+                  "name": "mundur"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6180"
+              },
+              "details": "A malicious GOSUMDB was capable of serving arbitrary module content not contained within the transparency log.\n\nThis attack allows for a coordinating GOPROXY and GOSUMDB to serve a client malicious module content that cannot be detected by evaluating the transparency log.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6180",
+              "modified": "2026-08-14T09:41:57.749669092Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80745"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815000"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jjqg-jcfg-qc8v"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Ignore unrelated, unauthenticated hashes in Lookup in golang.org/x/mod/sumdb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/sdk/cgo/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "golang.org/x/crypto",
+            "version": "0.54.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-5932"
+              ],
+              "aliases": [
+                "GO-2026-5932"
+              ],
+              "experimental_analysis": {
+                "GO-2026-5932": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/openpgp"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/packet"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/armor"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/clearsign"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/errors"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/elgamal"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/s2k"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5932"
+              },
+              "details": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
+              "id": "GO-2026-5932",
+              "modified": "2026-07-10T05:44:31.101996029Z",
+              "published": "2026-07-07T22:15:29Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/44226"
+                }
+              ],
+              "related": [
+                "CGA-485h-x96h-hqh7"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/image",
+            "version": "0.44.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6222"
+              ],
+              "aliases": [
+                "CVE-2026-46603",
+                "GO-2026-6222"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6222": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6222.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/image/vp8l",
+                        "symbols": [
+                          "Decode",
+                          "decoder.decodeHuffmanGroups",
+                          "decoder.decodeHuffmanTree"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/image",
+                    "purl": "pkg:golang/golang.org/x/image"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-46603"
+              ],
+              "credits": [
+                {
+                  "name": "Daniele Ballarini"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6222"
+              },
+              "details": "VP8L decoding in golang.org/x/image/vp8l can allocate an excessive amount of memory when processing a crafted VP8L image containing many unused Huffman tree groups. This allows a remote attacker to cause a denial of service via memory exhaustion.",
+              "id": "GO-2026-6222",
+              "modified": "2026-08-15T09:41:53.891904586Z",
+              "published": "2026-08-14T16:22:50Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80069"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/793460"
+                }
+              ],
+              "related": [
+                "CGA-hm5h-v84j-m3gx"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/mod",
+            "version": "0.38.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6179"
+              ],
+              "aliases": [
+                "CVE-2026-56865",
+                "GO-2026-6179"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6179": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6180"
+              ],
+              "aliases": [
+                "CVE-2026-56864",
+                "GO-2026-6180"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6180": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb/tlog",
+                        "symbols": [
+                          "tileHashReader.ReadHashes"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56865"
+              ],
+              "credits": [
+                {
+                  "name": "Filippo Valsorda (Geomys)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6179"
+              },
+              "details": "A malicious GOPROXY was previously capable of forging up to two sumdb tiles that allow for a requested module to bypass the GOSUMDB check and persist attacker-controlled module content to a local Go module cache.\n\nThis attack allows for a malicious GOPROXY to serve malicious module content that cannot be detected by evaluating the transparency log.\n\nAll tiles are now correctly verified against their parents.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6179",
+              "modified": "2026-08-14T09:41:58.033362708Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80744"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/814960"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jw38-qq2g-45fw"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Fix transparency log tile verification bypass in golang.org/x/mod/sumdb/tlog"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb",
+                        "symbols": [
+                          "Client.Lookup"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56864"
+              ],
+              "credits": [
+                {
+                  "name": "mundur"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6180"
+              },
+              "details": "A malicious GOSUMDB was capable of serving arbitrary module content not contained within the transparency log.\n\nThis attack allows for a coordinating GOPROXY and GOSUMDB to serve a client malicious module content that cannot be detected by evaluating the transparency log.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6180",
+              "modified": "2026-08-14T09:41:57.749669092Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80745"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815000"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jjqg-jcfg-qc8v"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Ignore unrelated, unauthenticated hashes in Lookup in golang.org/x/mod/sumdb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/sdk/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "golang.org/x/crypto",
+            "version": "0.54.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-5932"
+              ],
+              "aliases": [
+                "GO-2026-5932"
+              ],
+              "experimental_analysis": {
+                "GO-2026-5932": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/openpgp"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/packet"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/armor"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/clearsign"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/errors"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/elgamal"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/s2k"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5932"
+              },
+              "details": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
+              "id": "GO-2026-5932",
+              "modified": "2026-07-10T05:44:31.101996029Z",
+              "published": "2026-07-07T22:15:29Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/44226"
+                }
+              ],
+              "related": [
+                "CGA-485h-x96h-hqh7"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/image",
+            "version": "0.44.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6222"
+              ],
+              "aliases": [
+                "CVE-2026-46603",
+                "GO-2026-6222"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6222": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6222.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/image/vp8l",
+                        "symbols": [
+                          "Decode",
+                          "decoder.decodeHuffmanGroups",
+                          "decoder.decodeHuffmanTree"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/image",
+                    "purl": "pkg:golang/golang.org/x/image"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-46603"
+              ],
+              "credits": [
+                {
+                  "name": "Daniele Ballarini"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6222"
+              },
+              "details": "VP8L decoding in golang.org/x/image/vp8l can allocate an excessive amount of memory when processing a crafted VP8L image containing many unused Huffman tree groups. This allows a remote attacker to cause a denial of service via memory exhaustion.",
+              "id": "GO-2026-6222",
+              "modified": "2026-08-15T09:41:53.891904586Z",
+              "published": "2026-08-14T16:22:50Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80069"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/793460"
+                }
+              ],
+              "related": [
+                "CGA-hm5h-v84j-m3gx"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/sdk/js/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "golang.org/x/crypto",
+            "version": "0.54.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-5932"
+              ],
+              "aliases": [
+                "GO-2026-5932"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/openpgp"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/packet"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/armor"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/clearsign"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/errors"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/elgamal"
+                      },
+                      {
+                        "path": "golang.org/x/crypto/openpgp/s2k"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5932"
+              },
+              "details": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
+              "id": "GO-2026-5932",
+              "modified": "2026-07-10T05:44:31.101996029Z",
+              "published": "2026-07-07T22:15:29Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/44226"
+                }
+              ],
+              "related": [
+                "CGA-485h-x96h-hqh7"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/image",
+            "version": "0.44.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6222"
+              ],
+              "aliases": [
+                "CVE-2026-46603",
+                "GO-2026-6222"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6222.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/image/vp8l",
+                        "symbols": [
+                          "Decode",
+                          "decoder.decodeHuffmanGroups",
+                          "decoder.decodeHuffmanTree"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/image",
+                    "purl": "pkg:golang/golang.org/x/image"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.45.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-46603"
+              ],
+              "credits": [
+                {
+                  "name": "Daniele Ballarini"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6222"
+              },
+              "details": "VP8L decoding in golang.org/x/image/vp8l can allocate an excessive amount of memory when processing a crafted VP8L image containing many unused Huffman tree groups. This allows a remote attacker to cause a denial of service via memory exhaustion.",
+              "id": "GO-2026-6222",
+              "modified": "2026-08-15T09:41:53.891904586Z",
+              "published": "2026-08-14T16:22:50Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80069"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/793460"
+                }
+              ],
+              "related": [
+                "CGA-hm5h-v84j-m3gx"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "experimental_config": {
+    "licenses": {
+      "summary": false,
+      "allowlist": null
+    }
+  }
+}
