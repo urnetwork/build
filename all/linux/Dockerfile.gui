@@ -35,6 +35,8 @@ ENV LANG=C.UTF-8
 # - glib-networking: the GIO TLS modules; the AppDir bundles the GLib family
 #   WITH its modules or not at all
 # - adwaita-icon-theme: make-appimage.sh hard-fails without /usr/share/icons/Adwaita
+# - libsecret: RPC client credentials live in the desktop's Secret Service;
+#   this is a required security boundary, not an optional plaintext fallback
 # - xvfb/dbus-x11: the headless launch smoke test — a GTK/schema/pixbuf
 #   misconfiguration aborts on startup, and that is exactly what it catches
 # - libfuse2t64: the AppImage's own FUSE runtime, so the launch test exercises
@@ -58,6 +60,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         pkg-config \
         libgtkmm-4.0-dev \
         libadwaita-1-dev \
+        libsecret-1-dev \
         libglib2.0-dev \
         libglib2.0-bin \
         libgdk-pixbuf2.0-bin \

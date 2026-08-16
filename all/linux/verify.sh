@@ -130,10 +130,13 @@ else
     check "AppDir: gdk-pixbuf-query-loaders (AppRun regenerates the cache)" \
           test -x "${APPDIR}/usr/bin/gdk-pixbuf-query-loaders"
 
-    # GTK4 + libadwaita + the GLib family must all be bundled. Bundling the
-    # GLib family WITHOUT its GIO modules is the documented invariant break.
+    # GTK4 + libadwaita + libsecret + the GLib family must all be bundled.
+    # libsecret is not optional: RPC client credentials must never fall back
+    # to a plaintext file when the host does not provide the library.
+    # Bundling the GLib family WITHOUT its GIO modules is the documented
+    # invariant break.
     for lib in libgtk-4.so libadwaita-1.so libglib-2.0.so libgio-2.0.so \
-               libgobject-2.0.so libgdk_pixbuf-2.0.so; do
+               libgobject-2.0.so libgdk_pixbuf-2.0.so libsecret-1.so; do
       if compgen -G "${APPDIR}/usr/lib/${lib}*" >/dev/null; then
         pass "AppDir bundles ${lib}"
       else
@@ -184,7 +187,7 @@ else
     # Each of these must resolve INSIDE the AppDir. libc/libstdc++/Mesa are
     # deliberately host-provided (excludelist), so they are not listed.
     for lib in libgtk-4.so libadwaita-1.so libglib-2.0.so libgio-2.0.so \
-               libgobject-2.0.so libgdk_pixbuf-2.0.so; do
+               libgobject-2.0.so libgdk_pixbuf-2.0.so libsecret-1.so; do
       resolved="$(grep -oE "${lib}[^ ]* => [^ ]+" "${LDD_OUT}" | awk '{print $3}' | head -1)"
       if [ -z "${resolved}" ]; then
         skip "${lib} resolves inside the AppDir" "not in the GUI's closure"

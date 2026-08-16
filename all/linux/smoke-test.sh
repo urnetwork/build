@@ -97,6 +97,7 @@ gui)
   # GTK4/libadwaita dev libs.
   check_pc gtkmm-4.0  gtkmm-4.0
   check_pc libadwaita libadwaita-1
+  check_pc libsecret   libsecret-1
 
   # webkitgtk-6.0 must be ABSENT: meson links it whenever present (no opt-out
   # option) and make-appimage.sh then refuses to package, because WebKitGTK's
