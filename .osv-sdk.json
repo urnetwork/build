@@ -209,6 +209,7 @@
                 "GO-2026-6179"
               ],
               "aliases": [
+                "BIT-golang-2026-56865",
                 "CVE-2026-56865",
                 "GO-2026-6179"
               ],
@@ -225,6 +226,7 @@
                 "GO-2026-6180"
               ],
               "aliases": [
+                "BIT-golang-2026-56864",
                 "CVE-2026-56864",
                 "GO-2026-6180"
               ],
@@ -317,6 +319,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-56865",
                 "CVE-2026-56865"
               ],
               "credits": [
@@ -330,7 +333,7 @@
               },
               "details": "A malicious GOPROXY was previously capable of forging up to two sumdb tiles that allow for a requested module to bypass the GOSUMDB check and persist attacker-controlled module content to a local Go module cache.\n\nThis attack allows for a malicious GOPROXY to serve malicious module content that cannot be detected by evaluating the transparency log.\n\nAll tiles are now correctly verified against their parents.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
               "id": "GO-2026-6179",
-              "modified": "2026-08-14T09:41:58.033362708Z",
+              "modified": "2026-08-19T12:25:40.780492871Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -435,6 +438,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-56864",
                 "CVE-2026-56864"
               ],
               "credits": [
@@ -448,7 +452,7 @@
               },
               "details": "A malicious GOSUMDB was capable of serving arbitrary module content not contained within the transparency log.\n\nThis attack allows for a coordinating GOPROXY and GOSUMDB to serve a client malicious module content that cannot be detected by evaluating the transparency log.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
               "id": "GO-2026-6180",
-              "modified": "2026-08-14T09:41:57.749669092Z",
+              "modified": "2026-08-19T12:25:49.995487491Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -687,6 +691,7 @@
                 "GO-2026-6179"
               ],
               "aliases": [
+                "BIT-golang-2026-56865",
                 "CVE-2026-56865",
                 "GO-2026-6179"
               ],
@@ -703,6 +708,7 @@
                 "GO-2026-6180"
               ],
               "aliases": [
+                "BIT-golang-2026-56864",
                 "CVE-2026-56864",
                 "GO-2026-6180"
               ],
@@ -795,6 +801,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-56865",
                 "CVE-2026-56865"
               ],
               "credits": [
@@ -808,7 +815,7 @@
               },
               "details": "A malicious GOPROXY was previously capable of forging up to two sumdb tiles that allow for a requested module to bypass the GOSUMDB check and persist attacker-controlled module content to a local Go module cache.\n\nThis attack allows for a malicious GOPROXY to serve malicious module content that cannot be detected by evaluating the transparency log.\n\nAll tiles are now correctly verified against their parents.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
               "id": "GO-2026-6179",
-              "modified": "2026-08-14T09:41:58.033362708Z",
+              "modified": "2026-08-19T12:25:40.780492871Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -913,6 +920,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-56864",
                 "CVE-2026-56864"
               ],
               "credits": [
@@ -926,7 +934,7 @@
               },
               "details": "A malicious GOSUMDB was capable of serving arbitrary module content not contained within the transparency log.\n\nThis attack allows for a coordinating GOPROXY and GOSUMDB to serve a client malicious module content that cannot be detected by evaluating the transparency log.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
               "id": "GO-2026-6180",
-              "modified": "2026-08-14T09:41:57.749669092Z",
+              "modified": "2026-08-19T12:25:49.995487491Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -1150,6 +1158,289 @@
               ],
               "schema_version": "1.9.0",
               "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "golang.org/x/mod",
+            "version": "0.38.0",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-6179"
+              ],
+              "aliases": [
+                "BIT-golang-2026-56865",
+                "CVE-2026-56865",
+                "GO-2026-6179"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6179": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6180"
+              ],
+              "aliases": [
+                "BIT-golang-2026-56864",
+                "CVE-2026-56864",
+                "GO-2026-6180"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6180": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6179.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb/tlog",
+                        "symbols": [
+                          "tileHashReader.ReadHashes"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56865",
+                "CVE-2026-56865"
+              ],
+              "credits": [
+                {
+                  "name": "Filippo Valsorda (Geomys)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6179"
+              },
+              "details": "A malicious GOPROXY was previously capable of forging up to two sumdb tiles that allow for a requested module to bypass the GOSUMDB check and persist attacker-controlled module content to a local Go module cache.\n\nThis attack allows for a malicious GOPROXY to serve malicious module content that cannot be detected by evaluating the transparency log.\n\nAll tiles are now correctly verified against their parents.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6179",
+              "modified": "2026-08-19T12:25:40.780492871Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80744"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/814960"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jw38-qq2g-45fw"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Fix transparency log tile verification bypass in golang.org/x/mod/sumdb/tlog"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "cmd/go"
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "toolchain",
+                    "purl": "pkg:golang/toolchain"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6180.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/mod/sumdb",
+                        "symbols": [
+                          "Client.Lookup"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/mod",
+                    "purl": "pkg:golang/golang.org/x/mod"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.40.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56864",
+                "CVE-2026-56864"
+              ],
+              "credits": [
+                {
+                  "name": "mundur"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6180"
+              },
+              "details": "A malicious GOSUMDB was capable of serving arbitrary module content not contained within the transparency log.\n\nThis attack allows for a coordinating GOPROXY and GOSUMDB to serve a client malicious module content that cannot be detected by evaluating the transparency log.\n\nIn order to determine if you have been affected:\n\nrm -r go.sum go.work.sum vendor/ \u0026\u0026 go mod tidy",
+              "id": "GO-2026-6180",
+              "modified": "2026-08-19T12:25:49.995487491Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80745"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815000"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/815020"
+                }
+              ],
+              "related": [
+                "CGA-jjqg-jcfg-qc8v"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Ignore unrelated, unauthenticated hashes in Lookup in golang.org/x/mod/sumdb"
             }
           ]
         }
