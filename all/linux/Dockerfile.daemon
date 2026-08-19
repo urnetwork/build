@@ -26,10 +26,11 @@ ENV LANG=C.UTF-8
 # - binutils: readelf, which the glibc-floor gate uses
 # - dpkg-dev/fakeroot/tar: .deb + install-tarball packaging and its verification
 # - systemd: `systemd-analyze verify` (a static unit check; never booted here)
-# - libfuse2: satisfies the .deb's own `Depends: libfuse2t64 | libfuse2` so
-#   `dpkg -i` can CONFIGURE during verification (22.04 predates the t64 rename).
-#   Without it dpkg unpacks but never runs postinst, so the urnetwork group and
-#   the /etc conffiles never appear and the lifecycle test fails misleadingly.
+# - iproute2/nftables/libfuse2: satisfy the .deb's runtime dependencies so
+#   `dpkg -i` can CONFIGURE during verification (22.04 predates the libfuse2t64
+#   rename). If one is missing, dpkg only unpacks the package and never runs
+#   postinst, so the urnetwork group and /etc integration files never appear
+#   and the lifecycle test fails misleadingly.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
         g++ \
@@ -48,6 +49,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         desktop-file-utils \
         systemd \
         iproute2 \
+        nftables \
         libfuse2 \
         curl \
         ca-certificates \
