@@ -39,7 +39,14 @@
 # (linux/MIGRATION.md "Artifact filenames" — the pipeline greps for these):
 #   make-deb.sh             -> urnetwork-daemon_<version>_<arch>.deb          (ROLE=daemon)
 #   make-install-tarball.sh -> urnetwork-daemon-<version>-<arch>.install.tar.gz (ROLE=daemon)
+#   make-rpm.sh             -> urnetwork-daemon-<version>.<rpmarch>.rpm       (ROLE=daemon)
 #   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage + .zsync   (ROLE=gui)
+#
+# NOTE the .rpm is the one name that does not carry ${ARCH} verbatim: rpm has
+# its own arch spelling, so <rpmarch> is x86_64/aarch64 while the ASSET arch
+# stays Debian-spelled (amd64/arm64) everywhere else. The name is still exact,
+# not a glob — make-rpm.sh only emits the mangled canonical NVR under
+# UR_RPM_CANONICAL_NAME=1, which this pipeline never sets.
 #
 # Env knobs:
 #   UR_GLIBC_FLOOR    daemon glibc floor asserted by meson's `glibc-floor` test
@@ -52,6 +59,20 @@
 #                     distro does not package, and the AppImage host-provides
 #                     glibc per the excludelist. So the GUI requires a 24.04+
 #                     host while the daemon runs on 22.04.
+#   UR_REQUIRE_RPM    make a missing or failed .rpm fatal (default false: warn
+#                     and carry on). Default is deliberate. run.sh's own
+#                     warn-and-continue does NOT provide this tolerance: its
+#                     uploads live INSIDE the `then` branch of a single
+#                     `if build-linux.sh`, so one non-zero exit anywhere in the
+#                     linux leg skips EVERY linux asset — the .deb, the
+#                     tarball, the AppImage and the SDK zip included. A fatal
+#                     rpm step would therefore turn "the new package broke"
+#                     into "the release shipped no linux artifacts at all",
+#                     which is strictly worse than the status quo. So the
+#                     tolerance lives here, per artifact, and the .rpm runs
+#                     only after the contract artifacts are already on disk.
+#                     Set true to gate the release on it, which is what the
+#                     linux repo's own CI does (beta-build.yml UR_REQUIRE_RPM).
 #   UR_SKIP_VERIFY=1  build + package only, skip verify.sh
 #
 # SPDX-License-Identifier: MPL-2.0
@@ -80,9 +101,17 @@ rm -rf "${work}/.git"
 # (workstream B owns linux/packaging/**).
 deb_script="${work}/packaging/make-deb.sh"
 tarball_script="${work}/packaging/make-install-tarball.sh"
+rpm_script="${work}/packaging/make-rpm.sh"
 appimage_script="${work}/packaging/make-appimage.sh"
 if [ "${ROLE}" = daemon ]; then
   need_scripts=("${deb_script}" "${tarball_script}")
+  # rpm's own arch spelling — see the note in the header. Mapped here rather
+  # than at the call site so an unusable ARCH fails before the meson build.
+  case "${ARCH}" in
+    amd64) rpm_arch=x86_64 ;;
+    arm64) rpm_arch=aarch64 ;;
+    *) echo "ERROR: ARCH must be amd64 or arm64 (got '${ARCH}')" >&2; exit 1 ;;
+  esac
 else
   need_scripts=("${appimage_script}")
 fi
@@ -100,6 +129,26 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "       the normative artifact names in OUT_DIR."
   } >&2
   exit 1
+fi
+
+# make-rpm.sh is preflighted too — knowing in seconds beats finding out after a
+# qemu-emulated meson build — but SOFTLY, unlike the three above. It is the
+# newest script in linux/packaging, so a checkout that legitimately predates it
+# must still be able to produce the artifacts it does have; see UR_REQUIRE_RPM
+# in the header for why one missing script must not cost the release its .deb.
+build_rpm=1
+if [ "${ROLE}" = daemon ] && [ ! -f "${rpm_script}" ]; then
+  if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
+    {
+      echo "ERROR: ${rpm_script#"${work}"/} is missing and UR_REQUIRE_RPM=true."
+      echo "       It is owned by the linux repo (linux/MIGRATION.md workstream B),"
+      echo "       same as the scripts checked above."
+    } >&2
+    exit 1
+  fi
+  build_rpm=0
+  echo "WARN: [${ARCH}] packaging/make-rpm.sh is absent — this build produces no .rpm." >&2
+  echo "      Set UR_REQUIRE_RPM=true to make that fatal instead." >&2
 fi
 
 # The vendored cgo SDK slice for this arch (staged on the host by
@@ -212,6 +261,36 @@ if [ "${ROLE}" = daemon ]; then
   echo ">>> [${ARCH}] daemon install tarball: ${tarball_script}"
   bash "${tarball_script}"
   expect_artifact "urnetwork-daemon-${VERSION}-${ARCH}.install.tar.gz" "daemon install tarball"
+
+  # The .rpm goes LAST, and the order is load-bearing rather than cosmetic: the
+  # .deb and the tarball are release contracts and are already on disk by the
+  # time the tolerated step runs, so a bad rpm can never cost them. All three
+  # come out of ONE assemble_daemon_root() call on ONE staging tree, which is
+  # also why the .rpm belongs in this container and not in one of its own —
+  # three packages built from one install tree cannot ship different daemons.
+  if [ "${build_rpm}" = 0 ]; then
+    echo "WARN: [${ARCH}] skipping the daemon .rpm — make-rpm.sh is absent (see the preflight)" >&2
+  else
+    echo ">>> [${ARCH}] daemon .rpm: ${rpm_script}"
+    rpm_name="urnetwork-daemon-${VERSION}.${rpm_arch}.rpm"
+    if ! bash "${rpm_script}"; then
+      rpm_problem="make-rpm.sh failed"
+    elif [ ! -f "/out/${rpm_name}" ]; then
+      rpm_problem="make-rpm.sh reported success but wrote no ${rpm_name} to OUT_DIR (/out)"
+    else
+      rpm_problem=''
+      echo ">>> [${ARCH}] ${rpm_name}"
+    fi
+    if [ -n "${rpm_problem}" ]; then
+      if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
+        echo "ERROR: [${ARCH}] ${rpm_problem} — UR_REQUIRE_RPM=true" >&2
+        exit 1
+      fi
+      echo "WARN: [${ARCH}] ${rpm_problem}" >&2
+      echo "      The other daemon artifacts are already built; continuing without the .rpm." >&2
+      echo "      Set UR_REQUIRE_RPM=true to gate the release on it instead." >&2
+    fi
+  fi
 else
   echo ">>> [${ARCH}] GUI AppImage: ${appimage_script}"
   bash "${appimage_script}"

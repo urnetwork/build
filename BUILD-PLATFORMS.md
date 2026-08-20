@@ -14,7 +14,7 @@ can verify a build on each platform before committing.
 
 | Platform | Script | Toolchain (macOS host) | Output |
 |---|---|---|---|
-| Linux | `build-linux.sh` | zig (cgo cross) + Docker (Ubuntu 24.04) | `*.deb`, `*.install.tar.gz`, `*.AppImage` + `.zsync` (amd64, arm64) |
+| Linux | `build-linux.sh` | zig (cgo cross) + Docker (Ubuntu 22.04 daemon / 24.04 GUI) | `*.deb`, `*.install.tar.gz`, `*.rpm`, `*.AppImage` + `.zsync` (amd64, arm64) |
 | Windows | `build-windows.sh` | QEMU/HVF Windows VM | `*.msi` (x64, arm64) |
 | Android (F-Droid) | `build-fdroid.sh` | Docker (F-Droid buildserver) | github/ungoogle `*.apk` |
 
