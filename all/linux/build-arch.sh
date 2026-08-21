@@ -40,6 +40,10 @@
 #   make-deb.sh             -> urnetwork-daemon_<version>_<arch>.deb          (ROLE=daemon)
 #   make-install-tarball.sh -> urnetwork-daemon-<version>-<arch>.install.tar.gz (ROLE=daemon)
 #   make-rpm.sh             -> urnetwork-daemon-<version>.<rpmarch>.rpm       (ROLE=daemon)
+#   make-arch.sh            -> urnetwork-daemon-<version>-<pkgarch>.pkg.tar.zst (ROLE=daemon)
+# The Arch package, like the .rpm, does not carry ${ARCH} verbatim either:
+# <pkgarch> is x86_64/aarch64. Its name IS exact — make-arch.sh composes it from
+# VERSION and the mapped arch and writes nothing else.
 #   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage + .zsync   (ROLE=gui)
 #
 # NOTE the .rpm is the one name that does not carry ${ARCH} verbatim: rpm has
@@ -73,6 +77,9 @@
 #                     only after the contract artifacts are already on disk.
 #                     Set true to gate the release on it, which is what the
 #                     linux repo's own CI does (beta-build.yml UR_REQUIRE_RPM).
+#   UR_REQUIRE_ARCH_PKG  same for the Arch .pkg.tar.zst, same default (false),
+#                     for exactly the same reason: a brand-new package must not
+#                     be able to take the four contracted assets off a release.
 #   UR_SKIP_VERIFY=1  build + package only, skip verify.sh
 #
 # SPDX-License-Identifier: MPL-2.0
@@ -102,14 +109,15 @@ rm -rf "${work}/.git"
 deb_script="${work}/packaging/make-deb.sh"
 tarball_script="${work}/packaging/make-install-tarball.sh"
 rpm_script="${work}/packaging/make-rpm.sh"
+arch_script="${work}/packaging/make-arch.sh"
 appimage_script="${work}/packaging/make-appimage.sh"
 if [ "${ROLE}" = daemon ]; then
   need_scripts=("${deb_script}" "${tarball_script}")
   # rpm's own arch spelling — see the note in the header. Mapped here rather
   # than at the call site so an unusable ARCH fails before the meson build.
   case "${ARCH}" in
-    amd64) rpm_arch=x86_64 ;;
-    arm64) rpm_arch=aarch64 ;;
+    amd64) rpm_arch=x86_64; pkg_arch=x86_64 ;;
+    arm64) rpm_arch=aarch64; pkg_arch=aarch64 ;;
     *) echo "ERROR: ARCH must be amd64 or arm64 (got '${ARCH}')" >&2; exit 1 ;;
   esac
 else
@@ -149,6 +157,22 @@ if [ "${ROLE}" = daemon ] && [ ! -f "${rpm_script}" ]; then
   build_rpm=0
   echo "WARN: [${ARCH}] packaging/make-rpm.sh is absent — this build produces no .rpm." >&2
   echo "      Set UR_REQUIRE_RPM=true to make that fatal instead." >&2
+fi
+
+# Same shape for the Arch package: newer still than make-rpm.sh, so a checkout
+# that predates it must keep producing everything else.
+build_arch_pkg=1
+if [ "${ROLE}" = daemon ] && [ ! -f "${arch_script}" ]; then
+  if [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
+    {
+      echo "ERROR: ${arch_script#"${work}"/} is missing and UR_REQUIRE_ARCH_PKG=true."
+      echo "       It is owned by the linux repo, same as the scripts checked above."
+    } >&2
+    exit 1
+  fi
+  build_arch_pkg=0
+  echo "WARN: [${ARCH}] packaging/make-arch.sh is absent — this build produces no .pkg.tar.zst." >&2
+  echo "      Set UR_REQUIRE_ARCH_PKG=true to make that fatal instead." >&2
 fi
 
 # The vendored cgo SDK slice for this arch (staged on the host by
@@ -289,6 +313,35 @@ if [ "${ROLE}" = daemon ]; then
       echo "WARN: [${ARCH}] ${rpm_problem}" >&2
       echo "      The other daemon artifacts are already built; continuing without the .rpm." >&2
       echo "      Set UR_REQUIRE_RPM=true to gate the release on it instead." >&2
+    fi
+  fi
+
+  # The Arch package runs LAST for the same reason the .rpm runs late: the .deb
+  # and the tarball are the contracted artifacts, and a failure in a newer
+  # package must never cost them. nfpm is already installed for the .deb, and
+  # this is a third packager over the SAME assemble_daemon_root() staging tree,
+  # so all three daemon packages necessarily ship identical content.
+  if [ "${build_arch_pkg}" = 0 ]; then
+    echo "WARN: [${ARCH}] skipping the Arch package — make-arch.sh is absent (see the preflight)" >&2
+  else
+    echo ">>> [${ARCH}] daemon .pkg.tar.zst: ${arch_script}"
+    pkg_name="urnetwork-daemon-${VERSION}-${pkg_arch}.pkg.tar.zst"
+    if ! bash "${arch_script}"; then
+      pkg_problem="make-arch.sh failed"
+    elif [ ! -f "/out/${pkg_name}" ]; then
+      pkg_problem="make-arch.sh reported success but wrote no ${pkg_name} to OUT_DIR (/out)"
+    else
+      pkg_problem=''
+      echo ">>> [${ARCH}] ${pkg_name}"
+    fi
+    if [ -n "${pkg_problem}" ]; then
+      if [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
+        echo "ERROR: [${ARCH}] ${pkg_problem} — UR_REQUIRE_ARCH_PKG=true" >&2
+        exit 1
+      fi
+      echo "WARN: [${ARCH}] ${pkg_problem}" >&2
+      echo "      The other daemon artifacts are already built; continuing without it." >&2
+      echo "      Set UR_REQUIRE_ARCH_PKG=true to gate the release on it instead." >&2
     fi
   fi
 else

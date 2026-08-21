@@ -1448,6 +1448,7 @@ if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
                     "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
                     "$DESKTOP_OUT/linux/"*.rpm(N) \
+                    "$DESKTOP_OUT/linux/"*.pkg.tar.zst(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
         github_release_upload "$(basename "$artifact")" "$artifact"

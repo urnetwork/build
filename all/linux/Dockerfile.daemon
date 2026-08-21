@@ -31,6 +31,13 @@ ENV LANG=C.UTF-8
 #   rename). If one is missing, dpkg only unpacks the package and never runs
 #   postinst, so the urnetwork group and /etc integration files never appear
 #   and the lifecycle test fails misleadingly.
+# - zstd: the Arch package. make-arch.sh is nfpm-based like the .deb and the
+#   .rpm and needs no pacman, but its payload assertion reads the .pkg.tar.zst
+#   back with `tar --zstd`, and GNU tar shells out to the zstd BINARY for that.
+#   Without it the script still writes a correct package and simply skips the
+#   check — the same degrade-quietly shape the .rpm has when `rpm` is absent,
+#   and the same reason to install it: that assertion is what catches a package
+#   whose payload is not what was staged.
 # - rpm/checkpolicy/semodule-utils: the .rpm. make-rpm.sh is nfpm-based (below)
 #   and needs no rpmbuild, but it HARD-DIES without checkmodule AND
 #   semodule_package: the Fedora-family package ships a compiled SELinux policy
@@ -66,6 +73,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         rpm \
         checkpolicy \
         semodule-utils \
+        zstd \
         file \
         desktop-file-utils \
         systemd \
