@@ -262,6 +262,8 @@ error_trap 'pull goidenticons'
 error_trap 'pull extension'
 (cd $BUILD_HOME/localizations && git_main)
 error_trap 'pull localizations'
+(cd $WARP_HOME/mmm && git_main)
+error_trap 'pull mmm'
 
 # refresh the generated connect IP tables from the live threat feeds:
 # security/main.go -> ip_security_cfaa_block.go, blocker/main.go -> ip_blocker_block.go.
@@ -276,6 +278,17 @@ if [ "$CONNECT_IP_UPDATE" ]; then
         go run ./blocker)
     error_trap 'connect ip update'
 fi
+
+# Refresh the committed ur.io changelog sources while mmm is still on main.
+# This is release synchronization, not site compilation: doing it here makes
+# the generated source part of repository history before the web build consumes
+# it. GITHUB_API_KEY raises the GitHub API limit for the release walk.
+builder_message "updating the generated ur.io changelog"
+(cd $WARP_HOME/mmm/ur.io &&
+    CHANGELOG_STRICT=1 \
+    GITHUB_TOKEN="$GITHUB_API_KEY" \
+    node react/scripts/generate-changelog.mjs)
+error_trap 'ur.io changelog update'
 
 # regenerate every app's strings from the shared localization store:
 # localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
@@ -512,6 +525,20 @@ if [ "$CONNECT_IP_UPDATE" ]; then
         fi)
     error_trap 'connect ip update push'
 fi
+
+
+# Push the changelog generated before the tests to mmm main, stamped with the
+# release version. Stage only its two source files; the web build derives the
+# public markdown and llms assets from these committed inputs.
+(cd $WARP_HOME/mmm &&
+    git add \
+        ur.io/react/src/data/changelog.js \
+        ur.io/react/src/data/changelog-version.js &&
+    if ! git diff --cached --quiet; then
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog update" &&
+        git push
+    fi)
+error_trap 'ur.io changelog update push'
 
 
 # push the regenerated localizations (generated before the tests above) to each
