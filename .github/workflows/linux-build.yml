@@ -895,7 +895,7 @@ jobs:
             forbidden=(URnetwork-*.AppImage URnetwork-*.AppImage.zsync)
           else
             required=("URnetwork-${V}-${ARCH}.AppImage" "URnetwork-${V}-${ARCH}.AppImage.zsync")
-            forbidden=(urnetwork-daemon_*.deb urnetwork-daemon-*.install.tar.gz urnetwork-daemon*.rpm)
+            forbidden=(urnetwork-daemon_*.deb urnetwork-daemon-*.install.tar.gz urnetwork-daemon*.rpm urnetwork-daemon*.pkg.tar.zst)
           fi
           for f in "${required[@]}"; do
             if [ -s "$f" ]; then
@@ -939,6 +939,7 @@ jobs:
             out/desktop/linux/*.deb
             out/desktop/linux/*.install.tar.gz
             out/desktop/linux/*.rpm
+            out/desktop/linux/*.pkg.tar.zst
             out/desktop/linux/*.AppImage
             out/desktop/linux/*.AppImage.zsync
           if-no-files-found: error
