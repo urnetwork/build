@@ -46,6 +46,7 @@ case "${ROLE}" in
   all)    do_gui=1; do_daemon=1 ;;
 esac
 OUT_DIR="${OUT_DIR:-/out}"
+APP_ID="com.bringyour.network"
 
 APPIMAGE="${OUT_DIR}/URnetwork-${VERSION}-${ARCH}.AppImage"
 DEB="${OUT_DIR}/urnetwork-daemon_${VERSION}_${ARCH}.deb"
@@ -120,7 +121,7 @@ else
     check "AppDir: AppRun"                    test -x "${APPDIR}/AppRun"
     check "AppDir: usr/bin/urnetwork-gui"     test -x "${APPDIR}/usr/bin/urnetwork-gui"
     check "AppDir: libURnetworkSdk.so"        test -f "${APPDIR}/usr/lib/urnetwork/libURnetworkSdk.so"
-    check "AppDir: desktop entry"             test -f "${APPDIR}/network.ur.urnetwork.desktop"
+    check "AppDir: desktop entry"             test -f "${APPDIR}/${APP_ID}.desktop"
     check "AppDir: .DirIcon"                  test -f "${APPDIR}/.DirIcon"
     check "AppDir: compiled GSettings schemas (gschemas.compiled)" \
           test -s "${APPDIR}/usr/share/glib-2.0/schemas/gschemas.compiled"
@@ -318,10 +319,10 @@ else
   check "installed: /usr/bin/urnetwork (launcher)"          test -x /usr/bin/urnetwork
   check "installed: unit at /lib/systemd/system"            test -f /lib/systemd/system/urnetworkd.service
   check "installed: desktop entry (app-id filename)" \
-        test -f /usr/share/applications/network.ur.urnetwork.desktop
+        test -f "/usr/share/applications/${APP_ID}.desktop"
   check "installed: NetworkManager unmanaged marking"       test -f /etc/NetworkManager/conf.d/95-urnetwork.conf
   check "installed: udev unmanaged rule"                    test -f /etc/udev/rules.d/85-urnetwork-unmanaged.rules
-  check "installed: inert autostart template"               test -f /etc/urnetwork/autostart/network.ur.urnetwork.desktop
+  check "installed: inert autostart template"               test -f "/etc/urnetwork/autostart/${APP_ID}.desktop"
   check "postinst created the 'urnetwork' system group"     getent group urnetwork
 
   # The AppImage is NEVER packaged: the launcher must fail with a hint, not a
