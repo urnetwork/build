@@ -1,0 +1,184 @@
+name: Lint (shell + workflows)
+
+# =============================================================================
+# The cheap half of this repo's CI, and the one that should run on every push.
+#
+# linux-release.yml costs ~25 minutes and four runners; this costs about a
+# minute and catches the class of mistake that is most likely here: this
+# repository is almost entirely shell, it is driven by a 77 KB zsh script that
+# nothing type-checks, and a syntax error in any of it surfaces only when a
+# release is already half done. `bash -n` / `zsh -n` on every script is a
+# complete answer to that class, and it is free.
+#
+# TWO SHELLS, ROUTED BY SHEBANG, because this repo genuinely has both:
+#   all/run.sh                      #!/usr/bin/env zsh
+#   all/make-apple-dist-identity.sh #!/bin/zsh
+#   everything else                 #!/usr/bin/env bash
+# Checking run.sh with bash is not a stricter test, it is a WRONG one — it
+# fails on `*.msi(N)`, zsh's nullglob qualifier, which is load-bearing in the
+# release uploads. So each file is checked with the shell it declares.
+#
+# shellcheck runs at --severity=error ONLY as a gate. The repo is clean at that
+# level today and staying clean is a real property; running it at `style` and
+# gating on it would be a large, unrelated cleanup, so the lower severities are
+# reported to the job summary as advice and fail nothing.
+# =============================================================================
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # No submodules: every script this checks lives in this repository.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # zsh is not on the runner image. shellcheck is (and is not needed for
+      # the zsh half — shellcheck cannot parse zsh at all, which is the other
+      # half of why the routing below exists).
+      - name: Install zsh
+        run: |
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            install -y --no-install-recommends zsh
+          zsh --version
+          shellcheck --version
+
+      - name: Parse every script with the shell it declares
+        run: |
+          set -uo pipefail
+          bash_files=()
+          zsh_files=()
+          while IFS= read -r f; do
+            # The shebang is the routing key. all/windows/lib.sh has no
+            # shebang (it is sourced) but declares `# shellcheck shell=bash`,
+            # and falls into the bash bucket by default, which is correct.
+            case "$(head -n 1 "$f")" in
+              *zsh*) zsh_files+=("$f") ;;
+              *)     bash_files+=("$f") ;;
+            esac
+          done < <(git ls-files '*.sh')
+          echo "bash: ${#bash_files[@]} file(s), zsh: ${#zsh_files[@]} file(s)"
+          fail=0
+          for f in "${bash_files[@]}"; do
+            if bash -n "$f"; then
+              echo "ok  bash -n $f"
+            else
+              echo "::error file=$f::bash -n failed"
+              fail=1
+            fi
+          done
+          for f in "${zsh_files[@]}"; do
+            if zsh -n "$f"; then
+              echo "ok  zsh -n $f"
+            else
+              echo "::error file=$f::zsh -n failed"
+              fail=1
+            fi
+          done
+          # Persist the split for the steps below rather than recomputing it.
+          printf '%s\n' "${bash_files[@]}" > "$RUNNER_TEMP/bash_files.txt"
+          exit $fail
+
+      # THE GATE. -x follows `source`d files, which matters: all/build-linux.sh
+      # sources all/stage-local-repos.sh, and without -x shellcheck reports the
+      # sourced function as an unknown command.
+      - name: shellcheck (errors only — this one fails the build)
+        run: |
+          set -uo pipefail
+          mapfile -t bash_files < "$RUNNER_TEMP/bash_files.txt"
+          shellcheck --severity=error --shell=bash -x "${bash_files[@]}"
+
+      - name: shellcheck (style + info — advisory, never fails)
+        if: always()
+        run: |
+          set -uo pipefail
+          mapfile -t bash_files < "$RUNNER_TEMP/bash_files.txt"
+          out="$RUNNER_TEMP/shellcheck-advice.txt"
+          shellcheck --severity=style --shell=bash -x -f gcc "${bash_files[@]}" > "$out" 2>&1 || true
+          n=$(wc -l < "$out")
+          {
+            echo "### shellcheck advice (not a gate): $n finding(s)"
+            echo
+            echo '```'
+            head -n 200 "$out"
+            if [ "$n" -gt 200 ]; then echo "... $((n - 200)) more"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  workflows:
+    name: Workflow files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # Pinned AND checksum-verified, the same rule Dockerfile.daemon applies
+      # to nfpm: a linter that silently became a different linter is how a
+      # green run stops meaning anything. The digest is the one published in
+      # actionlint_1.7.7_checksums.txt.
+      - name: Install actionlint (pinned, checksum-verified)
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+          ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tgz" "$url"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          sudo install -m 0755 "$RUNNER_TEMP/actionlint" /usr/local/bin/actionlint
+          actionlint --version
+
+      # actionlint parses the YAML, type-checks every ${{ }} expression against
+      # the contexts each trigger actually provides, validates `runs-on` labels
+      # and `needs` graphs, and runs shellcheck over every `run:` block. The
+      # last part is why this job exists at all: a `run:` block is shell that
+      # nothing else in this repository would ever look at.
+      - name: actionlint
+        run: actionlint -no-color -oneline
+
+      # A second, independent parse. actionlint is strict about GitHub's schema;
+      # this catches the plain YAML mistakes (bad indent, duplicate key) with a
+      # different parser, so one tool's blind spot is not the whole check.
+      - name: Parse the workflow YAML with a second parser
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+          fail = 0
+          for p in sorted(pathlib.Path('.github/workflows').glob('*.y*ml')):
+              try:
+                  d = yaml.safe_load(p.read_text())
+              except Exception as e:                      # noqa: BLE001
+                  print(f"::error file={p}::{e}")
+                  fail = 1
+                  continue
+              # `on:` is YAML 1.1's boolean True, which is the single most
+              # common surprise when a script reads a workflow file.
+              trigger = d.get('on', d.get(True))
+              if not trigger:
+                  print(f"::error file={p}::no triggers")
+                  fail = 1
+              if not d.get('jobs'):
+                  print(f"::error file={p}::no jobs")
+                  fail = 1
+              print(f"ok  {p}: jobs={list((d.get('jobs') or {}).keys())}")
+          sys.exit(fail)
+          PY

@@ -4,6 +4,7 @@
 # (amd64 + arm64, Ubuntu 24.04 container via linux/build.sh):
 #   urnetwork-daemon_<version>_<arch>.deb
 #   urnetwork-daemon-<version>-<arch>.install.tar.gz
+#   urnetwork-daemon-<version>.<rpmarch>.rpm (rpmarch = x86_64|aarch64)
 #   URnetwork-<version>-<arch>.AppImage (+ .AppImage.zsync)
 #
 # This is the linux build part of run.sh, extracted so it can also run
@@ -18,11 +19,32 @@
 #                          from the v<version> branch of $BUILD_HOME/linux)
 #   WARP_VERSION           internal version, e.g. 2026.7.6+985989570 (default:
 #                          EXTERNAL_WARP_VERSION with the last '-' as a '+')
-#   OUT_DIR                where the deb/tarball/AppImage artifacts land;
+#   OUT_DIR                where the deb/tarball/rpm/AppImage artifacts land;
 #                          existing ones in it are removed so the caller never
 #                          picks up stale ones
 #                          (default: ${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux)
 #   ARCHES                 forwarded to linux/build.sh (default "amd64 arm64")
+#   ROLES                  forwarded to linux/build.sh: which halves to build,
+#                          subset of "daemon gui" (default both). See that
+#                          script's header — it is what lets a CI run the two
+#                          halves as separate jobs.
+#   UR_REQUIRE_RPM         forwarded: make a missing/failed .rpm fatal
+#                          (default false — warn and carry on)
+#   UR_SKIP_SDK_BUILD      1 = the cgo SDK output is ALREADY in
+#                          sdk/cgo/build/ (linux/<arch>/libURnetworkSdk.so +
+#                          URnetworkSdkLinux.zip); do not rebuild it. Default
+#                          0 — the release host always builds it here.
+#
+#                          It exists for CI (build/.github/workflows/
+#                          linux-release.yml), which builds the SDK ONCE in a
+#                          shared job and hands the zip to every (role, arch)
+#                          leg: four legs rebuilding a byte-identical .so would
+#                          each need Go, the zig cross toolchain and the 253 MB
+#                          sdk submodule, for ~2 minutes of duplicated work.
+#                          The output assertions below still run either way,
+#                          and THEY are what gates the packaging step — a
+#                          skipped build with nothing staged fails exactly as a
+#                          failed build does.
 #
 # SPDX-License-Identifier: MPL-2.0
 set -euo pipefail
@@ -91,6 +113,31 @@ for _p in packaging/make-deb.sh packaging/make-install-tarball.sh packaging/make
   exit 1
 done
 
+# make-rpm.sh is preflighted here too, but SOFTLY — deliberately unlike the
+# three above. It is the newest script in linux/packaging, so a checkout that
+# legitimately predates it must still produce the artifacts it does have. The
+# asymmetry matters because of where run.sh's uploads sit: they are all inside
+# the `then` branch of one `if build-linux.sh`, so a hard exit here would cost
+# the release its .deb, its tarball, its AppImage AND the SDK zip over one
+# missing file. UR_REQUIRE_RPM=true restores the gate, which is what the linux
+# repo's own CI runs with.
+if [ ! -f "$BUILD_HOME/linux/packaging/make-rpm.sh" ]; then
+  if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
+    {
+      echo "ERROR: $BUILD_HOME/linux/packaging/make-rpm.sh is missing and UR_REQUIRE_RPM=true."
+      echo "       Same cause as the block above: this pipeline builds \$BUILD_HOME/linux,"
+      echo "       a release-staged checkout, NOT your working tree — see SRC_HOME/SRC_LINUX."
+    } >&2
+    exit 1
+  fi
+  {
+    echo "WARNING: $BUILD_HOME/linux/packaging/make-rpm.sh is missing — this build will"
+    echo "         produce no .rpm. (Same staging caveat as above: \$BUILD_HOME/linux is a"
+    echo "         release-staged checkout, not your working tree.)"
+    echo "         Set UR_REQUIRE_RPM=true to make this fatal instead."
+  } >&2
+fi
+
 OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux}"
 mkdir -p "$OUT_DIR"
 # Clear stale artifacts of every type this build produces (run.sh globs OUT_DIR
@@ -101,7 +148,7 @@ mkdir -p "$OUT_DIR"
 # orphaned checksum that no longer matches any artifact is worse than none.
 # Also sweeps *.snap — nothing produces those since the AppImage migration, but
 # a pre-migration tree still has them sitting next to the real artifacts.
-rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz \
+rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz "$OUT_DIR"/*.rpm \
       "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.AppImage.zsync \
       "$OUT_DIR"/*.sha256 "$OUT_DIR"/*.asc \
       "$OUT_DIR"/*.snap
@@ -115,7 +162,15 @@ rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz \
 # of here — so a build can never silently move a dependency version, and the
 # artifact always corresponds to the tree as given. Check and fail with the
 # command to run; do not run it.
-if [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
+#
+# UR_SKIP_SDK_BUILD=1 short-circuits the gate TOGETHER WITH the build, and that
+# pairing is deliberate: with nothing to compile there is no module graph to
+# prepare, and demanding go.sum anyway would force every CI leg to check out the
+# 253 MB sdk submodule for a file it never opens.
+if [ "${UR_SKIP_SDK_BUILD:-0}" = 1 ]; then
+  echo ">>> UR_SKIP_SDK_BUILD=1 — using the sdk/cgo/build output already staged"
+  echo "    (the per-arch .so and zip assertions below still run)"
+elif [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
   {
     echo "ERROR: $BUILD_HOME/sdk/cgo/go.sum is missing."
     echo "       It is git-ignored and generated, normally by run.sh's version"
@@ -128,25 +183,46 @@ if [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
     echo "       upgrades indirect deps (quic-go, gvisor, x/crypto, …)."
   } >&2
   exit 1
+else
+  echo ">>> building the linux cgo sdk ($WARP_VERSION)"
+  (cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_linux)
 fi
-
-echo ">>> building the linux cgo sdk ($WARP_VERSION)"
-(cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_linux)
 
 # make chains recipe commands with ';', so a failed cross-compile does not stop
 # the zip step — verify both .so's exist before feeding the packaging build (a
 # partial zip would otherwise sail through to broken artifacts).
 for a in amd64 arm64; do
   so="$BUILD_HOME/sdk/cgo/build/linux/$a/libURnetworkSdk.so"
-  [ -f "$so" ] || { echo "ERROR: $so not built — is the linux cross toolchain installed? (cd sdk/cgo && make init)" >&2; exit 1; }
+  if [ ! -f "$so" ]; then
+    echo "ERROR: $so not built." >&2
+    if [ "${UR_SKIP_SDK_BUILD:-0}" = 1 ]; then
+      echo "       UR_SKIP_SDK_BUILD=1, so nothing here built it: whatever staged" >&2
+      echo "       sdk/cgo/build did not produce this arch. Check the job that did." >&2
+    else
+      echo "       Is the linux cross toolchain installed? (cd sdk/cgo && make init)" >&2
+    fi
+    exit 1
+  fi
 done
 
-# Deb + install tarball + AppImage — built per arch in the Ubuntu 24.04
-# container (meson build + the linux repo's packaging scripts); arm64 native,
-# amd64 under qemu emulation. See linux/README.md.
-echo ">>> building the linux deb/tarball/AppImage artifacts ($EXTERNAL_WARP_VERSION)"
+# The zip is the LAST command in the same ';'-chained recipe, so it can fail
+# while every .so above succeeds and make still exits 0 — and it, not the .so
+# files, is what build.sh actually hands to fetch-deps.sh. Assert it for the
+# same reason the loop above exists.
+SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+if [ ! -s "$SDK_ZIP" ]; then
+  echo "ERROR: $SDK_ZIP is missing or empty — the sdk zip step did not run" >&2
+  exit 1
+fi
+
+# Deb + install tarball + rpm + AppImage — built per arch in the Ubuntu
+# containers (meson build + the linux repo's packaging scripts); arm64 native,
+# amd64 under qemu emulation. The .deb, the tarball and the .rpm all come out
+# of the same staging tree in the same ROLE=daemon container, so they cannot
+# ship different daemons. See linux/README.md.
+echo ">>> building the linux deb/tarball/rpm/AppImage artifacts ($EXTERNAL_WARP_VERSION)"
 LINUX_DIR="$BUILD_HOME/linux" \
-SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip" \
+SDK_ZIP="$SDK_ZIP" \
 OUT_DIR="$OUT_DIR" \
 VERSION="$EXTERNAL_WARP_VERSION" \
     "$here/linux/build.sh"
