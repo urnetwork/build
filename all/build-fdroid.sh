@@ -55,7 +55,7 @@ container_build() {
     sudo apt-get update
     sudo apt-get install -y -t trixie openjdk-21-jdk-headless
     sudo update-alternatives --auto java
-    curl -L https://go.dev/dl/go1.26.6.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/
+    curl -L https://go.dev/dl/go1.26.7.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/
 
     echo ">>> android ndk install"
     export ANDROID_HOME=/opt/android-sdk
@@ -83,10 +83,10 @@ container_build() {
     go_version=$(go version 2> /dev/null || true)
     if [ "$go_version" == "" ]; then
         echo "go check: go will use /usr/local/go ($(/usr/local/go/bin/go version))"
-    elif [[ "$go_version" =~ "go version go1.26.6" ]]; then
+    elif [[ "$go_version" =~ "go version go1.26.7" ]]; then
         echo "go check: go will use system go ($go_version)"
     else
-        echo "go check: system go must either be 1.26.6 or not installed"
+        echo "go check: system go must either be 1.26.7 or not installed"
         exit 1
     fi
     java_version=$(java -version 2>&1 || true)
