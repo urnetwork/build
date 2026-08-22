@@ -1382,7 +1382,7 @@ fi
 
 
 # =============================================================================
-# Desktop apps: Windows Store (MSI) + Linux (deb + install tarball + AppImage).
+# Desktop apps: Windows Store (MSI) + Linux (deb + install tarball + rpm + AppImage).
 # See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
 #
 # Each platform builds via its own script (all/build-windows.sh,
@@ -1410,10 +1410,12 @@ fi
 #
 # SUBMISSION/PUBLISHING is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
-# Store (Partner Center). Linux has no store — the deb/tarball/AppImage ship
-# from the release page, and re-hosting the AppImage + .zsync on the update
-# endpoint (GitHub Releases can't serve the multi-range requests zsync needs —
-# linux/APPIMAGE.md §11f) is likewise a manual follow-up.
+# Store (Partner Center). Linux has no store — the deb/tarball/rpm/AppImage
+# ship from the release page, and re-hosting the AppImage + .zsync on the
+# update endpoint (GitHub Releases can't serve the multi-range requests zsync
+# needs — linux/APPIMAGE.md §11f) is likewise a manual follow-up. Publishing
+# the .deb to an apt repo and the .rpm to a dnf repo (which additionally wants
+# an rpm HEADER signature, not the detached .asc) are manual follow-ups too.
 # =============================================================================
 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
@@ -1429,22 +1431,30 @@ else
     builder_message "warning: windows build did not finish — skipping the windows sdk + MSI artifacts (release continues)"
 fi
 
-builder_message "building linux app (cgo sdk + deb/install-tarball on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container)"
+builder_message "building linux app (cgo sdk + deb/install-tarball/rpm on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container)"
 if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
-    # Three artifact types per arch (names normative — linux/MIGRATION.md):
+    # Four artifact types per arch (names normative — linux/MIGRATION.md):
     # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
-    # URnetwork-<v>-<arch>.AppImage + .AppImage.zsync. (N) nullglobs each
-    # pattern so a missing type uploads nothing rather than a literal '*'.
+    # urnetwork-daemon-<v>.<rpmarch>.rpm, URnetwork-<v>-<arch>.AppImage +
+    # .AppImage.zsync. (N) nullglobs each pattern so a missing type uploads
+    # nothing rather than a literal '*' — which is also what makes the .rpm's
+    # warn-and-continue behaviour in build-linux.sh work at this level: a
+    # release without one simply uploads the other four.
+    #
+    # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
+    # appear here. The .sha256/.asc sidecars the packaging scripts write are
+    # deliberately NOT uploaded, matching the .deb's existing behaviour.
     for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
                     "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
+                    "$DESKTOP_OUT/linux/"*.rpm(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
         github_release_upload "$(basename "$artifact")" "$artifact"
     done
     builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 else
-    builder_message "warning: linux build did not finish — skipping the linux sdk + deb/install-tarball/AppImage artifacts (release continues)"
+    builder_message "warning: linux build did not finish — skipping the linux sdk + deb/install-tarball/rpm/AppImage artifacts (release continues)"
 fi
 
 

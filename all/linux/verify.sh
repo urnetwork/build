@@ -51,6 +51,15 @@ APP_ID="com.bringyour.network"
 APPIMAGE="${OUT_DIR}/URnetwork-${VERSION}-${ARCH}.AppImage"
 DEB="${OUT_DIR}/urnetwork-daemon_${VERSION}_${ARCH}.deb"
 TARBALL="${OUT_DIR}/urnetwork-daemon-${VERSION}-${ARCH}.install.tar.gz"
+# The .rpm is the one artifact name that does not carry ${ARCH} verbatim — rpm
+# has its own arch spelling. Mirrors make-rpm.sh's map; an unknown ARCH leaves
+# RPM_ARCH empty and the rpm section reports a skip rather than a bogus path.
+case "${ARCH}" in
+  amd64) RPM_ARCH='x86_64' ;;
+  arm64) RPM_ARCH='aarch64' ;;
+  *)     RPM_ARCH='' ;;
+esac
+RPM="${OUT_DIR}/urnetwork-daemon-${VERSION}.${RPM_ARCH}.rpm"
 
 pass_n=0; fail_n=0; skip_n=0
 pass() { printf '[PASS] %s\n' "$1"; pass_n=$((pass_n + 1)); }
@@ -293,7 +302,7 @@ fi
 # ===========================================================================
 if [ "${do_daemon}" = 0 ]; then
   sec "5-6. daemon package lifecycle"
-  skip ".deb + install.sh tarball lifecycle" "ROLE=${ROLE}; dpkg/nfpm tooling lives in the daemon image"
+  skip ".deb + .rpm + install.sh tarball lifecycle" "ROLE=${ROLE}; the dpkg/nfpm/rpm tooling lives in the daemon image"
 else
 sec "5. .deb install lifecycle"
 # ===========================================================================
@@ -361,6 +370,52 @@ else
   fi
   check "purge removed /usr/lib/urnetwork/urnetworkd"  test ! -e /usr/lib/urnetwork/urnetworkd
   check "purge removed /usr/bin/urnetwork"             test ! -e /usr/bin/urnetwork
+fi
+
+# ===========================================================================
+sec "5b. .rpm (metadata only)"
+# ===========================================================================
+# Deliberately THIN, and both halves of that are on purpose.
+#
+# What is NOT repeated here: make-rpm.sh already asserts the payload against
+# `rpm -qp` before it returns — the six required installed paths, the policy
+# module, that nothing ships under /lib, that the unit is not %config, and that
+# all four scriptlets exist and name their units. Re-running those would test
+# the same tool twice. (That is also why Dockerfile.daemon installs `rpm`:
+# without it make-rpm.sh silently downgrades the whole assertion to a warning.)
+#
+# What IS checked here is the thing only the CALLER can know: the staging tree
+# is arch-specific, so an aarch64 rpm falling out of the amd64 leg is the real
+# failure mode at this level, and neither the packaging script nor a
+# file-exists check can see it.
+#
+# There is NO install test, on purpose. `rpm -i` on Ubuntu would create an
+# rpmdb on a dpkg-owned filesystem and STILL not exercise what matters: %post's
+# `semodule -X 200 -i` and the systemd preset only mean something on a Fedora
+# host. Nothing in this pipeline executes an rpm scriptlet — do not read a
+# green build here as a green install.
+if [ -z "${RPM_ARCH}" ]; then
+  skip ".rpm checks" "ARCH='${ARCH}' has no rpm arch spelling (expected amd64|arm64)"
+elif [ ! -f "${RPM}" ]; then
+  # A skip, not a fail: the .rpm is warn-and-continue in build-arch.sh
+  # (UR_REQUIRE_RPM), which has already reported the reason with more detail
+  # than this script has. Failing here would just double the noise and turn a
+  # tolerated miss into a build failure by the back door.
+  skip ".rpm present" "no $(basename "${RPM}") in ${OUT_DIR} — see build-arch.sh's UR_REQUIRE_RPM warning above"
+elif ! command -v rpm >/dev/null 2>&1; then
+  skip ".rpm metadata" "rpm is not installed in this image (Dockerfile.daemon installs it)"
+else
+  pass ".rpm present ($(du -h "${RPM}" | cut -f1))"
+  check "rpm metadata readable (rpm -qp --info)" rpm -qp --info "${RPM}"
+
+  # The arch tag in the HEADER, not merely in the filename: a mis-plumbed
+  # staging tree renames nothing.
+  rpm_pkg_arch="$(rpm -qp --qf '%{ARCH}' "${RPM}" 2>/dev/null || true)"
+  if [ "${rpm_pkg_arch}" = "${RPM_ARCH}" ]; then
+    pass "rpm arch tag is ${RPM_ARCH} (this leg is ARCH=${ARCH})"
+  else
+    fail "rpm arch tag is ${RPM_ARCH} (got '${rpm_pkg_arch:-unreadable}') — an rpm from the other arch's leg?"
+  fi
 fi
 
 # ===========================================================================

@@ -31,6 +31,24 @@ ENV LANG=C.UTF-8
 #   rename). If one is missing, dpkg only unpacks the package and never runs
 #   postinst, so the urnetwork group and /etc integration files never appear
 #   and the lifecycle test fails misleadingly.
+# - rpm/checkpolicy/semodule-utils: the .rpm. make-rpm.sh is nfpm-based (below)
+#   and needs no rpmbuild, but it HARD-DIES without checkmodule AND
+#   semodule_package: the Fedora-family package ships a compiled SELinux policy
+#   module, and without it systemd runs urnetworkd in init_t, which is denied
+#   /dev/net/tun — so every Connect fails on an Enforcing host. The package
+#   split differs by family and guessing wrong looks identical to not trying:
+#   semodule_package is in *semodule-utils* on Debian/Ubuntu (policycoreutils
+#   here ships semodule/sestatus/setfiles and NOT the packager), but in
+#   policycoreutils on Fedora. `rpm` itself is not a nice-to-have either —
+#   without it make-rpm.sh SKIPS its whole payload assertion and degrades to a
+#   single warning, and that assertion is what catches an rpm containing no
+#   daemon.
+#
+#   22.04 is the RIGHT host for this for a second, independent reason:
+#   semodule_package stamps the module with the BUILD host's libsepol policy
+#   version and a target whose libsepol is OLDER refuses it. Building on
+#   jammy's libsepol 3.3 for Fedora's 3.6+ is the safe direction; building on a
+#   bleeding-edge host for RHEL is not.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
         g++ \
@@ -45,6 +63,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         unzip \
         dpkg-dev \
         fakeroot \
+        rpm \
+        checkpolicy \
+        semodule-utils \
         file \
         desktop-file-utils \
         systemd \
@@ -73,6 +94,21 @@ RUN set -eu; \
     dpkg -i "/tmp/${nfpm_deb}"; \
     rm -f "/tmp/${nfpm_deb}" /tmp/nfpm-checksums.txt; \
     nfpm --version
+
+# Fail at `docker build` if a base-image change ever drops the SELinux
+# packager, rather than 40 minutes into an emulated build inside make-rpm.sh's
+# die. Mirrors the same pre-flight in linux/.github/workflows/beta-build.yml —
+# the split between checkpolicy and semodule-utils is exactly the kind of thing
+# a distro rearranges between LTSes.
+RUN set -eu; \
+    for t in checkmodule semodule_package; do \
+      command -v "$t" >/dev/null 2>&1 || { \
+        echo "ERROR: $t is missing after installing checkpolicy + semodule-utils"; \
+        echo "       — make-rpm.sh cannot build the SELinux policy module without it."; \
+        exit 1; \
+      }; \
+    done; \
+    rpm --version
 
 # *important* gettext (msgfmt) is required, not optional: meson's i18n module
 # SILENTLY disables translations when msgfmt is missing — the build still
