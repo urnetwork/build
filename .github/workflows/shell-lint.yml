@@ -1,4 +1,4 @@
-name: Lint (shell + workflows)
+name: Lint (shell + workflows + changelog)
 
 # =============================================================================
 # The cheap half of this repo's CI, and the one that should run on every push.
@@ -182,3 +182,125 @@ jobs:
               print(f"ok  {p}: jobs={list((d.get('jobs') or {}).keys())}")
           sys.exit(fail)
           PY
+
+  changelog:
+    name: Changelog generator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # No submodules and no tags on purpose. The generator resolves a release
+      # ref from the local clone when it can and from the GitHub API when it
+      # cannot, and a default shallow checkout has neither the tags nor the
+      # submodules -- so running it here exercises the API fallback path, which is
+      # the one a fresh CI runner will always take.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Syntax
+        run: python3 -m py_compile all/changelog.py
+
+      # The generator's own checks: the noise filters against the exact strings
+      # all/run.sh commits, the 500-character store budget, the non-shipping-path
+      # rule against real file lists, the markdown escaping, and the release-body
+      # size ladder. No network, no token, no rate limit -- so it is a gate.
+      - name: changelog.py self-test
+        run: python3 all/changelog.py --self-test
+
+      # THE HARD ASSERT, and this is the right place for it.
+      #
+      # fdroidserver truncates a changelog at 500 characters SILENTLY
+      # (update.py's _set_localized_text_entry does `text[:limit]` -- no warning,
+      # no error, no log), and Google Play rejects an over-length note outright.
+      # all/run.sh cannot afford to fail on this: a release that is already half
+      # published must not be lost over release notes, so there it is a
+      # builder_message warning and a fallback. Here, failing loudly is free.
+      #
+      # Characters, not bytes. Every file in the repo is ASCII today so `wc -c`
+      # would agree, but the generator now pulls subjects and bodies out of 17
+      # submodules and those carry em dashes and non-ASCII author names -- at
+      # which point `wc -c` over-counts and would fail a file that is actually
+      # fine, while a byte budget would under-count the room a store really has.
+      #
+      # The trailing newline is excluded deliberately. F-Droid's slice is applied
+      # to a read that includes it, so a 500-character body plus "\n" survives
+      # intact; reserving a character for the newline would throw away a
+      # character of real changelog for nothing.
+      - name: Every store changelog fits the 500-character store limit
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sys
+          LIMIT = 500
+          fail = 0
+          files = sorted(pathlib.Path('metadata/en-US/changelogs').glob('*.txt'))
+          worst = 0
+          for p in files:
+              raw = p.read_bytes()
+              if raw.startswith(b'\xef\xbb\xbf'):
+                  print(f"::error file={p}::UTF-8 BOM -- F-Droid counts it against the 500")
+                  fail = 1
+              text = raw.decode('utf-8')
+              if text[:1].isspace():
+                  print(f"::error file={p}::leading whitespace -- whatsNew is sliced raw, "
+                        "it is not stripped the way name/summary/video are")
+                  fail = 1
+              n = len(text.rstrip('\n'))
+              worst = max(worst, n)
+              if n > LIMIT:
+                  print(f"::error file={p}::{n} characters, limit {LIMIT} -- "
+                        "F-Droid would cut this mid-sentence without saying so")
+                  fail = 1
+          print(f"checked {len(files)} changelog file(s); longest is {worst}/{LIMIT} characters")
+          sys.exit(fail)
+          PY
+
+      # ADVISORY, never a gate. This one talks to api.github.com, and a lint
+      # workflow whose whole argument is that it is cheap and always green must
+      # not go red because GitHub had a bad minute. The gate above is offline.
+      #
+      # It walks a fixed historical pair, so the expected output never drifts,
+      # and it runs the generator twice into different files and diffs them --
+      # which is the determinism claim, checked rather than asserted.
+      - name: Generate a real changelog and prove it is deterministic (advisory)
+        id: smoke
+        continue-on-error: true
+        env:
+          GITHUB_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+          FROM_TAG: v2026.8.21-1025223880
+          TO_TAG: v2026.8.21-1025763520
+        run: |
+          set -euo pipefail
+          for i in 1 2; do
+            python3 all/changelog.py \
+              --from "$FROM_TAG" --to "$TO_TAG" \
+              --store-out "$RUNNER_TEMP/store$i.txt" \
+              --full-out "$RUNNER_TEMP/full$i.md"
+          done
+          diff -u "$RUNNER_TEMP/store1.txt" "$RUNNER_TEMP/store2.txt"
+          diff -u "$RUNNER_TEMP/full1.md" "$RUNNER_TEMP/full2.md"
+          n=$(python3 -c 'import sys;print(len(open(sys.argv[1],encoding="utf-8").read().rstrip("\n")))' "$RUNNER_TEMP/store1.txt")
+          echo "store note: $n/500 characters, identical across two runs"
+          test "$n" -le 500
+          test -s "$RUNNER_TEMP/full1.md"
+          {
+            echo "### Changelog smoke test: \`$FROM_TAG\` -> \`$TO_TAG\`"
+            echo
+            echo "Store note ($n/500 characters):"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/store1.txt"
+            echo '```'
+            echo
+            echo "<details><summary>Full changelog</summary>"
+            echo
+            cat "$RUNNER_TEMP/full1.md"
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say so if the smoke test could not run
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "::warning::the networked changelog smoke test did not pass; \
+          the offline gates above did. Check the step log before assuming the \
+          generator is broken."
