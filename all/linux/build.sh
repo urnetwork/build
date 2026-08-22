@@ -117,6 +117,7 @@ fi
 # never hand old files to the uploader. (Once per run, NOT per arch — the first
 # arch's output must survive the second arch's pass.)
 rm -f "${OUT_DIR}/"*.deb "${OUT_DIR}/"*.install.tar.gz "${OUT_DIR}/"*.rpm \
+    "${OUT_DIR}/"*.pkg.tar.zst \
       "${OUT_DIR}/"*.AppImage "${OUT_DIR}/"*.AppImage.zsync
 
 for arch in ${ARCHES}; do
@@ -196,11 +197,26 @@ for arch in ${ARCHES}; do
     echo "         UR_REQUIRE_RPM=true makes this fatal instead." >&2
   fi
 
+  # Same treatment for the Arch package, and for the same reason: it is not a
+  # release contract yet, and build-arch.sh already tolerates it per-artifact.
+  pkg_name="urnetwork-daemon-${VERSION}-${rpm_arch}.pkg.tar.zst"
+  if [ -n "${rpm_arch}" ] && [ -f "${OUT_DIR}/${pkg_name}" ]; then
+    : # present
+  elif [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
+    echo "ERROR: no ${pkg_name} after the ${arch} build and UR_REQUIRE_ARCH_PKG=true" >&2
+    exit 1
+  else
+    echo "WARNING: no Arch package for ${arch} (expected ${pkg_name}) — the" >&2
+    echo "         release will ship without it. build-arch.sh logged the reason;" >&2
+    echo "         UR_REQUIRE_ARCH_PKG=true makes this fatal instead." >&2
+  fi
+
   echo ">>> ${arch} artifacts OK"
 done
 
 echo ">>> linux artifacts built:"
 for f in "${OUT_DIR}"/*.deb "${OUT_DIR}"/*.install.tar.gz "${OUT_DIR}"/*.rpm \
+         "${OUT_DIR}"/*.pkg.tar.zst \
          "${OUT_DIR}"/*.AppImage "${OUT_DIR}"/*.AppImage.zsync; do
   if [ -f "$f" ]; then echo "    $(basename "$f")"; fi
 done

@@ -138,6 +138,23 @@ if [ ! -f "$BUILD_HOME/linux/packaging/make-rpm.sh" ]; then
   } >&2
 fi
 
+if [ ! -f "$BUILD_HOME/linux/packaging/make-arch.sh" ]; then
+  if [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
+    {
+      echo "ERROR: $BUILD_HOME/linux/packaging/make-arch.sh is missing and UR_REQUIRE_ARCH_PKG=true."
+      echo "       Same cause as the block above: this pipeline builds \$BUILD_HOME/linux,"
+      echo "       a release-staged checkout, NOT your working tree — see SRC_HOME/SRC_LINUX."
+    } >&2
+    exit 1
+  fi
+  {
+    echo "WARNING: $BUILD_HOME/linux/packaging/make-arch.sh is missing — this build will"
+    echo "         produce no .pkg.tar.zst. (Same staging caveat as above: \$BUILD_HOME/linux is a"
+    echo "         release-staged checkout, not your working tree.)"
+    echo "         Set UR_REQUIRE_ARCH_PKG=true to make this fatal instead."
+  } >&2
+fi
+
 OUT_DIR="${OUT_DIR:-${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux}"
 mkdir -p "$OUT_DIR"
 # Clear stale artifacts of every type this build produces (run.sh globs OUT_DIR
@@ -149,6 +166,7 @@ mkdir -p "$OUT_DIR"
 # Also sweeps *.snap — nothing produces those since the AppImage migration, but
 # a pre-migration tree still has them sitting next to the real artifacts.
 rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz "$OUT_DIR"/*.rpm \
+    "$OUT_DIR"/*.pkg.tar.zst \
       "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.AppImage.zsync \
       "$OUT_DIR"/*.sha256 "$OUT_DIR"/*.asc \
       "$OUT_DIR"/*.snap
