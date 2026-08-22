@@ -116,8 +116,11 @@ fi
 # Clear any stale artifacts of the types we produce, so a partial rebuild can
 # never hand old files to the uploader. (Once per run, NOT per arch — the first
 # arch's output must survive the second arch's pass.)
+# *.flatpak is cleared here even though this script does not build one:
+# all/linux/build-flatpak.sh writes into this same OUT_DIR, it runs AFTER this,
+# and run.sh's upload glob cannot tell a fresh bundle from last release's.
 rm -f "${OUT_DIR}/"*.deb "${OUT_DIR}/"*.install.tar.gz "${OUT_DIR}/"*.rpm \
-    "${OUT_DIR}/"*.pkg.tar.zst \
+    "${OUT_DIR}/"*.pkg.tar.zst "${OUT_DIR}/"*.flatpak \
       "${OUT_DIR}/"*.AppImage "${OUT_DIR}/"*.AppImage.zsync
 
 for arch in ${ARCHES}; do

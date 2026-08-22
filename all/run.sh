@@ -1667,10 +1667,10 @@ else
     builder_message "warning: windows build did not finish — skipping the windows sdk + MSI artifacts (release continues)"
 fi
 
-builder_message "building linux app (cgo sdk + deb/install-tarball/rpm on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container)"
+builder_message "building linux app (cgo sdk + deb/install-tarball/rpm/arch on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container; then the flatpak on this host)"
 if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
-    # Four artifact types per arch (names normative — linux/MIGRATION.md):
+    # Five artifact types per arch (names normative — linux/MIGRATION.md):
     # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
     # urnetwork-daemon-<v>.<rpmarch>.rpm, URnetwork-<v>-<arch>.AppImage +
     # .AppImage.zsync. (N) nullglobs each pattern so a missing type uploads
@@ -1681,10 +1681,33 @@ if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
     # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
     # appear here. The .sha256/.asc sidecars the packaging scripts write are
     # deliberately NOT uploaded, matching the .deb's existing behaviour.
+    # THE FLATPAK, built on this host rather than in the desktop container.
+    # flatpak-builder needs bubblewrap, bubblewrap needs unprivileged user
+    # namespaces, and all/linux/build.sh runs docker without --privileged; see
+    # the header of build-flatpak.sh for why granting that container
+    # CAP_SYS_ADMIN is the worse trade. It runs AFTER build-linux.sh because the
+    # manifest vendors the cgo SDK that build-linux.sh stages into the tree.
+    #
+    # ONE ARCH. flatpak-builder has no cross-compile mode, so this produces a
+    # bundle for whatever this build machine is. arm64 users get the AppImage
+    # and the native packages, as they do today.
+    #
+    # warn-and-continue, matching the rpm and the windows block: a host without
+    # flatpak installed loses the Flatpak and keeps the release.
+    if VERSION="${EXTERNAL_WARP_VERSION}" \
+       LINUX_DIR="$BUILD_HOME/linux" \
+       OUT_DIR="$DESKTOP_OUT/linux" \
+       bash "$BUILD_HOME/all/linux/build-flatpak.sh"; then
+        :
+    else
+        builder_message "warning: the flatpak build did not finish — the release continues without a .flatpak. Install \`flatpak\` on the build host to restore it."
+    fi
+
     for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
                     "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
                     "$DESKTOP_OUT/linux/"*.rpm(N) \
                     "$DESKTOP_OUT/linux/"*.pkg.tar.zst(N) \
+                    "$DESKTOP_OUT/linux/"*.flatpak(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage(N) \
                     "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
         github_release_upload "$(basename "$artifact")" "$artifact"
