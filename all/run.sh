@@ -677,6 +677,14 @@ FDROID_VERSION_CODE_OFFSETS="${FDROID_VERSION_CODE_OFFSETS:-0 2 3}"
 BUILD_CHANGELOG_STORE="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.txt"
 # exported: github_finalize_release() below reads it, long after this block
 export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.md"
+# IN THE REPO, not in TMPDIR, unlike the two above. The android note has a home
+# already (metadata/en-US/changelogs, which F-Droid reads off this repository);
+# the apple, windows and linux notes had nowhere to be, and a note that exists
+# only in a Slack message during the run is a note nobody can find on the day
+# they submit. `git add .` below carries the whole tree into the release commit
+# and the release tag, so every published version can be traced to the exact
+# text that was offered for it.
+BUILD_STORE_NOTES="$BUILD_HOME/store-notes"
 rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"
 builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
 python3 "$BUILD_HOME/all/changelog.py" \
@@ -685,6 +693,7 @@ python3 "$BUILD_HOME/all/changelog.py" \
     --to-label "v${EXTERNAL_WARP_VERSION}" \
     --lede "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
     --store-out "$BUILD_CHANGELOG_STORE" \
+    --store-notes-dir "$BUILD_STORE_NOTES" \
     --full-out "$BUILD_CHANGELOG_FULL"
 warn_trap 'generate changelog'
 if [ ! -s "$BUILD_CHANGELOG_STORE" ] && [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
@@ -711,6 +720,78 @@ if [ -s "$BUILD_CHANGELOG_STORE" ]; then
 \`\`\`
 $(cat "$BUILD_CHANGELOG_STORE")
 \`\`\`"
+fi
+
+
+# metadata -- THE OTHER THREE STOREFRONTS
+#
+# The block above handles android, and android alone: 500 characters of plain
+# text, written under the offset filenames F-Droid matches by. The other three
+# stores are not that. Their limits are 4000 (App Store Connect), 1500 (Partner
+# Center) and none at all (AppStream, which is not even text -- it is markup
+# inside urnetwork/linux's metainfo XML, and appstreamcli gates that repo's build
+# on it). changelog.py --store-notes-dir writes one file per storefront, each in
+# its own format at its own limit; see AUDIENCES in all/changelog.py for the
+# citation behind every one of those numbers.
+#
+# Each file is that app's own changes first, then the shared sdk/connect changes
+# after a boundary marker, so whoever submits can delete the tail in one motion
+# if that store's reviewers do not need it. store-notes/README.md says which
+# field each file is pasted into.
+#
+# NOT UNDER metadata/. That tree belongs to F-Droid: fdroidserver globs
+# `build/[A-Za-z]*/metadata/[a-z][a-z]*` and then os.walk()s it, matching
+# changelog files by bare filename at any depth, so an apple or windows note
+# dropped in there would either overwrite the real en-US note or invent a locale
+# in the F-Droid index. store-notes/ is a sibling and is invisible to that glob.
+#
+# NO trap on this block. The generator already ran under warn_trap above; what
+# is left is cat/wc/cp over files it either produced or did not, and every one
+# of them is guarded. A missing note is reported and skipped.
+if [ -d "$BUILD_STORE_NOTES" ]; then
+    for store_note in \
+        "apple/en-US/release_notes.txt:App Store Connect -> What's New in This Version (iOS and macOS), 4000 chars" \
+        "windows/en-US/whats_new.txt:Partner Center -> Store listings -> What's new in this version, 1500 chars" \
+        "linux/release-description.xml:urnetwork/linux metainfo <release><description>, AppStream XML"
+    do
+        # ${x%%:*} / ${x#*:} rather than `cut`: no subprocess, and the field is
+        # a path that must not be word-split.
+        store_note_path="$BUILD_STORE_NOTES/${store_note%%:*}"
+        if [ ! -s "$store_note_path" ]; then
+            builder_message "warning: no store note at ${store_note%%:*}. Build will continue."
+            continue
+        fi
+        builder_message "store note ${store_note%%:*} ($(wc -m < "$store_note_path" | tr -d ' ') chars) -- ${store_note#*:}:
+\`\`\`
+$(cat "$store_note_path")
+\`\`\`"
+    done
+
+    # THE LINUX FRAGMENT HAS TO TRAVEL, and it has to travel in the repository
+    # rather than as a build flag. The metainfo is installed by exactly one
+    # channel -- the Flatpak -- and Flathub builds that manifest on ITS OWN
+    # infrastructure, where nothing in this pipeline runs. A meson option passed
+    # from all/linux/build-arch.sh would therefore be absent on the one channel
+    # that ships the file; packaging/flatpak/com.bringyour.network.yml already
+    # documents that trap for -Dapp_version. So the fragment is copied INTO the
+    # linux checkout, where git_commit() (which does `git add .` on the version
+    # branch) carries it to urnetwork/linux the same way app/po already travels.
+    #
+    # ONLY IF THAT REPO HAS OPTED IN. The handshake is the destination file
+    # already existing: urnetwork/linux commits it once, together with the meson
+    # fs.read() that substitutes it into the metainfo template, and from then on
+    # every release refreshes it. Until then this says so and changes nothing --
+    # dropping an unreferenced file into another repository's tree is not this
+    # script's call to make.
+    linux_release_description="$BUILD_HOME/linux/app/packaging/release-description.xml"
+    if [ -s "$BUILD_STORE_NOTES/linux/release-description.xml" ]; then
+        if [ -e "$linux_release_description" ]; then
+            cp "$BUILD_STORE_NOTES/linux/release-description.xml" "$linux_release_description"
+            builder_message "linux release description staged into app/packaging/release-description.xml"
+        else
+            builder_message "note: urnetwork/linux has no app/packaging/release-description.xml, so the generated AppStream release description was not staged there. It is in store-notes/linux/release-description.xml in this repo, ready for whoever wires the meson side. Build will continue."
+        fi
+    fi
 fi
 
 

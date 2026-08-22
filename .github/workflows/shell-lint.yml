@@ -254,6 +254,70 @@ jobs:
           sys.exit(fail)
           PY
 
+      # THE SECOND HARD ASSERT, and it is deliberately a separate step with its
+      # own numbers rather than a widening of the one above.
+      #
+      # The 500 gate exists to protect the android note, which F-Droid publishes
+      # unattended and truncates in silence. Raising its LIMIT so that a 4000-char
+      # Apple note could share it would un-protect exactly the file it was written
+      # for. So: different tree, different step, different limits, and the two
+      # cannot drift into each other.
+      #
+      # The Linux note is not checked against a length at all, because AppStream
+      # has none. It is checked against the rules `appstreamcli validate
+      # --no-net --pedantic` enforces -- which is what urnetwork/linux's own CI
+      # runs, with warnings treated as failures. Those rules live in
+      # all/changelog.py (appstream_problems) rather than being restated here, so
+      # there is one copy of them and the generator and the gate cannot disagree.
+      # appstreamcli itself is not installed on the runner and is not needed:
+      # every rule it would fail us on is a structural property of the fragment.
+      - name: Every per-store note fits its own storefront's limit
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, 'all')
+          import changelog
+
+          fail = 0
+          seen = 0
+          root = pathlib.Path('store-notes')
+          for name, a in sorted(changelog.AUDIENCES.items()):
+              if not a['out']:
+                  continue
+              p = root / a['out']
+              if not p.exists():
+                  # These are written by a release run, not committed by hand, so
+                  # "not there yet" is normal and is not a failure.
+                  print(f"skip {p} (no release has written it yet)")
+                  continue
+              seen += 1
+              raw = p.read_bytes()
+              if raw.startswith(b'\xef\xbb\xbf'):
+                  print(f"::error file={p}::UTF-8 BOM")
+                  fail = 1
+              text = raw.decode('utf-8')
+              if a['format'] == 'appstream':
+                  problems = changelog.appstream_problems(text)
+                  for msg in problems:
+                      print(f"::error file={p}::appstreamcli would fail this: {msg}")
+                      fail = 1
+                  print(f"ok   {p}: {len(text)} chars of AppStream XML, "
+                        f"{len(problems)} problem(s)")
+                  continue
+              if text[:1].isspace():
+                  print(f"::error file={p}::leading whitespace")
+                  fail = 1
+              n = len(text.rstrip('\n'))
+              if n > a['limit']:
+                  print(f"::error file={p}::{n} characters, {name} accepts "
+                        f"{a['limit']}")
+                  fail = 1
+              print(f"ok   {p}: {n}/{a['limit']} characters ({name})")
+          print(f"checked {seen} per-store note(s)")
+          sys.exit(fail)
+          PY
+
       # ADVISORY, never a gate. This one talks to api.github.com, and a lint
       # workflow whose whole argument is that it is cheap and always green must
       # not go red because GitHub had a bad minute. The gate above is offline.
@@ -274,10 +338,15 @@ jobs:
             python3 all/changelog.py \
               --from "$FROM_TAG" --to "$TO_TAG" \
               --store-out "$RUNNER_TEMP/store$i.txt" \
+              --store-notes-dir "$RUNNER_TEMP/notes$i" \
               --full-out "$RUNNER_TEMP/full$i.md"
           done
           diff -u "$RUNNER_TEMP/store1.txt" "$RUNNER_TEMP/store2.txt"
           diff -u "$RUNNER_TEMP/full1.md" "$RUNNER_TEMP/full2.md"
+          # Every storefront, not just the one --store-out wrote: four notes
+          # rendered from one walk is four chances for a shared cache or a
+          # dict iteration order to make a run non-reproducible.
+          diff -ru "$RUNNER_TEMP/notes1" "$RUNNER_TEMP/notes2"
           n=$(python3 -c 'import sys;print(len(open(sys.argv[1],encoding="utf-8").read().rstrip("\n")))' "$RUNNER_TEMP/store1.txt")
           echo "store note: $n/500 characters, identical across two runs"
           test "$n" -le 500
@@ -291,6 +360,17 @@ jobs:
             cat "$RUNNER_TEMP/store1.txt"
             echo '```'
             echo
+            for f in "$RUNNER_TEMP"/notes1/*/*.txt "$RUNNER_TEMP"/notes1/*/*/*.txt \
+                     "$RUNNER_TEMP"/notes1/*/*.xml; do
+              [ -e "$f" ] || continue
+              echo "Per-store note \`${f#"$RUNNER_TEMP"/notes1/}\` "
+              echo "($(python3 -c 'import sys;print(len(open(sys.argv[1],encoding="utf-8").read().rstrip("\n")))' "$f") characters):"
+              echo
+              echo '```'
+              cat "$f"
+              echo '```'
+              echo
+            done
             echo "<details><summary>Full changelog</summary>"
             echo
             cat "$RUNNER_TEMP/full1.md"

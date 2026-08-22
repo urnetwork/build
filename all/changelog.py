@@ -27,7 +27,7 @@
 #     whitespace and a BOM are counted too; this script emits neither.
 #   * Google Play: "up to 500 Unicode characters per language". The Publisher API
 #     rejects an over-length note outright rather than truncating. Not on this
-#     repo's path today (run.sh:1489 is still `# FIXME android play release`, the
+#     repo's path today (run.sh:1603 is still `# FIXME android play release`, the
 #     .aab goes to a GitHub release and a human uploads it), but the Console
 #     enforces the same 500.
 # So the store file gets a hard 500-character budget, packed at bullet
@@ -37,6 +37,47 @@
 # answers 422 "body is too long" above it, and run.sh PATCHes that body under
 # error_trap, so overrunning it would abort a release after every artifact has
 # already been uploaded). --full-limit exists for exactly that reason.
+#
+# ONE NOTE PER STOREFRONT, AND ONE SHARED TAIL -- the second design decision
+# There is no such thing as "the store note". Four storefronts serve four
+# different artifacts, and not one of the three numbers that matter -- the
+# limit, the format, the field -- is shared between them:
+#
+#   android   500 chars   plain text      metadata/en-US/changelogs/<code>.txt
+#   apple    4000 chars   plain text      store-notes/apple/en-US/release_notes.txt
+#   windows  1500 chars   plain text      store-notes/windows/en-US/whats_new.txt
+#   linux     no limit    AppStream XML   store-notes/linux/release-description.xml
+#
+# A single 500-character plain-text note for all four would waste seven eighths
+# of what App Store Connect accepts, and would be INVALID on Linux, where the
+# field is not text at all but a markup fragment inside a metainfo XML file that
+# a validator gates the build on. So each storefront gets its own audience, its
+# own budget and its own renderer; see AUDIENCES below for the per-store
+# reasoning and every citation.
+#
+# Each note is ITS OWN APP FIRST, then the parts every app is built from. The
+# shared tail is appended after a boundary a human can find and delete in one
+# motion, because the same sdk/connect commit is honest news on one store and
+# noise on another and only the person publishing knows which. The boundary is
+# NOT the same syntax everywhere, and that is not an inconsistency:
+#   * plain text has no comment syntax. Whatever separator is written there is
+#     PUBLISHED VERBATIM -- fdroidserver reads the changelog file raw and
+#     slices it raw -- and it is charged against the limit. So the marker has to
+#     be text that reads acceptably on the day somebody forgets to delete it.
+#   * AppStream XML does have comment syntax, and it is genuinely free:
+#     as_validator_check_description_tag() only inspects XML_ELEMENT_NODE
+#     children, so a comment validates, and GNOME Software / KDE Discover parse
+#     the XML and drop it. So Linux gets an explicit boxed marker for nothing.
+#
+# THE SHARED TAIL IS ALWAYS INSIDE THE LIMIT, on every store, and the developer
+# deleting it is an option rather than an obligation. It has to be, because on
+# android there is no developer in the loop at all: F-Droid pulls this repo's
+# metadata tree on its own schedule and truncates at 500 in silence. Budgeting
+# the tail outside the limit would be safe on the three stores a human edits and
+# invisibly wrong on the one that nobody reviews. It costs the app tier nothing,
+# because the app tier is packed FIRST and may take the whole budget -- the tail
+# only ever fills what is left over, so a deleted tail never turns out to have
+# displaced an app change.
 #
 # DEGRADE, NEVER BREAK
 # run.sh's rule is that a failed step must not lose a release. So: a component
@@ -64,6 +105,8 @@
 #
 #   all/changelog.py --from v2026.8.21-1025339670 --to v2026.8.21-1025613560
 #   all/changelog.py --to worktree --store-out store.txt --full-out full.md
+#   all/changelog.py --to worktree --store-notes-dir store-notes
+#   all/changelog.py --audience apple --to v2026.8.21-1025763520
 #   all/changelog.py --self-test
 # =============================================================================
 
@@ -77,6 +120,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 BUILD_REPO = "urnetwork/build"
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
@@ -95,17 +139,188 @@ COMPONENT_ORDER = [
     "localizations", "docs", "glog", "goidenticons",
 ]
 
-# What actually ships inside the Android artifact the stores serve. apple, linux,
-# windows, extension, web, server, proxy and sn changes are real work and they
-# are all in the full changelog -- but they are not in this .aab, and the store
-# note has 500 characters for the entire release. Spending them describing the
-# macOS app to an F-Droid user is the wrong trade.
+# Everything that is compiled INTO every one of the four apps and is not one of
+# them. sdk is the Go client library each app links; connect is what sdk is built
+# on; glog and goidenticons are compiled into sdk (its go.mod requires all three
+# and `replace`s them at ../). warp is warpctl, the build tool -- it produces the
+# artifact, it is not in it -- and server, proxy, sn and userwireguard run on the
+# network's own machines, not on anybody's device.
 #
-# warp is warpctl, the build tool: it produces the artifact, it is not in it.
-# glog and goidenticons are compiled into the sdk, so they are.
+# This list is IDENTICAL for all four storefronts, and that is a fact about the
+# build rather than a simplification worth flagging in the notes: android is a
+# `gomobile bind` of sdk, apple is ONE
+# `gomobile bind -target ios/arm64,iossimulator/arm64,macos/arm64,macos/amd64`
+# of the same package (sdk build/Makefile, target build_apple), and linux and
+# windows both build sdk/cgo -- all/build-linux.sh and all/build-windows.sh each
+# stage exactly `sdk connect glog goidenticons` over the build root, because
+# sdk/cgo/go.mod replaces all of them with local paths at once.
+SHARED_COMPONENTS = ["sdk", "connect", "glog", "goidenticons"]
+
+# THE STOREFRONT TABLE.
+#
+# "app" is what ships as THIS app and nothing else; "shared" is what ships inside
+# it and inside the other three. The two are kept apart rather than concatenated
+# because the whole point of the split is that a human publishing to one store
+# can delete the second half -- see the header. Priority is app first, then
+# shared, newest commit first inside each; if the budget only fits three bullets
+# they are the three most recent, most user-facing ones.
+#
+# "limit" is the storefront's REAL limit, one per store, sourced individually:
+#
+#   android  500   fdroidserver common.py default_config sets
+#                  char_limits['whatsNew'] = 500 and update.py's
+#                  _set_localized_text_entry does `text = fp.read(limit * 2)`
+#                  then `text[:limit]` -- a silent mid-word slice, no warning,
+#                  no log, and F-Droid reads this repo directly (fdroiddata's
+#                  com.bringyour.network.yml: `Repo: https://github.com/urnetwork/build`)
+#                  so nobody is in the loop to catch it. Play's cap is the same
+#                  number from a different source: "You can enter release notes
+#                  using up to 500 Unicode characters per language"
+#                  (support.google.com/googleplay/android-developer/answer/9859348),
+#                  and androidpublisher rejects rather than truncates
+#                  ("length 546, which is too long (max: 500)").
+#   apple   4000   App Store Connect, What's New in This Version: "Limited to
+#                  4000 characters" (developer.apple.com/help/app-store-connect/
+#                  reference/app-information/platform-version-information/).
+#                  Same field and same limit on the iOS and the macOS version --
+#                  see the apple entry for why one note is honest for both.
+#   windows 1500   Partner Center, "What's new in this version": "Character
+#                  limit: 1,500 characters" (learn.microsoft.com/windows/apps/
+#                  publish/publish-your-app/msi/add-and-edit-store-listing-info).
+#                  The MSIX page states the same 1500, so this survives a move
+#                  off MSI; this repo ships MSIs today (all/build-windows.sh).
+#   linux   none   AppStream bounds a release description nowhere -- not in the
+#                  spec and not in the validator; a 35,000-character description
+#                  passes `appstreamcli validate --no-net --pedantic`. The number
+#                  below is EDITORIAL, not a format limit: GNOME Software and
+#                  the Flathub page render the newest release inline, and forty
+#                  bullets there is not a release note, it is a commit log.
+#
+# "boundary" is what marks the start of the shared tail, and it is a per-format
+# decision because the cost is per-format (header, and see render_store /
+# render_appstream):
+#   ""              a blank line and nothing else. This is android's, and it is
+#                   the whole of what 500 characters can afford: the real note
+#                   for a one-week span measures 485/500, so a prose heading
+#                   would displace an actual bullet. One newline still gives the
+#                   person pasting into the Play Console a one-motion delete
+#                   target ("from the blank line to the end"), and it publishes
+#                   to F-Droid as a harmless paragraph break.
+#   "Under the hood"  a blank line plus a plain-prose heading, for the two stores
+#                   whose budget is three to eight times android's. Deliberately
+#                   not "--- SHARED ---" or "<!-- sdk -->": this text is user-
+#                   visible App Store and Microsoft Store copy the moment
+#                   somebody forgets to delete it, so it has to read as a
+#                   release note rather than as a leaked machine marker.
+#   None            do not mark a boundary at all (the "all" audience, which has
+#                   no shared tier because it has no app tier either).
+#
+# "out" is where --store-notes-dir writes the note, RELATIVE to that directory,
+# and android's is deliberately None: its home is metadata/en-US/changelogs/
+# <versionCode>.txt, all/run.sh writes it there once per FDROID_VERSION_CODE_OFFSETS
+# entry, and a second copy under store-notes/ would be a second source of truth
+# for the one file a robot reads unattended. Nothing else may be written under
+# metadata/ either -- fdroidserver globs `build/[A-Za-z]*/metadata/[a-z][a-z]*`
+# and then os.walk()s it, matching changelog files by bare filename at ANY depth,
+# so a per-store tree under metadata/ would either collide with the real en-US
+# note or fabricate a locale in the F-Droid index. store-notes/ is a sibling of
+# metadata/, invisible to that glob.
 AUDIENCES = {
-    "android": ["android", "sdk", "connect", "glog", "goidenticons"],
-    "all": None,   # every component, in COMPONENT_ORDER
+    # F-Droid reads this file off this repository with no human in between, and
+    # Google Play gets the same text pasted by hand (run.sh:1603 is still
+    # `# FIXME android play release to play internal testing`). Both cap at 500.
+    "android": {
+        "app": ["android"],
+        "shared": SHARED_COMPONENTS,
+        "limit": 500,
+        "format": "text",
+        "boundary": "",
+        "out": None,
+        "where": "metadata/en-US/changelogs/<versionCode>.txt (F-Droid, unattended) "
+                 "and Play Console -> release notes (pasted by hand)",
+    },
+    # ONE NOTE FOR TWO STORES, and it is honest for both. The brief's question
+    # was whether the sdk slice differs between iOS and macOS: it does not.
+    # urnetwork/sdk build/Makefile builds all four slices
+    # (ios/arm64, iossimulator/arm64, macos/arm64, macos/amd64) in a SINGLE
+    # `gomobile bind`, from one Go package, with no per-platform build tags, and
+    # both platform archives come from the same apple pin and the same sdk pin.
+    # So between any two release tags the apple/sdk/connect commit range is
+    # byte-identical for the iOS and the macOS version, and the same 4000
+    # characters are accepted in the same field on both.
+    #
+    # Named "apple", never "ios": the app target's SUPPORTED_PLATFORMS already
+    # lists `xros xrsimulator`, so a third paste target is latent and would
+    # otherwise rename this tree later.
+    "apple": {
+        "app": ["apple"],
+        "shared": SHARED_COMPONENTS,
+        "limit": 4000,
+        "format": "text",
+        "boundary": "Under the hood",
+        # fastlane deliver's own shape (<metadata_path>/<locale>/release_notes.txt,
+        # and en-US is a real App Store Connect locale), so if the manual paste is
+        # ever replaced by `deliver -p ios` / `deliver -p osx` the file is already
+        # where that tool looks. Nothing in urnetwork/apple uses fastlane today.
+        "out": "apple/en-US/release_notes.txt",
+        "where": "App Store Connect -> What's New in This Version (iOS and macOS)",
+    },
+    # Manual submission today: all/windows/README.md says "MSIs are uploaded to
+    # the GitHub release; Store submission is manual", so this file exists to be
+    # pasted. The Partner Center CSV column is WhatsNew and the MSI/EXE
+    # submission API field is listings.whatsNew, if it is ever automated.
+    "windows": {
+        "app": ["windows"],
+        "shared": SHARED_COMPONENTS,
+        "limit": 1500,
+        "format": "text",
+        "boundary": "Under the hood",
+        "out": "windows/en-US/whats_new.txt",
+        "where": "Partner Center -> Store listings -> <language> -> "
+                 "What's new in this version",
+    },
+    # NOT A STORE AND NOT PLAIN TEXT. Linux has no single storefront; what every
+    # channel actually reads is the AppStream <release><description> in
+    # urnetwork/linux app/packaging/com.bringyour.network.metainfo.xml.in, which
+    # GNOME Software, KDE Discover and the Flathub page all render. That field is
+    # restricted markup, a validator gates the build on it
+    # (.github/workflows/build.yml: `appstreamcli validate --no-net --pedantic`,
+    # where a WARNING is fatal), and so this audience gets its own renderer
+    # rather than a different number.
+    "linux": {
+        "app": ["linux"],
+        "shared": SHARED_COMPONENTS,
+        "limit": 1800,
+        # THE ONLY STOREFRONT THAT NEEDS THIS, and it needs it for a reason that
+        # does not apply to the other three. Everywhere else the app tier may
+        # take the entire budget, because there the budget belongs to the STORE:
+        # spending android's last 40 characters on an app change instead of an
+        # sdk change is the right trade, and the tail simply gets what is left.
+        # Here the 1800 above is OURS -- AppStream imposes nothing -- so letting
+        # a number this file invented be the thing that deletes the shared tail
+        # would be inventing a constraint and then obeying it. urnetwork/linux
+        # is the most actively developed of the four apps and produced 28
+        # qualifying commits in one week, which is exactly enough to swallow any
+        # round number, so the app tier is capped and the tail always has room.
+        "app_limit": 1000,
+        "format": "appstream",
+        "boundary": "Under the hood",
+        "out": "linux/release-description.xml",
+        "where": "urnetwork/linux app/packaging/com.bringyour.network.metainfo.xml.in "
+                 "-> <releases><release><description>",
+    },
+    # Not a storefront: every component, in COMPONENT_ORDER, which is what
+    # `--audience all` has always meant. No app/shared split, so no boundary --
+    # there is nothing to delete when nothing was separated.
+    "all": {
+        "app": None,
+        "shared": [],
+        "limit": 500,
+        "format": "text",
+        "boundary": None,
+        "out": None,
+        "where": "nothing -- this is the everything-included view, for reading",
+    },
 }
 
 # The version string all/run.sh stamps into its own commits: 2026.8.21-1025613560.
@@ -161,8 +376,16 @@ DEFAULT_FILTERS = "release,ungoogle,localization,merge"
 # checkpoint". Those are honest commits and they stay in the full changelog, but
 # as one of the four or five bullets a phone user ever sees they are worse than
 # nothing.
+# wip and partial are in the FIRST group, the type-prefix one, deliberately.
+# "Wip(egress): mark the daemon's sockets at creation via cgroup-BPF -- NOT
+# MERGEABLE YET" and "Partial(canvas): settle dots when there is no clock -- NOT
+# the missing-dots fix" are both real subjects from urnetwork/linux in
+# v2026.8.15-1020621320...v2026.8.21-1025763520, and both would otherwise have
+# been published on the Flathub page. The author labelled them as unfinished;
+# taking them at their word is the whole rule. They stay in the full changelog.
 STORE_SKIP = re.compile(
-    r"^(?:test|tests|ci|chore|build|docs?|refactor|style|lint|deps|bump|release)\b\s*(?:\([^)]*\))?\s*:"
+    r"^(?:test|tests|ci|chore|build|docs?|refactor|style|lint|deps|bump|release|"
+    r"wip|partial)\b\s*(?:\([^)]*\))?\s*:"
     r"|^(?:wip|checkpoint|fixes|fix|update|updates|cleanup|tweaks?|misc|audit|"
     r"nit|nits|typo|typos|rebase|merge|revert|format|formatting|refactor)\b\s*(?:\([^)]*\))?\s*:?$"
     r"|\bcheckpoint\b"                       # "perfvar checkpoint", "reliability checkpoint"
@@ -181,7 +404,7 @@ STORE_MIN_SUBJECT = 16
 # "Fix(android): don't capture apps through a tunnel with no live exit" ->
 # "Don't capture apps through a tunnel with no live exit". The full changelog
 # keeps subjects exactly as they were written.
-STORE_TYPE_PREFIX = re.compile(r"^(?:fix|feat|feature|perf|improve|add|update)\s*"
+STORE_TYPE_PREFIX = re.compile(r"^(?:fix|feat|feature|perf|improve|add|update|tune)\s*"
                                r"(?:\([^)]*\))?\s*:\s*", re.I)
 
 # Paths that are not the app.
@@ -466,6 +689,16 @@ def compare(slug, base, head, token):
     return commits
 
 
+# One process now renders up to four storefront notes from the same sections,
+# and the highest-priority commits are the SAME commits in all four (the shared
+# sdk/connect tail is identical by construction -- see SHARED_COMPONENTS). Paying
+# the API four times for one commit's file list would quadruple the request count
+# for nothing and, anonymously, would burn the 60/hour allowance four times as
+# fast. Keyed by (slug, sha), which is immutable, so the cache cannot go stale
+# inside a run and cannot change the output: same input, same answer.
+_FILES_CACHE = {}
+
+
 def commit_files(slug, sha, token):
     """The paths one commit touched.
 
@@ -473,8 +706,13 @@ def commit_files(slug, sha, token):
     this is a separate request per candidate -- which is why only the handful of
     commits that could actually fit in the store note are ever looked up
     (--store-candidates), and why the full changelog never uses this."""
+    key = (slug, sha)
+    if key in _FILES_CACHE:
+        return _FILES_CACHE[key]
     d = api_get("/repos/%s/commits/%s" % (slug, sha), token)
-    return [f["filename"] for f in (d.get("files") or [])]
+    files = [f["filename"] for f in (d.get("files") or [])]
+    _FILES_CACHE[key] = files
+    return files
 
 
 def subject_of(message):
@@ -627,24 +865,40 @@ def md_escape(s, subject=False):
     return (_MD_SUBJECT if subject else _MD_BODY).sub(r"\\\1", s)
 
 
-def store_bullets(sections, audience_names, token=None, path_check=False,
+def store_bullets(sections, app_names, shared_names=(), token=None, path_check=False,
                   limit=500, max_candidates=40, min_subject=STORE_MIN_SUBJECT):
     """The lines the store note may draw from, in priority order.
 
-    Priority is the audience list order (the app first, then what the app is
-    built from) and newest commit first inside each component, so if the budget
-    only fits three bullets they are the three most recent, most user-facing
-    ones.
+    Priority is the app components first and then the shared ones, newest commit
+    first inside each component, so if the budget only fits three bullets they
+    are the three most recent, most user-facing ones.
 
-    Returns (lines, held_back) where held_back maps a reason to the number of
-    commits it held out of the note. Every one of them is still in the full
-    changelog, and the reasons are printed -- nothing here drops silently."""
+    Returns (lines, shared_from, held_back). `shared_from` is the index in
+    `lines` at which the shared tier starts -- everything before it is this
+    app's own work, everything from it on is the sdk/connect tail a publisher
+    may want to delete. It is len(lines) when there is no tail at all, which is
+    what the renderers treat as "nothing to mark".
+
+    held_back maps a reason to the number of commits it held out of the note.
+    Every one of them is still in the full changelog, and the reasons are
+    printed -- nothing here drops silently."""
     by_name = {s["name"]: s for s in sections}
-    names = audience_names if audience_names is not None else [s["name"] for s in sections]
+    app = list(app_names) if app_names is not None else [s["name"] for s in sections]
+    # A component cannot be in both tiers. If an audience ever names one in both
+    # (say a future all-in-one artifact), the app tier wins: that is the tier the
+    # reader of THAT store cares about, and duplicating a bullet under a
+    # "shared" heading would be worse than not marking it at all.
+    shared = [n for n in (shared_names or ()) if n not in app]
     seen, lines, looked_up = set(), [], 0
     held_back = {}
+    shared_from = None
     budget = 0
-    for name in names:
+    for name in app + shared:
+        if shared_from is None and name in shared:
+            # Recorded when the tier CHANGES, not when the first shared bullet
+            # is appended, so a shared component that contributes nothing still
+            # ends the app tier at the right index.
+            shared_from = len(lines)
         s = by_name.get(name)
         if not s:
             continue
@@ -662,15 +916,26 @@ def store_bullets(sections, audience_names, token=None, path_check=False,
             key = text.lower()
             if key in seen:
                 continue
-            if path_check and looked_up < max_candidates:
-                looked_up += 1
-                try:
-                    files = commit_files(s["slug"], c["sha"], token)
-                except ApiError as e:
-                    # Fail OPEN. A missed lookup must not delete somebody's work
-                    # from the release notes; at worst the note is less relevant.
-                    warn("%s %s: %s (keeping it)" % (s["slug"], c["sha"][:9], e))
-                    files = []
+            if path_check:
+                # The budget is on API REQUESTS, so a commit whose files another
+                # storefront already looked up is free and does not spend it.
+                # It matters: the shared sdk/connect tier is the same commits in
+                # all four notes, so without this the first note would spend the
+                # whole allowance and the later ones would silently stop
+                # filtering -- which is how a test-only commit ended up in the
+                # Linux tail while apple and windows correctly held it back.
+                files_key = (s["slug"], c["sha"])
+                files = _FILES_CACHE.get(files_key)
+                if files is None and looked_up < max_candidates:
+                    looked_up += 1
+                    try:
+                        files = commit_files(s["slug"], c["sha"], token)
+                    except ApiError as e:
+                        # Fail OPEN. A missed lookup must not delete somebody's
+                        # work from the release notes; at worst the note is less
+                        # relevant.
+                        warn("%s %s: %s (keeping it)" % (s["slug"], c["sha"][:9], e))
+                        files = []
                 if files and all(STORE_NONSHIPPING_PATHS.search(f) for f in files):
                     held_back["CI, test, docs or build files only"] = \
                         held_back.get("CI, test, docs or build files only", 0) + 1
@@ -682,8 +947,12 @@ def store_bullets(sections, audience_names, token=None, path_check=False,
             # stop -- there is no point paying for lookups that cannot fit.
             budget += len(text) + 3
             if budget > limit * 2:
-                return lines, held_back
-    return lines, held_back
+                # The gather budget is shared across both tiers on purpose. If
+                # the app tier alone overflows twice the note's budget, no shared
+                # bullet could have fitted underneath it anyway, and stopping
+                # here also stops paying for file-list lookups that cannot land.
+                return lines, shared_from if shared_from is not None else len(lines), held_back
+    return lines, shared_from if shared_from is not None else len(lines), held_back
 
 
 def polish(subject):
@@ -697,8 +966,30 @@ def polish(subject):
     return s
 
 
-def render_store(lines, limit, lede, fallback):
+def boundary_lines(boundary):
+    """The literal lines a PLAIN-TEXT note spends on the app/shared boundary.
+
+    "" is a blank line and nothing else -- android's, because 500 characters
+    cannot afford a heading (see AUDIENCES). Any other string is a blank line
+    plus that string as a heading. None is "do not mark one".
+
+    Every one of these lines is PUBLISHED. There is no comment syntax in a
+    store note: fdroidserver reads the changelog file raw and slices it raw, and
+    App Store Connect and Partner Center show the field verbatim. So this is
+    text a reader is allowed to see, not a machine marker."""
+    if boundary is None:
+        return []
+    return [""] if boundary == "" else ["", boundary]
+
+
+def pack_bullets(lines, limit, lede=None, shared_from=None, boundary=None, prefix="- ",
+                 app_limit=None):
     """Pack bullets into `limit` characters, cutting only at bullet boundaries.
+
+    Returns (lede_kept, app_kept, shared_kept, boundary_kept): the raw texts, in
+    order, that fit -- the caller adds whatever markup its format needs. The
+    split is returned rather than a joined string because the same packing
+    serves plain text and AppStream XML, which mark the boundary differently.
 
     The budget is `limit` characters of CONTENT, excluding the single trailing
     newline: F-Droid slices [:500] on a read that includes the newline, so a
@@ -707,34 +998,265 @@ def render_store(lines, limit, lede, fallback):
 
     Characters, not bytes. Every changelog file in this repo today is ASCII so
     `wc -c` happens to agree, but subjects pulled from 17 submodules carry em
-    dashes and non-ASCII names, and both stores count code points."""
-    out, used = [], 0
+    dashes and non-ASCII names, and every store counts code points.
+
+    THE APP TIER IS PACKED FIRST AND MAY TAKE THE WHOLE BUDGET. The shared tail
+    fills what is left, so appending it never displaces an app change -- which is
+    what makes "the tail counts against the limit" cost nothing. `app_limit`
+    caps the app tier below `limit` and so reserves the difference for the tail;
+    it exists for the one storefront whose limit this file invented rather than
+    read off a store (see AUDIENCES["linux"]), and defaults to no cap at all.
+
+    THE BOUNDARY IS CHARGED before the first shared bullet that fits, and only
+    when something was emitted above it: a heading with nothing over it separates
+    nothing, and would be two lines of a small budget spent on punctuation."""
+    lede_out, app_out, shared_out = [], [], []
+    used, emitted = 0, 0
+
+    def cost(items):
+        # Joined with "\n": each new item costs its own length, plus one
+        # newline -- except the very first item in the note, which has nothing
+        # in front of it to separate from.
+        return sum(len(i) for i in items) + (len(items) if emitted else len(items) - 1)
+
     if lede:
         for l in lede.strip().splitlines():
             l = l.rstrip()
             if not l:
                 continue
-            cost = len(l) + (1 if out else 0)
-            if used + cost > limit:
+            if used + cost([l]) > limit:
                 break
-            out.append(l)
-            used += cost
-    for text in lines:
-        line = "- " + text
-        cost = len(line) + (1 if out else 0)
-        if used + cost > limit:
+            used += cost([l])
+            emitted += 1
+            lede_out.append(l)
+
+    n_app = len(lines) if shared_from is None else shared_from
+    marker = boundary_lines(boundary) if shared_from is not None else []
+    if app_limit is None:
+        app_limit = limit
+    charged = False
+    for i, text in enumerate(lines):
+        is_shared = i >= n_app
+        pre = marker if (is_shared and not charged and (app_out or lede_out)) else []
+        items = pre + [prefix + text]
+        if used + cost(items) > (limit if is_shared else app_limit):
             # Skip this bullet and try the next; a shorter one may still fit.
             # Never truncate mid-subject -- a half-sentence is what we are here to
             # stop the stores from producing.
             continue
-        out.append(line)
-        used += cost
+        used += cost(items)
+        emitted += len(items)
+        if pre:
+            charged = True
+        (shared_out if is_shared else app_out).append(text)
+    return lede_out, app_out, shared_out, (marker if charged else [])
+
+
+def render_store(lines, limit, lede, fallback, shared_from=None, boundary=None,
+                 app_limit=None):
+    """A plain-text store note: android, apple, windows.
+
+    With shared_from and boundary left at None this is byte-for-byte what this
+    function produced before the per-storefront split existed, which is what
+    keeps --audience android and --audience all unchanged and what
+    --no-store-boundary reproduces on demand."""
+    lede_out, app, shared, marker = pack_bullets(lines, limit, lede, shared_from, boundary,
+                                                app_limit=app_limit)
+    out = list(lede_out) + ["- " + t for t in app] + list(marker) + ["- " + t for t in shared]
     if not out:
         # Never emit an empty store file. An empty <versionCode>.txt would make
         # F-Droid show a blank "What's New" -- strictly worse than the placeholder
         # it replaces.
         return (fallback or "- Bug and performance fixes.").strip() + "\n"
     return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# AppStream: the Linux release description
+#
+# This is not a store note with a different limit, it is a different LANGUAGE,
+# and a validator gates urnetwork/linux's build on it
+# (.github/workflows/build.yml: `appstreamcli validate --no-net --pedantic`,
+# where a WARNING is fatal, and app/meson.build runs the same check as a test).
+# Every rule below was checked against appstreamcli 1.1.3 rather than inferred:
+#
+#   * ONLY <p>, <ul>/<ol> and <li> are legal here. <b>, a nested <ul>, or raw
+#     text sitting directly under <description> are all failures
+#     (description-markup-invalid / description-para-markup-invalid /
+#     description-spurious-text). That is why the bullets are wrapped rather
+#     than emitted as "- " lines: "- " text under <description> does not merely
+#     look wrong, it fails the build.
+#   * & < > MUST be escaped. A raw "&" is a hard XML parse error
+#     (xml-markup-invalid, xmlParseEntityRef: no name), and commit subjects in
+#     this org contain them.
+#   * NO literal http:// https:// ftp:// anywhere in the description
+#     (description-has-plaintext-url, a WARNING, therefore fatal). Commit
+#     subjects do carry URLs, so they are stripped -- and a bullet that is
+#     NOTHING BUT a URL then has to be dropped entirely, because an empty <li>
+#     is tag-empty, also a WARNING, also fatal. Stripping without dropping would
+#     turn one fatal error into a different one.
+#   * XML COMMENTS ARE LEGAL and free: the validator only inspects element
+#     children of <description>, and GNOME Software / KDE Discover parse the XML
+#     and drop comments. This is the one format where the app/shared boundary
+#     costs nothing and is invisible to users, so it gets a real boxed marker.
+#   * The fragment is the CHILDREN of <description>, not a whole <release> and
+#     not a whole document. urnetwork/linux's metainfo template already
+#     configure_file()s @APPSTREAM_VERSION@ and @APPSTREAM_DATE@ into a single
+#     <release>; a third placeholder fed from this file is the whole
+#     integration. Standalone it is therefore not a well-formed document (no
+#     single root), which is deliberate -- it is meant to be substituted, not
+#     parsed on its own.
+# ---------------------------------------------------------------------------
+
+# Children of <description> sit at 8 spaces in
+# app/packaging/com.bringyour.network.metainfo.xml.in (component 0, releases 2,
+# release 4, description 6). Emitting them already indented means the
+# substitution needs no re-indent step and the result still reads as XML.
+APPSTREAM_INDENT = 8
+
+# No "--" anywhere inside: that sequence is illegal in an XML comment and would
+# turn the boundary marker into a parse error.
+APPSTREAM_SHARED_OPEN = ("<!-- Shared with the other URnetwork apps. To publish a note about "
+                         "the Linux app alone, delete from here to the end comment below. -->")
+APPSTREAM_SHARED_CLOSE = "<!-- end of the shared section -->"
+
+_APPSTREAM_URL = re.compile(r"\S*(?:https?|ftp)://\S*")
+
+
+def appstream_text(text):
+    """One bullet -> text that is legal inside <li> / <p>, or "" to drop it.
+
+    URL first, escape second: stripping after escaping would leave "&amp;" in a
+    URL's query string behind as debris."""
+    t = " ".join(_APPSTREAM_URL.sub(" ", text).split())
+    t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return t.strip()
+
+
+def render_appstream(lines, limit, lede, fallback, shared_from=None, boundary=None,
+                     app_limit=None, indent=APPSTREAM_INDENT):
+    """The <p>/<ul> children of <release><description> for urnetwork/linux."""
+    # Clean and drop BEFORE packing, so a bullet that was only a URL never gets
+    # charged against the budget and never reaches the renderer as an empty <li>.
+    n_app = len(lines) if shared_from is None else shared_from
+    kept, kept_app = [], 0
+    for i, text in enumerate(lines):
+        t = appstream_text(text)
+        if not t:
+            continue
+        if i < n_app:
+            kept_app += 1
+        kept.append(t)
+    lede_out, app, shared, _ = pack_bullets(
+        kept, limit, appstream_text(lede) if lede else None,
+        None if shared_from is None else kept_app,
+        # The XML boundary is charged nothing: AppStream has no length limit at
+        # all, so `limit` here is an editorial budget on the bullets a store page
+        # can usefully show, and the marker is not one of them.
+        boundary=None, prefix="", app_limit=app_limit)
+
+    pad = " " * indent
+    out = []
+    for l in lede_out:
+        out.append("%s<p>%s</p>" % (pad, l))
+    if app:
+        out.append("%s<ul>" % pad)
+        out.extend("%s  <li>%s</li>" % (pad, t) for t in app)
+        out.append("%s</ul>" % pad)
+    if shared:
+        # Mark the boundary only when there is something above it to separate
+        # from, and only when a boundary was asked for at all
+        # (--no-store-boundary turns it off everywhere, in every format).
+        marked = bool(out) and boundary is not None
+        if marked:
+            out.append("%s%s" % (pad, APPSTREAM_SHARED_OPEN))
+            if boundary:
+                # A heading as well as the comment: the comment is for the
+                # person deleting the tail, the <p> is for the person reading
+                # the store page, and here -- unlike in a 500-character plain
+                # text note -- both are affordable.
+                out.append("%s<p>%s</p>" % (pad, appstream_text(boundary)))
+        out.append("%s<ul>" % pad)
+        out.extend("%s  <li>%s</li>" % (pad, t) for t in shared)
+        out.append("%s</ul>" % pad)
+        if marked:
+            out.append("%s%s" % (pad, APPSTREAM_SHARED_CLOSE))
+    if not out:
+        # <description> may not be empty -- a description with no valid element
+        # child is description-no-valid-content, and a WARNING is fatal here.
+        # The fallback is written as a paragraph rather than a one-item list:
+        # "- " is the plain-text stores' bullet syntax and means nothing in XML.
+        for l in (fallback or "- Bug and performance fixes.").strip().splitlines():
+            l = appstream_text(l.lstrip("-* ").strip())
+            if l:
+                out.append("%s<p>%s</p>" % (pad, l))
+    return "\n".join(out) + "\n"
+
+
+# The tags AppStream permits inside a <description>. ol and em and code are not
+# emitted by this generator, but they ARE legal, so a hand-edited fragment that
+# uses them must not be reported as broken.
+APPSTREAM_ALLOWED = {"p", "ul", "ol", "li", "em", "code"}
+APPSTREAM_BLOCK = {"p", "ul", "ol"}
+
+
+def appstream_problems(fragment):
+    """Every rule `appstreamcli validate` would fail the Linux build on, checked
+    offline and with no dependency on appstreamcli being installed.
+
+    This exists because the failure is REMOTE and LATE: the fragment is consumed
+    by urnetwork/linux, whose CI runs `appstreamcli validate --no-net --pedantic`
+    with warnings treated as failures, and whose meson build runs the same check
+    as a test. A malformed fragment would not break the release that generated
+    it -- it would break the next Linux build, in another repository, for
+    somebody who did not write it. Checking here turns that into a warning at
+    the point of generation.
+
+    Returns a list of human-readable problems; empty means it would validate.
+    Comments are deliberately not checked for anything: the validator only
+    inspects element children, which is exactly why the boundary marker is free
+    in this format."""
+    problems = []
+    try:
+        root = ET.fromstring("<description>\n" + fragment + "\n</description>")
+    except ET.ParseError as e:
+        # An unescaped & lands here: "xmlParseEntityRef: no name" in
+        # appstreamcli, a hard ERROR rather than a warning.
+        return ["not well-formed XML: %s" % e]
+
+    def walk(node, parent):
+        tag = node.tag
+        if tag not in APPSTREAM_ALLOWED:
+            problems.append("<%s> is not allowed in a description" % tag)
+        elif parent == "description" and tag not in APPSTREAM_BLOCK:
+            problems.append("<%s> may not be a direct child of <description>" % tag)
+        elif tag == "li" and parent not in ("ul", "ol"):
+            problems.append("<li> outside a <ul>/<ol>")
+        elif tag in ("ul", "ol") and parent in ("ul", "ol", "li"):
+            problems.append("nested <%s> (description-markup-nesting-too-deep)" % tag)
+        text = "".join(node.itertext())
+        if tag in ("p", "li") and not text.strip():
+            # tag-empty is a WARNING, and a WARNING fails the build.
+            problems.append("empty <%s> (tag-empty)" % tag)
+        for child in node:
+            walk(child, tag)
+
+    for child in root:
+        walk(child, "description")
+    # Raw text directly under <description> is description-spurious-text; a "- "
+    # bullet list pasted in unwrapped is exactly what that catches.
+    stray = (root.text or "").strip() + "".join((c.tail or "").strip() for c in root)
+    if stray:
+        problems.append("text outside an element: %r (description-spurious-text)"
+                        % stray[:60])
+    whole = "".join(root.itertext())
+    for scheme in ("http://", "https://", "ftp://"):
+        if scheme in whole:
+            problems.append("literal %s in the text (description-has-plaintext-url)"
+                            % scheme)
+    if not [c for c in root if c.tag in APPSTREAM_BLOCK]:
+        problems.append("no <p>/<ul>/<ol> content (description-no-valid-content)")
+    return problems
 
 
 # ---------------------------------------------------------------------------
@@ -795,13 +1317,51 @@ def build(args, token):
 
     meta = {"from_label": from_label, "to_label": args.to_label or to_label}
     full = fit_full(meta, sections, filtered_counts, unwalkable, args)
-    lines, held_back = store_bullets(sections, AUDIENCES[args.audience], token,
-                                     path_check=args.store_path_check,
-                                     limit=args.store_limit,
-                                     max_candidates=args.store_candidates,
-                                     min_subject=args.store_min_subject)
-    store = render_store(lines, args.store_limit, args.lede_text, args.store_fallback)
-    return full, store, sections, filtered_counts, unwalkable, held_back
+
+    # Render the note --audience selected, plus -- when --store-notes-dir was
+    # given -- every storefront that has a file of its own. One walk, four notes:
+    # the ranges are already in memory and commit_files() is cached, so the extra
+    # storefronts cost no API requests that the first one did not already make.
+    wanted = [args.audience]
+    if args.store_notes_dir:
+        wanted += [n for n in sorted(AUDIENCES)
+                   if AUDIENCES[n]["out"] and n not in wanted]
+    notes = {}
+    for name in wanted:
+        notes[name] = render_note(name, sections, args, token)
+    return full, notes, sections, filtered_counts, unwalkable
+
+
+def render_note(name, sections, args, token):
+    """One storefront's note -> {"text", "limit", "held_back", ...}.
+
+    Renders in that storefront's own format at that storefront's own limit; the
+    only thing --store-limit does is override the number, for testing."""
+    a = AUDIENCES[name]
+    limit = a["limit"] if args.store_limit is None else args.store_limit
+    # Absent (three storefronts out of four) means "the app tier may take the
+    # whole budget"; see the linux entry for why exactly one sets it.
+    app_limit = min(limit, a.get("app_limit", limit))
+    lines, shared_from, held_back = store_bullets(
+        sections, a["app"], a["shared"], token=token,
+        path_check=args.store_path_check,
+        limit=limit,
+        max_candidates=args.store_candidates,
+        min_subject=args.store_min_subject)
+    boundary = a["boundary"] if args.store_boundary else None
+    render = render_appstream if a["format"] == "appstream" else render_store
+    text = render(lines, limit, args.lede_text, args.store_fallback,
+                  shared_from, boundary, app_limit=app_limit)
+    if a["format"] == "appstream":
+        # WARN, never raise. A fragment that would not validate is still better
+        # than losing the release, and urnetwork/linux's own CI is the backstop;
+        # this is here so the problem is named at the point it is created rather
+        # than in another repository three steps later.
+        for p in appstream_problems(text):
+            warn("%s note would fail appstreamcli: %s" % (name, p))
+    return {"name": name, "text": text, "limit": limit, "format": a["format"],
+            "out": a["out"], "where": a["where"], "held_back": held_back,
+            "app": len(lines[:shared_from]), "shared": len(lines[shared_from:])}
 
 
 def fit_full(meta, sections, filtered_counts, unwalkable, args):
@@ -890,6 +1450,161 @@ def self_test():
               store_bullets([{"name": "android", "slug": "urnetwork/android", "commits": [
                   commit("test(routing): pin the fixture please")]}], ["android"])[0],
               500, None, "- f"))
+
+    # -----------------------------------------------------------------------
+    # PER-STOREFRONT NOTES.
+    #
+    # The three things that would go wrong silently: a storefront quietly
+    # inheriting android's 500 (an Apple note capped at an eighth of what the
+    # store accepts), the boundary marker pushing a note over a limit that is
+    # enforced by a silent truncation, and the AppStream fragment being invalid
+    # in a way that only breaks the NEXT Linux build, in another repository.
+    # -----------------------------------------------------------------------
+    check("--audience android and all both still exist",
+          "android" in AUDIENCES and "all" in AUDIENCES)
+    check("android is still 500 and still plain text",
+          AUDIENCES["android"]["limit"] == 500
+          and AUDIENCES["android"]["format"] == "text")
+    check("android draws from exactly the components it always did",
+          AUDIENCES["android"]["app"] + AUDIENCES["android"]["shared"]
+          == ["android", "sdk", "connect", "glog", "goidenticons"])
+    check("every storefront has its own limit, none inherits 500",
+          [AUDIENCES[a]["limit"] for a in ("android", "windows", "apple")]
+          == [500, 1500, 4000])
+    check("apple, linux and windows each write one file",
+          all(AUDIENCES[a]["out"] for a in ("apple", "linux", "windows")))
+    check("android writes no file of its own (metadata/ is its home)",
+          AUDIENCES["android"]["out"] is None)
+    check("no storefront file is written under metadata/",
+          not any((AUDIENCES[a]["out"] or "").startswith("metadata")
+                  for a in AUDIENCES))
+    check("all four apps share exactly one sdk tier",
+          all(AUDIENCES[a]["shared"] == SHARED_COMPONENTS
+              for a in ("android", "apple", "linux", "windows")))
+
+    tiered = [{"name": "android", "slug": "urnetwork/android", "base": "a" * 40,
+               "head": "b" * 40,
+               "commits": [commit("Show degraded Auto transport status"),
+                           commit("Stop capturing apps with no live exit")]},
+              {"name": "sdk", "slug": "urnetwork/sdk", "base": "c" * 40,
+               "head": "d" * 40,
+               "commits": [commit("Expose degraded transport status across SDK")]}]
+    lines, shared_from, _ = store_bullets(tiered, ["android"], SHARED_COMPONENTS)
+    check("the tier boundary lands where the components change",
+          shared_from == 2 and len(lines) == 3)
+    # The same subject really does land in two components at once -- connect and
+    # sdk both carried "Optimize low-bar network performance" in
+    # v2026.8.15-1020621320...v2026.8.21-1025763520 -- and a store note that
+    # says it three times is worse than one that says it once.
+    dupes = tiered + [{"name": "connect", "slug": "urnetwork/connect", "base": "e" * 40,
+                       "head": "f" * 40,
+                       "commits": [commit("Expose degraded transport status across SDK"),
+                                   commit("Show degraded Auto transport status")]}]
+    check("a subject in two components is listed once",
+          store_bullets(dupes, ["android"], SHARED_COMPONENTS)[0]
+          == ["Show degraded Auto transport status",
+              "Stop capturing apps with no live exit",
+              "Expose degraded transport status across SDK"])
+    check("no shared component, no boundary index past the end",
+          store_bullets(tiered[:1], ["android"], SHARED_COMPONENTS)[1] == 2)
+
+    plain = render_store(lines, 500, None, "- f", shared_from, "")
+    check("android boundary is one blank line and nothing else",
+          plain.splitlines()[2] == "" and len(plain.splitlines()) == 4)
+    check("android boundary costs exactly one character",
+          len(plain.rstrip("\n"))
+          == len(render_store(lines, 500, None, "- f").rstrip("\n")) + 1)
+    check("--no-store-boundary is byte-identical to the old single block",
+          render_store(lines, 500, None, "- f", shared_from, None)
+          == render_store(lines, 500, None, "- f"))
+    headed = render_store(lines, 4000, None, "- f", shared_from, "Under the hood")
+    check("apple/windows boundary is a blank line plus a plain heading",
+          headed.splitlines()[2:4] == ["", "Under the hood"])
+    check("the boundary appears exactly once",
+          headed.count("\nUnder the hood\n") == 1)
+    check("no boundary when no app bullet fitted above it",
+          "Under the hood" not in
+          render_store(lines, 60, None, "- f", shared_from, "Under the hood"))
+    check("no boundary when the tail is empty",
+          "Under the hood" not in
+          render_store(lines[:2], 4000, None, "- f", 2, "Under the hood"))
+
+    # The packer's arithmetic against the rendered bytes, at every real limit.
+    # If those two ever disagree, a note goes over a cap that is enforced by a
+    # silent mid-word truncation.
+    pile = ["Subject number %d that is long enough to be kept" % i for i in range(200)]
+    for name in ("android", "windows", "apple"):
+        lim = AUDIENCES[name]["limit"]
+        note = render_store(pile, lim, "A human headline", "- f", 120,
+                            AUDIENCES[name]["boundary"])
+        check("%s note fits %d chars including the boundary" % (name, lim),
+              len(note.rstrip("\n")) <= lim)
+
+    # app_limit, and the failure it exists to stop: on the real span
+    # v2026.8.15-1020621320...v2026.8.21-1025763520 the linux app tier produced
+    # 28 qualifying bullets, which took the whole editorial budget and left the
+    # shared sdk/connect tail with nothing -- a note with no tail to delete.
+    hoggish = ["A linux app change number %02d, spelled out at some length" % i
+               for i in range(40)] + ["A shared sdk change, spelled out at the same length"]
+    _, app_only, tail_only, _ = pack_bullets(hoggish, 1800, shared_from=40)
+    check("without a cap the app tier can starve the tail", tail_only == [])
+    _, capped, tail, _ = pack_bullets(hoggish, 1800, shared_from=40, app_limit=1000)
+    check("app_limit reserves room for the shared tail",
+          len(tail) == 1 and 0 < len(capped) < len(app_only))
+    check("app_limit never widens the budget",
+          len("\n".join("- " + t for t in capped + tail)) <= 1800)
+
+    # The exact subjects these two rules were written against, from
+    # urnetwork/linux and urnetwork/connect in the same real span.
+    for wip in ("Wip(egress): mark the daemon's sockets at creation via cgroup-BPF",
+                "Partial(canvas): settle dots when there is no clock",
+                "wip: something unfinished"):
+        check("store holds back %r" % wip[:28], bool(STORE_SKIP.search(wip)))
+    check("a real subject containing the word partial is still kept",
+          not STORE_SKIP.search("Restore partial provider windows on reconnect"))
+    check("store drops a tune() label like any other commit type",
+          polish("Tune(window): raise the quality window 2/6/12 -> 6/12/16")
+          == "Raise the quality window 2/6/12 -> 6/12/16")
+
+    # AppStream. Everything here was checked against appstreamcli 1.1.3, which
+    # is what urnetwork/linux's CI runs; a WARNING there is a build failure.
+    xml = render_appstream(lines, 1800, None, "- f", shared_from, "Under the hood")
+    check("appstream fragment would validate", appstream_problems(xml) == [])
+    check("appstream wraps bullets in <li>, never in \"- \"",
+          "<li>Show degraded Auto transport status</li>" in xml
+          and "\n- " not in xml)
+    check("appstream marks the boundary with a free XML comment",
+          APPSTREAM_SHARED_OPEN in xml and APPSTREAM_SHARED_CLOSE in xml)
+    check("appstream comment markers contain no illegal '--'",
+          "--" not in APPSTREAM_SHARED_OPEN[4:-3]
+          and "--" not in APPSTREAM_SHARED_CLOSE[4:-3])
+    check("appstream escapes an ampersand",
+          "<li>Fix A &amp; B routing on the exit side</li>"
+          in render_appstream(["Fix A & B routing on the exit side"], 1800, None, "- f"))
+    check("appstream strips a plaintext URL rather than failing the build",
+          appstream_problems(render_appstream(
+              ["Document the flow at https://ur.io/docs for operators"],
+              1800, None, "- f")) == [])
+    # Strip-and-leave-empty would be a DIFFERENT fatal issue (tag-empty), so the
+    # bullet has to disappear, not shrink.
+    urlonly = render_appstream(["https://ur.io/releases", "Keep this real bullet here"],
+                               1800, None, "- f")
+    check("a bullet that was only a URL is dropped, not emptied",
+          "<li></li>" not in urlonly and appstream_problems(urlonly) == []
+          and urlonly.count("<li>") == 1)
+    check("appstream falls back to a paragraph, not to a \"- \" line",
+          render_appstream([], 1800, None, "- Bug and performance fixes.").strip()
+          == "<p>Bug and performance fixes.</p>")
+    check("the appstream checker catches raw text under <description>",
+          appstream_problems("- a bullet\n") != [])
+    check("the appstream checker catches an unescaped ampersand",
+          appstream_problems("<p>A &amp B</p>") != [])
+    check("the appstream checker catches a plaintext URL",
+          appstream_problems("<p>See https://ur.io</p>") != [])
+    check("the appstream checker catches an empty <li>",
+          appstream_problems("<ul><li></li></ul>") != [])
+    check("the appstream checker catches a disallowed tag",
+          appstream_problems("<p><b>no</b></p>") != [])
     # The exact file lists of the two Android CI commits in
     # v2026.8.21-1025223880...v2026.8.21-1025763520, and of the app commit next
     # to them, so this rule is pinned against real data rather than a guess.
@@ -982,17 +1697,34 @@ def main(argv=None):
                         "path passes v<version>, because 'worktree' means nothing "
                         "to somebody reading a release body)")
     p.add_argument("--repo", default=here, help="the build repo checkout (default: %(default)s)")
-    p.add_argument("--store-out", metavar="PATH", help="write the store note here")
+    p.add_argument("--store-out", metavar="PATH",
+                   help="write the --audience storefront's note here")
+    p.add_argument("--store-notes-dir", metavar="DIR",
+                   help="ALSO write one note per storefront under DIR, each in that "
+                        "store's own format at that store's own limit: "
+                        "apple/en-US/release_notes.txt, windows/en-US/whats_new.txt, "
+                        "linux/release-description.xml. android is not written here "
+                        "-- its home is metadata/en-US/changelogs/<versionCode>.txt "
+                        "and all/run.sh puts it there, once per "
+                        "FDROID_VERSION_CODE_OFFSETS entry")
     p.add_argument("--full-out", metavar="PATH", help="write the full changelog here")
-    p.add_argument("--store-limit", type=int, default=500,
-                   help="store note budget in characters (default: %(default)s -- "
-                        "fdroidserver char_limits['whatsNew'] and Play's cap)")
+    p.add_argument("--store-limit", type=int, default=None, metavar="N",
+                   help="override the store note budget in characters. There is no "
+                        "single default: each storefront's real limit is in "
+                        "AUDIENCES -- android 500 (fdroidserver char_limits"
+                        "['whatsNew'] and Play's cap), windows 1500 (Partner "
+                        "Center), apple 4000 (App Store Connect), linux an "
+                        "editorial budget because AppStream sets no limit at all. "
+                        "This overrides EVERY note in the run, so it is a testing "
+                        "knob, not a per-store setting")
     p.add_argument("--full-limit", type=int, default=120000,
                    help="full changelog budget in characters (default: %(default)s -- "
                         "GitHub's release body cap is 125000 and run.sh prepends a header "
                         "and the VirusTotal table)")
     p.add_argument("--audience", choices=sorted(AUDIENCES), default="android",
-                   help="which components the STORE note draws from (default: %(default)s)")
+                   help="which storefront --store-out is for; also picks the limit "
+                        "and the format (default: %(default)s -- the F-Droid/Play "
+                        "note all/run.sh copies into metadata/en-US/changelogs)")
     p.add_argument("--filters", default=DEFAULT_FILTERS,
                    help="comma-separated noise filters, or empty to keep every commit "
                         "(default: %(default)s; known: " + ",".join(sorted(FILTERS)) + ")")
@@ -1009,13 +1741,25 @@ def main(argv=None):
                    action="store_false", default=True,
                    help="do not hold CI/test/docs/build-only commits out of the "
                         "store note (they are always in the full changelog)")
+    p.add_argument("--no-store-boundary", dest="store_boundary",
+                   action="store_false", default=True,
+                   help="do not mark where this app's own changes end and the shared "
+                        "sdk/connect tail begins. Reproduces, byte for byte, the "
+                        "single-block note this generator produced before there was "
+                        "more than one storefront")
     p.add_argument("--store-min-subject", type=int, default=STORE_MIN_SUBJECT,
                    metavar="N",
                    help="hold subjects shorter than N characters out of the store "
                         "note (default: %(default)s; 0 disables)")
     p.add_argument("--store-candidates", type=int, default=40, metavar="N",
-                   help="how many store candidates to look up file paths for "
-                        "(default: %(default)s; one API request each)")
+                   help="how many store candidates to look up file paths for, per "
+                        "note (default: %(default)s; one API request each, and a "
+                        "commit another note already looked up costs nothing). A "
+                        "span long enough to exhaust this renders the same either "
+                        "way for the same command line, but a note rendered "
+                        "alongside others may filter more of its shared tail than "
+                        "the same note rendered on its own, because the others "
+                        "warmed the cache")
     p.add_argument("--store-fallback", default="- Bug and performance fixes.",
                    help="what the store note says when no commit qualifies")
     p.add_argument("--self-test", action="store_true",
@@ -1055,25 +1799,50 @@ def main(argv=None):
                  "already does) or pass --no-store-path-check to skip the check "
                  "deliberately rather than by accident.")
 
-    full, store, sections, filtered, unwalkable, held_back = build(args, token)
+    full, notes, sections, filtered, unwalkable = build(args, token)
+    selected = notes[args.audience]
 
-    # Both artifacts are fully rendered before either file is opened, so a
-    # failure above leaves the tree exactly as it was and run.sh's fallback has
-    # something to fall back to.
+    # EVERY artifact is fully rendered before ANY file is opened, so a failure
+    # above leaves the tree exactly as it was and run.sh's fallback has something
+    # to fall back to. That invariant is why the loop below only writes.
+    def write_text(path, text):
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
     if args.store_out:
-        with open(args.store_out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(store)
+        write_text(args.store_out, selected["text"])
+    if args.store_notes_dir:
+        for name in sorted(notes):
+            if notes[name]["out"]:
+                write_text(os.path.join(args.store_notes_dir, notes[name]["out"]),
+                           notes[name]["text"])
     if args.full_out:
-        with open(args.full_out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(full)
-    if not args.store_out and not args.full_out:
+        write_text(args.full_out, full)
+    if not args.store_out and not args.full_out and not args.store_notes_dir:
         sys.stdout.write(full)
 
     warn("%d component(s), %d commit(s), %d filtered as builder noise, %d unwalkable"
          % (len(sections), sum(len(s["commits"]) for s in sections),
             sum(filtered.values()), len(unwalkable)))
-    warn("store note %d/%d chars" % (len(store.rstrip("\n")), args.store_limit))
-    for reason, n in sorted(held_back.items()):
+    for name in sorted(notes):
+        n = notes[name]
+        size = len(n["text"].rstrip("\n"))
+        # An AppStream fragment is measured, not budgeted: the number below is
+        # the file, tags and all, and there is no limit to compare it to. Saying
+        # "1743/1800" for it would invent a cap the format does not have.
+        if n["format"] == "appstream":
+            warn("%s note %d chars of AppStream XML (no format limit; %d-char "
+                 "editorial budget on the bullet text)%s"
+                 % (name, size, n["limit"], " -> " + n["out"] if n["out"] else ""))
+        else:
+            warn("%s note %d/%d chars%s"
+                 % (name, size, n["limit"], " -> " + n["out"] if n["out"] else ""))
+        warn("  %d app bullet(s) then %d shared sdk/connect bullet(s) available; "
+             "pasted into %s" % (n["app"], n["shared"], n["where"]))
+    for reason, n in sorted(selected["held_back"].items()):
         warn("  held out of the store note (still in the full changelog): %d with %s"
              % (n, reason))
     return 0
