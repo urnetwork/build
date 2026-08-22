@@ -1036,6 +1036,24 @@ def main(argv=None):
     token = api_token()
     if not token:
         warn("no GITHUB_API_KEY/GITHUB_TOKEN; walking anonymously (every repo is public)")
+        if args.store_path_check:
+            # SAY THIS LOUDLY, because the degradation is silent otherwise and
+            # it lands in the artifact a user reads. The store path check needs
+            # one extra API call per candidate commit to see which files it
+            # touched, and anonymous callers get 60 requests/hour -- so on any
+            # real span those lookups start returning 403. commit_files() then
+            # fails OPEN by design (a missed lookup must never delete somebody's
+            # work), which means the commit is KEPT. The note stays truthful but
+            # gets less relevant: measured on a one-week span, anonymous led with
+            # "Tighten the job timeouts" and "Add a build-and-test workflow",
+            # while the same span with a token held 6 CI/test/docs-only commits
+            # back and led with the shipping changes instead.
+            warn("  the store note holds CI/test/docs-only commits back by "
+                 "looking up each commit's files, and that lookup is rate "
+                 "limited to 60/hour without a token. Expect build-only commits "
+                 "to survive into the note. Export GITHUB_API_KEY (run.sh "
+                 "already does) or pass --no-store-path-check to skip the check "
+                 "deliberately rather than by accident.")
 
     full, store, sections, filtered, unwalkable, held_back = build(args, token)
 
