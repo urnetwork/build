@@ -854,9 +854,17 @@ jobs:
           # install had just succeeded. A GitHub runner is not immutable, so it
           # should take the native path; the sandboxed fallback is exercised on
           # the hosts that actually need it.
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          #
+          # elfutils comes WITH that choice. flatpak-builder strips debuginfo out
+          # of every module it builds and shells out to eu-strip/eu-elfcompress
+          # to do it. The sandboxed org.flatpak.Builder ships its own copy; a
+          # native builder expects them on the host, and without them the run
+          # dies on the first module: "Failed to execute child process eu-strip".
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder elfutils
           flatpak --version
           flatpak-builder --version
+          eu-strip --version | head -1
           flatpak remote-add --if-not-exists --user \
             flathub https://flathub.org/repo/flathub.flatpakrepo
 
