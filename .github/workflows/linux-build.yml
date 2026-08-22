@@ -1,0 +1,962 @@
+name: Linux build + test
+
+# =============================================================================
+# WHAT THIS IS
+#
+# The Linux leg of all/run.sh, run on GitHub runners instead of by hand on the
+# macOS build host — so the build repo's OWN pipeline can be exercised, and so
+# the fork can cut a Linux release without the release host.
+#
+# It does not reimplement the pipeline. Every artifact here is produced by the
+# scripts this repo already ships, called through their documented entry point:
+#
+#     all/build-linux.sh
+#       -> all/linux/build.sh
+#            -> docker build  all/linux/Dockerfile.{daemon,gui}
+#            -> docker run    all/linux/build-arch.sh   (meson + packaging)
+#                             all/linux/verify.sh       (verify the artifacts)
+#
+# The workflow's job is to put the right tree, the right toolchain and the
+# right environment in front of those scripts, then assert on what came out.
+# Where a step is lifted from the linux repo's own CI
+# (urnetwork-linux/.github/workflows/beta-build.yml) the comment says so and
+# says what it solved there — that file is the proof these steps work on
+# GitHub runners.
+#
+# -----------------------------------------------------------------------------
+# THE JOB GRAPH, AND WHY IT IS SHAPED LIKE THIS
+#
+#   plan ──> build-sdk ──┬─> build (daemon, amd64) ─┐
+#                        ├─> build (gui,    amd64) ─┤
+#                        ├─> build (daemon, arm64) ─┼─> release
+#                        └─> build (gui,    arm64) ─┘
+#
+#   plan       ~20 s   version, matrix, publish switch. Cheap and separate so
+#                      the (role x arch) matrix can come from a dispatch input.
+#   build-sdk  ~4 min  ONE job for BOTH arches. zig cross-compiles either
+#                      target and pins the glibc floor while doing it, so
+#                      splitting it per arch would buy nothing and cost a
+#                      second Go module download. Its ~25 MiB zip fans out to
+#                      every leg below.
+#   build      role x arch, all four in parallel. The two roles are separate
+#                      jobs because they are separate base images (22.04 for
+#                      the daemon's 2.35 glibc floor, 24.04 for GTK4) and the
+#                      GUI half is the long pole; run serially, as the release
+#                      host does, one arch is daemon+gui back to back.
+#                      ~10-14 min (daemon) / ~14-20 min (gui), cold.
+#   release    ~2 min  Publishes only if every leg above is green.
+#
+# Expected wall clock: ~25 min, against ~50+ min for the same work serialized.
+#
+# ARM64 IS A NATIVE RUNNER, NOT QEMU. This is the one place the CI is
+# structurally BETTER than the release host: build.sh's own header says
+# "arm64 builds native, amd64 builds under qemu emulation", because the
+# release host is an Apple Silicon Mac. Here each arch gets a runner of its
+# own architecture (ubuntu-24.04 / ubuntu-24.04-arm), so `docker build
+# --platform linux/<arch>` and `docker run --platform linux/<arch>` are always
+# native and no binfmt/qemu registration is needed at all. That also removes
+# the emulation caveat verify.sh documents around `--appimage-extract` (a
+# static-pie ELF that Docker Desktop's amd64 emulation cannot exec).
+# beta-build.yml has its arm64 matrix rows commented out — read its comment:
+# the reason is "uncomment when the arm64 line is turned on", a product
+# decision about which artifacts that release ships, not a runner limitation.
+# The build repo's pipeline has always built both arches, so both are on here.
+#
+# -----------------------------------------------------------------------------
+# WHAT IT BUILDS, AND WHAT "PINNED" MEANS
+#
+# By default this builds the trees the build repo POINTS AT — the recorded
+# submodule commits for `sdk` and `linux`. That is the honest default for a
+# pipeline test: it reproduces what `all/run.sh` would have handed to the
+# packaging scripts. It is NOT a test of the fork's application code; the
+# recorded `linux` pin is upstream's, and at the recorded `sdk` pin
+# cgo/go.mod has no `replace` directives, so the cgo build links the PUBLISHED
+# github.com/urnetwork/{sdk,connect,glog,goidenticons}/v2026 modules from the
+# module proxy rather than any local tree. Use the `linux_ref` / `sdk_ref`
+# inputs to build something else, and see the guard in build-sdk for the one
+# case that cannot work here.
+#
+# ONLY TWO of the repo's seventeen submodules are checked out, and they are
+# checked out in DIFFERENT jobs: `sdk` (253 MB) in build-sdk, `linux` (4.5 MB)
+# in the build legs. Nothing in the Linux leg opens the other fifteen —
+# all/build-linux.sh's `stage_local_repos sdk connect glog goidenticons linux`
+# call is a no-op unless SRC_HOME/SRC_<REPO> is set, which this workflow never
+# sets. Checking out all seventeen would be 2.53 GB against 258 MB.
+#
+# THE SUBMODULE URLS ARE SSH (`git@github.com:...` in .gitmodules) and there is
+# no key on a runner, so a plain `git submodule update` hangs. The fix is a
+# GLOBAL url rewrite; a repo-local `git config url...insteadOf` is silently
+# ignored by the `git clone` that submodule--helper spawns. Every checkout step
+# below does the global rewrite first. All the repos involved are public, so no
+# deploy key or PAT is needed.
+#
+# -----------------------------------------------------------------------------
+# HOW A PARTIAL SET IS PREVENTED — the same tolerance run.sh already has
+#
+# run.sh wraps the whole Linux leg in one `if build-linux.sh; then <every
+# upload>; else warn; fi`. The uploads live INSIDE the `then` branch, so a
+# failure anywhere in the leg skips EVERY Linux asset rather than publishing
+# some of them. This workflow reproduces that shape exactly:
+#
+#   * `release` has `needs: [plan, build-sdk, build]`. A matrix job's result is
+#     "success" only when every leg succeeded, and a job whose `needs` did not
+#     succeed is skipped — its `if:` here contains no status function, so the
+#     implicit success gate still applies. One red leg therefore publishes
+#     nothing at all. `fail-fast: false` is still set so the other legs finish
+#     and report, which is diagnosis, not permission to publish.
+#   * The asset set is asserted BEFORE the release is touched, because
+#     publishing deletes the tag's existing release first: discovering a
+#     missing file after the delete would leave the tag with no release at all.
+#     (Lifted from beta-build.yml's "Assert the asset-name contract" step,
+#     which exists for that exact reason.)
+#   * `shopt -s nullglob` around the upload list, for the same reason run.sh
+#     writes `*.rpm(N)`: without it bash hands `gh` an unexpanded pattern as a
+#     literal filename and the upload fails with the release ALREADY DELETED.
+#   * The .rpm keeps its per-artifact tolerance. build-arch.sh builds it LAST,
+#     after the .deb and the tarball are already on disk, and warns instead of
+#     failing unless UR_REQUIRE_RPM=true — because run.sh's leg-level `if` is
+#     NOT sufficient tolerance on its own (one non-zero exit costs the release
+#     the .deb, the tarball, the AppImage and the SDK zip too). The
+#     `require_rpm` input drives that knob; it defaults to "true" here, which
+#     is what the linux repo's own CI runs with.
+#
+# -----------------------------------------------------------------------------
+# NOT ATTEMPTED HERE, DELIBERATELY
+#
+#   * The Flatpak. all/linux/build-arch.sh does not build one — it is the linux
+#     repo's own CI that does, in a job with `sudo` and bubblewrap user
+#     namespaces that a `docker run` here is not granted. Adding it would mean
+#     writing a build path this repo does not have.
+#   * Signing. run.sh's release path has no detached signatures for Linux and
+#     neither does this. The packaging scripts' .sha256/.asc sidecars are
+#     written next to the artifacts and, exactly as in run.sh, are NOT
+#     uploaded: verification rides the per-asset sha256 GitHub publishes.
+#   * VirusTotal. run.sh's github_release_upload scans every asset first. That
+#     needs VIRUSTOTAL_API_KEY, and a fork CI that silently skipped the scan
+#     while looking like run.sh would be worse than one that says it does not
+#     scan. It does not scan.
+#   * The apple / android / windows / extension / sdk-mobile / server legs.
+#     Nothing in this file touches all/run.sh.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      arches:
+        description: "Architectures to build (amd64 uses ubuntu-24.04, arm64 uses ubuntu-24.04-arm)"
+        type: choice
+        default: "amd64 arm64"
+        options: ["amd64 arm64", "amd64", "arm64"]
+      roles:
+        description: "Halves to build. A release requires BOTH; a subset is a build-only smoke test."
+        type: choice
+        default: "daemon gui"
+        options: ["daemon gui", "daemon", "gui"]
+      require_rpm:
+        description: "Gate the build on the .rpm (UR_REQUIRE_RPM). false = warn and carry on."
+        type: choice
+        default: "true"
+        options: ["true", "false"]
+      version:
+        description: "Release version, e.g. 2026.8.20-1024590520. Empty = derive a fork beta version."
+        type: string
+        default: ""
+      linux_repo:
+        description: "owner/repo to take the linux tree from (only used when linux_ref is set)"
+        type: string
+        default: "urnetwork/linux"
+      linux_ref:
+        description: "Branch/tag/sha for the linux tree. Empty = the recorded submodule pin."
+        type: string
+        default: ""
+      sdk_repo:
+        description: "owner/repo to take the sdk tree from (only used when sdk_ref is set)"
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        description: "Branch/tag/sha for the sdk tree. Empty = the recorded submodule pin. See the guard in build-sdk."
+        type: string
+        default: ""
+  # REUSABLE. This workflow BUILDS AND TESTS; it never publishes, and it has no
+  # release job at all -- upstream cuts releases on dedicated build servers, so a
+  # release workflow does not belong in urnetwork/build. The fork's
+  # linux-release.yml calls this and adds the publishing on top, which is why the
+  # `mode` input exists HERE but not in workflow_dispatch above: a human running
+  # this workflow directly can never turn it into a release.
+  workflow_call:
+    inputs:
+      mode:
+        description: "build-only, or release when a calling workflow intends to publish"
+        type: string
+        default: build-only
+      arches:
+        type: string
+        default: "amd64 arm64"
+      roles:
+        type: string
+        default: "daemon gui"
+      require_rpm:
+        type: string
+        default: "true"
+      version:
+        type: string
+        default: ""
+      linux_repo:
+        type: string
+        default: "urnetwork/linux"
+      linux_ref:
+        type: string
+        default: ""
+      sdk_repo:
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        type: string
+        default: ""
+    outputs:
+      version:       { value: "${{ jobs.plan.outputs.version }}" }
+      publish:       { value: "${{ jobs.plan.outputs.publish }}" }
+      arches:        { value: "${{ jobs.plan.outputs.arches }}" }
+      roles:         { value: "${{ jobs.plan.outputs.roles }}" }
+      require_rpm:   { value: "${{ jobs.plan.outputs.require_rpm }}" }
+      sdk_source:    { value: "${{ jobs.plan.outputs.sdk_source }}" }
+      linux_source:  { value: "${{ jobs.plan.outputs.linux_source }}" }
+
+  # Per-commit signal on the fork's Linux branch. NEVER publishes: this workflow
+  # has no release job, Upstream adopting this file would put its own branches
+  # here (or drop the trigger and keep the dispatch).
+  push:
+    branches:
+      - linux-release-matrix
+  pull_request:
+    branches:
+      - main
+      - linux-release-matrix
+
+# Least privilege throughout: this workflow only ever READS. It has no release
+# job and never needs contents: write -- the fork's linux-release.yml, which
+# calls this one, is where publishing (and that permission) lives.
+permissions:
+  contents: read
+  # the version derive step reads this run's created_at through the actions api
+  actions: read
+
+# The release job deletes the tag's release and recreates it. Two runs of the
+# same ref interleaving inside that window would leave the release deleted.
+# Serialize per ref; cancel superseded PR runs, which never publish anyway.
+concurrency:
+  group: linux-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # zig is used ONLY as a glibc-pinning cross compiler for the cgo SDK:
+  # sdk/cgo/Makefile's LINUX_AMD64_CC / LINUX_ARM64_CC default to
+  # `zig cc -target <arch>-linux-gnu.2.35`. Taken from PyPI rather than
+  # ziglang.org because the PyPI package is version-addressable and its URL
+  # grammar does not change between zig releases the way ziglang.org's has.
+  # (Solution and version both lifted from beta-build.yml.)
+  UR_ZIG_VERSION: "0.14.1"
+  # The glibc floor the SDK .so must honour. It is not a free parameter: it is
+  # the `-gnu.2.35` in the Makefile's CC default, the default of
+  # all/linux/build-arch.sh's UR_GLIBC_FLOOR, and the `Depends: libc6 (>= …)`
+  # the .deb declares. The build-sdk job asserts it against build-arch.sh
+  # rather than trusting this line to have been kept in sync.
+  UR_SDK_GLIBC_FLOOR: "2.35"
+  # apt's default is to wait forever on a stalled mirror. beta-build.yml added
+  # this after two runs died that way (one an hour on `apt-get install zip`,
+  # one six hours). Bounded at the transport rather than per call site.
+  UR_APT_OPTS: >-
+    -o Acquire::Retries=3
+    -o Acquire::http::Timeout=30
+    -o Acquire::https::Timeout=30
+    -o Acquire::http::No-Cache=true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Everything that has to be decided ONCE for the whole run: the version, the
+  # (role x arch) matrix, and whether this run is allowed to publish.
+  #
+  # It is a job of its own rather than part of build-sdk because the matrix has
+  # to be a job output — `strategy.matrix` cannot read `inputs` directly, only
+  # `fromJSON(needs.<job>.outputs.<x>)`. It costs ~20 s of runner startup and
+  # buys a run that can be dispatched as amd64-only, daemon-only, or both.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      warp_version: ${{ steps.version.outputs.warp_version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      arches: ${{ steps.matrix.outputs.arches }}
+      roles: ${{ steps.matrix.outputs.roles }}
+      publish: ${{ steps.publish.outputs.publish }}
+      require_rpm: ${{ steps.publish.outputs.require_rpm }}
+      sdk_source: ${{ steps.sources.outputs.sdk_source }}
+      linux_source: ${{ steps.sources.outputs.linux_source }}
+    steps:
+      # No submodules: this job only reads the gitlink SHAs and the scripts.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # Same scheme the fork's windows and linux beta lines use: the official
+      # date format with warpctl's counter (seconds since the company founding
+      # times ten), derived from THIS RUN's created_at rather than from `date`
+      # at step time, so every job of one run agrees even across midnight UTC.
+      # The "-beta" suffix is what keeps a fork build from ever looking like an
+      # official urnetwork/build release tag.
+      #
+      # It survives the packaging scripts unchanged, which is not obvious and
+      # was checked: make-rpm.sh splits VERSION at the FIRST '-' into rpm's
+      # Version/Release (rpm forbids '-' in both) and folds the tail to
+      # `0.<code>.beta`, the Fedora prerelease convention — its own header names
+      # this exact version shape. make-deb.sh splits at the LAST '-' instead,
+      # which Debian versions permit. Both then name the file with ${VERSION}
+      # verbatim, which is why build.sh's exact-name assertions still hold.
+      - name: Derive the release version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+            echo "version pinned by workflow input: $version"
+          else
+            created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            base=$(date -u -d "$created" '+%Y.%-m.%-d')
+            founded=$(date -u -d "2023-05-23" +%s)
+            created_epoch=$(date -u -d "$created" +%s)
+            code=$(( (created_epoch - founded) * 10 ))
+            version="${base}-${code}-beta"
+            echo "run created $created -> version $version (code $code)"
+          fi
+          # The version becomes a git tag AND part of every artifact filename.
+          # Anything outside this alphabet would produce a file the packaging
+          # scripts' own name assertions could not match.
+          case "$version" in
+            *[!A-Za-z0-9._+-]*|'')
+              echo "::error::version '$version' must be non-empty and contain only [A-Za-z0-9._+-]"
+              exit 1
+              ;;
+          esac
+          # WARP_VERSION (the internal spelling: last '-' becomes '+'). This
+          # mirrors all/build-linux.sh lines 60-67 exactly. build-linux.sh
+          # still derives its own copy — this one exists only for the SDK job,
+          # which runs `make build_linux` directly and needs the same value in
+          # the -ldflags.
+          case "$version" in
+            *-*) warp="${version%-*}+${version##*-}" ;;
+            *)   warp="$version" ;;
+          esac
+          echo "version=$version"       >> "$GITHUB_OUTPUT"
+          echo "warp_version=$warp"     >> "$GITHUB_OUTPUT"
+          echo "EXTERNAL_WARP_VERSION=$version  WARP_VERSION=$warp"
+
+      # Provenance for the release notes. A fork release that does not say
+      # which trees it was cut from is not auditable, and the pins are two
+      # `git ls-tree` reads away.
+      - name: Resolve which sdk and linux trees this run builds
+        id: sources
+        env:
+          INPUT_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+          INPUT_SDK_REF: ${{ inputs.sdk_ref || '' }}
+          INPUT_LINUX_REPO: ${{ inputs.linux_repo || 'urnetwork/linux' }}
+          INPUT_LINUX_REF: ${{ inputs.linux_ref || '' }}
+        run: |
+          set -euo pipefail
+          pin_sdk=$(git ls-tree HEAD sdk | awk '{print $3}')
+          pin_linux=$(git ls-tree HEAD linux | awk '{print $3}')
+          # A missing gitlink means someone removed the submodule; every later
+          # job would then fail in a much less obvious way.
+          [ -n "$pin_sdk" ]   || { echo "::error::no 'sdk' submodule gitlink at HEAD"; exit 1; }
+          [ -n "$pin_linux" ] || { echo "::error::no 'linux' submodule gitlink at HEAD"; exit 1; }
+          if [ -n "$INPUT_SDK_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_SDK_REPO is a step env var
+            sdk_source="${INPUT_SDK_REPO}@${INPUT_SDK_REF} (override)"
+          else
+            sdk_source="urnetwork/sdk@${pin_sdk} (submodule pin)"
+          fi
+          if [ -n "$INPUT_LINUX_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_LINUX_REPO is a step env var
+            linux_source="${INPUT_LINUX_REPO}@${INPUT_LINUX_REF} (override)"
+          else
+            linux_source="urnetwork/linux@${pin_linux} (submodule pin)"
+          fi
+          echo "sdk_source=$sdk_source"     >> "$GITHUB_OUTPUT"
+          echo "linux_source=$linux_source" >> "$GITHUB_OUTPUT"
+          echo "sdk:   $sdk_source"
+          echo "linux: $linux_source"
+
+      # The (role x arch) matrix, plus the runner label each arch needs. The
+      # runner's own OS is nearly irrelevant — every compile happens inside
+      # Dockerfile.daemon / Dockerfile.gui — but its ARCHITECTURE is not: it is
+      # what makes `docker run --platform linux/<arch>` native instead of
+      # emulated.
+      - name: Build the (role x arch) matrix
+        id: matrix
+        env:
+          INPUT_ARCHES: ${{ inputs.arches || 'amd64 arm64' }}
+          INPUT_ROLES: ${{ inputs.roles || 'daemon gui' }}
+        run: |
+          set -euo pipefail
+          # Re-split and re-join so the comparisons downstream are exact even
+          # if an input arrives with doubled or trailing whitespace.
+          read -r -a arch_arr <<<"$INPUT_ARCHES"
+          read -r -a role_arr <<<"$INPUT_ROLES"
+          arches="${arch_arr[*]}"
+          roles="${role_arr[*]}"
+          [ "${#arch_arr[@]}" -gt 0 ] || { echo "::error::no arches selected"; exit 1; }
+          [ "${#role_arr[@]}" -gt 0 ] || { echo "::error::no roles selected"; exit 1; }
+          include=""
+          for arch in "${arch_arr[@]}"; do
+            case "$arch" in
+              amd64) runner="ubuntu-24.04" ;;
+              # GA public-repo label. The whole point of using it: no qemu.
+              arm64) runner="ubuntu-24.04-arm" ;;
+              *) echo "::error::unsupported arch '$arch' (amd64|arm64)"; exit 1 ;;
+            esac
+            for role in "${role_arr[@]}"; do
+              case "$role" in
+                daemon|gui) ;;
+                *) echo "::error::unsupported role '$role' (daemon|gui)"; exit 1 ;;
+              esac
+              include="${include}${include:+,}{\"role\":\"$role\",\"arch\":\"$arch\",\"runner\":\"$runner\"}"
+            done
+          done
+          matrix="{\"include\":[${include}]}"
+          # Assert it parses. A malformed matrix does not fail the run — it
+          # produces zero jobs, which looks like a green build that did nothing.
+          echo "$matrix" | jq -e . > /dev/null \
+            || { echo "::error::generated matrix is not valid JSON: $matrix"; exit 1; }
+          {
+            echo "matrix=$matrix"
+            echo "arches=$arches"
+            echo "roles=$roles"
+          } >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+      # THE PUBLISH SWITCH. Three independent conditions, each of which alone
+      # forces a build-only run.
+      - name: Decide whether this run publishes
+        id: publish
+        env:
+          INPUT_MODE: ${{ inputs.mode || 'build-only' }}
+          INPUT_REQUIRE_RPM: ${{ inputs.require_rpm || 'true' }}
+          ROLES: ${{ steps.matrix.outputs.roles }}
+        run: |
+          set -euo pipefail
+          case "$INPUT_REQUIRE_RPM" in
+            true|false) ;;
+            *) echo "::error::require_rpm must be 'true' or 'false' (got '$INPUT_REQUIRE_RPM')"; exit 1 ;;
+          esac
+          publish=false
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            # A push or PR that republished (and first DELETED) the release
+            # would be a footgun even before fork PRs' read-only tokens made it
+            # fail halfway. Same rule as beta-build.yml.
+            reason="event is '$GITHUB_EVENT_NAME', not workflow_dispatch"
+          elif [ "$INPUT_MODE" != "release" ]; then
+            reason="mode='$INPUT_MODE'"
+          elif [ "$ROLES" != "daemon gui" ]; then
+            # A role subset is a smoke test, not a release. Publishing one
+            # would ship a release with no GUI (or no service) that the in-app
+            # updater would then find and offer.
+            reason="roles='$ROLES' — a release needs both halves"
+          else
+            publish=true
+            reason="mode=release on workflow_dispatch with both roles"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "require_rpm=$INPUT_REQUIRE_RPM" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish ($reason)"
+          echo "PUBLISH=$publish — $reason" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the run plan to the job summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WARP_VERSION: ${{ steps.version.outputs.warp_version }}
+          ARCHES: ${{ steps.matrix.outputs.arches }}
+          ROLES: ${{ steps.matrix.outputs.roles }}
+          REQUIRE_RPM: ${{ steps.publish.outputs.require_rpm }}
+          SDK_SOURCE: ${{ steps.sources.outputs.sdk_source }}
+          LINUX_SOURCE: ${{ steps.sources.outputs.linux_source }}
+        run: |
+          set -euo pipefail
+          {
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`$VERSION\` |"
+            echo "| internal | \`$WARP_VERSION\` |"
+            echo "| arches | \`$ARCHES\` |"
+            echo "| roles | \`$ROLES\` |"
+            echo "| UR_REQUIRE_RPM | \`$REQUIRE_RPM\` |"
+            echo "| sdk | \`$SDK_SOURCE\` |"
+            echo "| linux | \`$LINUX_SOURCE\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE CGO SDK — one job, both arches.
+  #
+  # This is all/build-linux.sh's first half, lifted out so the four packaging
+  # legs below do not each rebuild a byte-identical .so. The line it runs is
+  # the same line build-linux.sh runs:
+  #     (cd sdk/cgo && WARP_VERSION="$WARP_VERSION" make build_linux)
+  # and the steps below assert that build-linux.sh still agrees about the
+  # target name and the output path, so this job cannot quietly drift away from
+  # the script it stands in for.
+  #
+  # WHY THIS IS SIMPLER THAN beta-build.yml's SDK JOB, and it is worth knowing
+  # why rather than copying that file wholesale: beta-build.yml builds the
+  # FORK's sdk branch, whose cgo/go.mod carries four `replace ... => ../../<x>`
+  # directives — which is the entire reason it clones connect, glog and
+  # goidenticons as siblings and writes a RenderPngV2 shim. At the build repo's
+  # recorded pin there are no replace directives at all: the module graph
+  # resolves from proxy.golang.org against a COMMITTED cgo/go.sum, so there are
+  # no siblings to clone, no shim to write, and no `go mod tidy` to run. The
+  # guard below refuses the replace form rather than pretending to support it.
+  # ---------------------------------------------------------------------------
+  build-sdk:
+    name: Build the cgo SDK (amd64 + arm64)
+    needs: plan
+    runs-on: ubuntu-24.04
+    # Bounded on purpose: beta-build.yml lost runs to apt/mirror stalls that
+    # otherwise ran until GitHub's 6h default killed them.
+    timeout-minutes: 45
+    env:
+      WARP_VERSION: ${{ needs.plan.outputs.warp_version }}
+      UR_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+      UR_SDK_REF: ${{ inputs.sdk_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # `submodules:` is deliberately left at its default (false): `true` or
+      # `recursive` would drag in all seventeen (2.53 GB) for the one this job
+      # reads. Neither sdk nor linux has a .gitmodules of its own, so recursion
+      # would buy nothing even if it were cheap.
+      - name: Check out the sdk submodule over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local. .gitmodules spells the URLs `git@github.com:`
+          # and there is no ssh key on a runner; a repo-local insteadOf is
+          # silently ignored by the `git clone` submodule--helper spawns, and
+          # the job then hangs on an ssh handshake until the timeout above.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          # --depth 1 is safe even though the pin is not a branch tip: GitHub
+          # serves the exact SHA (allowAnySHA1InWant). The fallback is for a
+          # host that does not.
+          git submodule update --init --depth 1 sdk \
+            || git submodule update --init sdk
+          git -C sdk log -1 --format='sdk pin: %H %s'
+
+      - name: Override the sdk ref
+        if: env.UR_SDK_REF != ''
+        run: |
+          set -euo pipefail
+          git -C sdk fetch --depth 1 "https://github.com/${UR_SDK_REPO}.git" "$UR_SDK_REF"
+          git -C sdk checkout --detach FETCH_HEAD
+          git -C sdk log -1 --format='sdk overridden to: %H %s'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          # Without this, setup-go looks for a go.sum at the REPO ROOT, finds
+          # none, logs "Restore cache failed: Dependencies file is not found"
+          # and silently caches nothing — visible in beta-build.yml's own logs,
+          # where the sdk also lives in a subdirectory.
+          cache-dependency-path: sdk/cgo/go.sum
+
+      # THE ONE MODE THIS JOB CANNOT BUILD, refused in five seconds with the
+      # reason rather than 90 seconds later as an opaque Go error.
+      - name: Refuse a sibling-replace module graph
+        working-directory: sdk/cgo
+        env:
+          # go.mod's `go` directive is newer than some `stable` releases; let
+          # the toolchain fetch itself rather than failing on the version line.
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          n=$(go mod edit -json | jq '.Replace | length')
+          if [ "$n" != "0" ]; then
+            go mod edit -json | jq -r '.Replace[] | "  \(.Old.Path) => \(.New.Path)"'
+            echo "::error::sdk/cgo/go.mod carries $n replace directive(s) pointing at sibling checkouts."
+            {
+              echo "This job builds the sdk ALONE. A ref whose cgo/go.mod replaces"
+              echo "github.com/urnetwork/{sdk,connect,glog,goidenticons} with ../.. paths"
+              echo "needs those three trees checked out as siblings of sdk/ AND a"
+              echo "generated go.sum — that is what urnetwork-linux's beta-build.yml does"
+              echo "(see its 'Check out connect/glog/goidenticons dependency' steps and the"
+              echo "RenderPngV2 shim that only a moving dependency HEAD needs)."
+              echo ""
+              echo "The build repo's recorded sdk pin has NO replace directives: it resolves"
+              echo "the published /v2026 modules from proxy.golang.org against a committed"
+              echo "cgo/go.sum. Build a ref like that, or add the sibling apparatus here"
+              echo "deliberately rather than by accident."
+            } >&2
+            exit 1
+          fi
+          echo "no replace directives — the module graph resolves from the proxy"
+          # Belt and braces for the pin: go.sum is TRACKED at the recorded
+          # commit (all/build-linux.sh's "It is git-ignored and generated"
+          # message is stale for it, and is upstream's text to fix, not this
+          # workflow's). If a ref genuinely lacks one, write the sums for the
+          # existing build list — never `go mod tidy`, which would silently
+          # move dependency versions and defeat the point of a pinned build.
+          if [ ! -f go.sum ]; then
+            echo "::warning::cgo/go.sum absent at this ref — running 'go mod download all'"
+            go mod download all
+          fi
+
+      # Lifted verbatim from beta-build.yml. The Makefile's LINUX_*_CC default
+      # to `zig cc -target <arch>-linux-gnu.2.35`; putting a `zig` shim on PATH
+      # means the recipe runs UNMODIFIED — no CC override to drift out of sync
+      # with the Makefile, and the glibc pin stays where it is documented. A
+      # venv rather than `pip install --user` because Ubuntu 24.04's system
+      # python is PEP 668 externally-managed and refuses a user install.
+      - name: Install zig (PyPI ziglang, pinned)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/zigvenv"
+          "$RUNNER_TEMP/zigvenv/bin/pip" install --quiet "ziglang==${UR_ZIG_VERSION}"
+          sudo install -d /usr/local/bin
+          printf '#!/bin/sh\nexec %s -m ziglang "$@"\n' "$RUNNER_TEMP/zigvenv/bin/python" \
+            | sudo tee /usr/local/bin/zig > /dev/null
+          sudo chmod 0755 /usr/local/bin/zig
+          zig version
+
+      # Assert the environment AND the contract, instead of finding out inside
+      # a make recipe that chains with ';' and therefore exits 0 anyway.
+      - name: Assert the toolchain and the build-linux.sh contract
+        run: |
+          set -euo pipefail
+          fail=0
+          for tool in go zig zip make jq unzip; do
+            if command -v "$tool" > /dev/null 2>&1; then
+              echo "have $tool"
+            else
+              echo "::error::$tool is not on PATH"
+              fail=1
+            fi
+          done
+          # This job stands in for one line of all/build-linux.sh. If that line
+          # ever names a different make target, this job would keep building
+          # the old one and the legs below would package a stale .so.
+          grep -q 'make build_linux' all/build-linux.sh \
+            || { echo "::error::all/build-linux.sh no longer runs 'make build_linux' — this job is standing in for a line that moved"; fail=1; }
+          # UR_SDK_GLIBC_FLOOR is asserted on the artifact below. It is only
+          # meaningful if it is still the floor the packaging half declares.
+          grep -q "UR_GLIBC_FLOOR:-${UR_SDK_GLIBC_FLOOR}" all/linux/build-arch.sh \
+            || { echo "::error::all/linux/build-arch.sh no longer defaults UR_GLIBC_FLOOR to ${UR_SDK_GLIBC_FLOOR} — update UR_SDK_GLIBC_FLOOR in this workflow"; fail=1; }
+          exit $fail
+
+      - name: Build the SDK shared objects
+        working-directory: sdk/cgo
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          make build_linux
+          ls -la build/linux/amd64 build/linux/arm64
+
+      # Lifted from beta-build.yml, and its comment is worth keeping whole: the
+      # Makefile chains its recipes with '; \', so a failing `go build` does NOT
+      # fail the target — the trailing `cp` of the headers succeeds and make
+      # exits 0. On the windows line that is exactly how a compile error shipped
+      # a "successful" SDK job whose zip contained three headers and no library.
+      # `ls` and `test -s <zip>` both passed on that build. Assert on the
+      # ARTIFACT THAT MATTERS instead — and, because zig's glibc pin is not
+      # self-verifying (ziglang/zig#25415), assert the floor here rather than
+      # discovering it two jobs later in the daemon's meson gate.
+      - name: Verify the SDK actually produced shared objects
+        working-directory: sdk/cgo
+        run: |
+          set -uo pipefail
+          fail=0
+          for arch in amd64 arm64; do
+            so="build/linux/$arch/libURnetworkSdk.so"
+            if [ ! -f "$so" ]; then
+              echo "::error::$so was not produced — the cgo build failed (see the make output above)"
+              fail=1
+              continue
+            fi
+            size=$(stat -c %s "$so")
+            echo "$so: $size bytes"
+            # a real c-shared build of this sdk is tens of MB; anything tiny
+            # means a truncated or stub link, which would fail far downstream
+            if [ "$size" -lt 5000000 ]; then
+              echo "::error::$so is only $size bytes — implausibly small for the sdk"
+              fail=1
+            fi
+            machine=$(readelf -h "$so" | sed -n 's/^ *Machine: *//p')
+            echo "$so machine: $machine"
+            case "$arch:$machine" in
+              amd64:*X86-64*|arm64:*AArch64*) ;;
+              *) echo "::error::$so reports machine '$machine', which is not $arch"; fail=1 ;;
+            esac
+            maxsym=$(readelf --dyn-syms -W "$so" | { grep -o 'GLIBC_[0-9.]*' || true; } \
+                     | sed 's/^GLIBC_//' | sort -V | tail -n1)
+            echo "$so: max GLIBC_${maxsym:-none}"
+            if [ -n "$maxsym" ] && [ "$(printf '%s\n%s\n' "$maxsym" "$UR_SDK_GLIBC_FLOOR" | sort -V | tail -n1)" != "$UR_SDK_GLIBC_FLOOR" ]; then
+              echo "::error::$so references GLIBC_${maxsym}, above the declared ${UR_SDK_GLIBC_FLOOR} floor — the zig -gnu.${UR_SDK_GLIBC_FLOOR} pin did not hold (ziglang/zig#25415)"
+              fail=1
+            fi
+            # the .hpp does #include "urnetwork_sdk.h" relative to itself, so a
+            # missing .h is a compile error in the packaging legs, not a link error
+            for h in urnetwork_sdk.h urnetwork_sdk.hpp; do
+              [ -f "build/linux/$arch/$h" ] || { echo "::error::build/linux/$arch/$h missing"; fail=1; }
+            done
+          done
+          # And the ZIP must carry them, because the zip — not the build tree —
+          # is what the packaging legs unpack through the linux repo's
+          # app/scripts/fetch-deps.sh. The zip step is the LAST command of the
+          # same ';'-chained recipe, so it can fail on its own.
+          for arch in amd64 arm64; do
+            if ! unzip -l build/URnetworkSdkLinux.zip | grep -q "linux/$arch/libURnetworkSdk.so"; then
+              echo "::error::URnetworkSdkLinux.zip is missing linux/$arch/libURnetworkSdk.so"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Upload the SDK zip
+        uses: actions/upload-artifact@v4
+        with:
+          # Same artifact name the linux repo's CI uses, so the same
+          # `gh run download -n urnetwork-sdk-linux` works against either.
+          name: urnetwork-sdk-linux
+          path: sdk/cgo/build/URnetworkSdkLinux.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # ONE JOB PER (role, arch). Each runs the repo's real entry point,
+  # all/build-linux.sh, with three environment knobs:
+  #
+  #   ARCHES=<arch>            build one arch (the script already took this)
+  #   ROLES=<role>             build one half   (new, defaulted; see build.sh)
+  #   UR_SKIP_SDK_BUILD=1      the .so was built by build-sdk (new, defaulted)
+  #
+  # Everything else — the packaging preflights, the version handling, the stale
+  # sweep, the .so/zip assertions, the container build, meson, the packaging
+  # scripts, verify.sh — runs exactly as it does on the release host. That is
+  # the point: this exercises the pipeline rather than reimplementing it.
+  #
+  # EXTERNAL_WARP_VERSION IS MANDATORY HERE, not a convenience. build-linux.sh
+  # auto-detects the version from `git -C linux branch --show-current` and
+  # expects a `v<version>` branch; a submodule is checked out DETACHED, so that
+  # returns empty and the script exits 1 by design.
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.role }} / ${{ matrix.arch }}
+    needs: [plan, build-sdk]
+    runs-on: ${{ matrix.runner }}
+    # Generous: a cold runner builds an Ubuntu image from scratch (apt, no
+    # layer cache between runs) before it compiles anything, and the GUI leg
+    # compiles the whole gtkmm-consuming app and then squashfs's an AppDir.
+    timeout-minutes: 90
+    strategy:
+      # Let every leg report. It does NOT let a partial set publish: `release`
+      # needs this job, and a matrix job is only "success" when all legs are.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      EXTERNAL_WARP_VERSION: ${{ needs.plan.outputs.version }}
+      UR_REQUIRE_RPM: ${{ needs.plan.outputs.require_rpm }}
+      UR_LINUX_REPO: ${{ inputs.linux_repo || 'urnetwork/linux' }}
+      UR_LINUX_REF: ${{ inputs.linux_ref || '' }}
+      # ARCH and ROLE are deliberately NOT job-level env. They are the names
+      # build-arch.sh reads INSIDE the container, handed to it by build.sh's
+      # own `-e ARCH=… -e ROLE=…`; setting them on the host too would put two
+      # sources of the same truth in one process tree. The assertion step
+      # further down sets them for itself.
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the linux submodule over https
+        run: |
+          set -euo pipefail
+          # See build-sdk for why this rewrite has to be global.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 linux \
+            || git submodule update --init linux
+          git -C linux log -1 --format='linux pin: %H %s'
+
+      # The knob that lets a CI point the pipeline at the fork's linux tree.
+      # NOT SRC_LINUX: all/stage-local-repos.sh would then also try to resolve
+      # sdk, connect, glog and goidenticons from the same SRC_HOME and hard-fail
+      # on the first one it cannot find. Replacing the checkout in place leaves
+      # stage_local_repos the no-op it is on the release host.
+      - name: Override the linux ref
+        if: env.UR_LINUX_REF != ''
+        run: |
+          set -euo pipefail
+          git -C linux fetch --depth 1 "https://github.com/${UR_LINUX_REPO}.git" "$UR_LINUX_REF"
+          git -C linux checkout --detach FETCH_HEAD
+          git -C linux log -1 --format='linux overridden to: %H %s'
+
+      - name: Download the SDK zip
+        uses: actions/download-artifact@v4
+        with:
+          name: urnetwork-sdk-linux
+          path: sdk-zip
+
+      # Put the SDK where build-linux.sh looks for it, then prove it is there.
+      # The `sdk` submodule itself is NOT checked out in this job — 253 MB for
+      # a directory whose only role now is to hold build/ output.
+      - name: Stage the SDK into sdk/cgo/build
+        run: |
+          set -euo pipefail
+          # Tripwires: this step hardcodes paths that belong to other files.
+          # If either moves, staging silently puts the SDK somewhere the build
+          # does not read and the failure surfaces much later as a missing .so.
+          grep -q 'sdk/cgo/build/URnetworkSdkLinux.zip' all/build-linux.sh \
+            || { echo "::error::all/build-linux.sh no longer expects the sdk zip at sdk/cgo/build/URnetworkSdkLinux.zip"; exit 1; }
+          grep -q 'UR_SKIP_SDK_BUILD' all/build-linux.sh \
+            || { echo "::error::all/build-linux.sh has no UR_SKIP_SDK_BUILD knob — this job would rebuild the SDK without Go or zig installed"; exit 1; }
+          grep -q 'ROLES:-daemon gui' all/linux/build.sh \
+            || { echo "::error::all/linux/build.sh has no ROLES knob — the role split below would silently build both halves"; exit 1; }
+          mkdir -p sdk/cgo/build
+          mv sdk-zip/URnetworkSdkLinux.zip sdk/cgo/build/URnetworkSdkLinux.zip
+          # Unpack in place: the zip's own layout is linux/<arch>/…, which is
+          # exactly the tree `make build_linux` would have left behind, and
+          # exactly what build-linux.sh's per-arch .so assertions read.
+          unzip -q -o sdk/cgo/build/URnetworkSdkLinux.zip -d sdk/cgo/build
+          fail=0
+          for a in amd64 arm64; do
+            so="sdk/cgo/build/linux/$a/libURnetworkSdk.so"
+            if [ -s "$so" ]; then
+              echo "staged $so ($(stat -c %s "$so") bytes)"
+            else
+              echo "::error::$so missing or empty after staging the SDK zip"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # Diagnostics, printed before anything expensive. The two most common
+      # runner-specific failures in this job are "no docker" and "no disk";
+      # both are two lines of output away from being obvious.
+      - name: Show the runner's docker and disk
+        run: |
+          set -euo pipefail
+          docker version
+          uname -m
+          df -h /
+
+      # ------------------------------------------------------------------
+      # THE ACTUAL BUILD. Everything below the next line is this repo's code.
+      # ------------------------------------------------------------------
+      - name: Build the linux artifacts (all/build-linux.sh)
+        env:
+          ARCHES: ${{ matrix.arch }}
+          ROLES: ${{ matrix.role }}
+          # build-sdk built it; do not rebuild it (and do not require Go, zig
+          # or the sdk submodule in this job to do so).
+          UR_SKIP_SDK_BUILD: "1"
+        run: ./all/build-linux.sh
+
+      - name: Reclaim ownership of the container's output
+        run: |
+          set -euo pipefail
+          # build-arch.sh runs as root inside the container and writes /out
+          # through a bind mount, so every artifact lands root-owned on the
+          # runner. Nothing later needs to modify them, but the workspace
+          # cleanup between steps does, and a root-owned tree is how a green
+          # build turns into a red "permission denied" during teardown.
+          sudo chown -R "$(id -u):$(id -g)" out
+          ls -la out/desktop/linux
+
+      # build.sh already asserted the artifact names in-container and again on
+      # the host. This asserts something build.sh cannot: that the ROLE SPLIT
+      # actually split. A gui leg that produced a .deb would mean ROLES did
+      # nothing and both halves ran in every job — which would still be green,
+      # just twice as slow and with two containers racing one OUT_DIR.
+      - name: Assert this leg produced its role's artifacts and only those
+        working-directory: out/desktop/linux
+        env:
+          V: ${{ needs.plan.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          ROLE: ${{ matrix.role }}
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          fail=0
+          case "$ARCH" in
+            amd64) rpm_arch=x86_64 ;;
+            arm64) rpm_arch=aarch64 ;;
+            *) echo "::error::unexpected ARCH '$ARCH'"; exit 1 ;;
+          esac
+          if [ "$ROLE" = daemon ]; then
+            required=("urnetwork-daemon_${V}_${ARCH}.deb" "urnetwork-daemon-${V}-${ARCH}.install.tar.gz")
+            forbidden=(URnetwork-*.AppImage URnetwork-*.AppImage.zsync)
+          else
+            required=("URnetwork-${V}-${ARCH}.AppImage" "URnetwork-${V}-${ARCH}.AppImage.zsync")
+            forbidden=(urnetwork-daemon_*.deb urnetwork-daemon-*.install.tar.gz urnetwork-daemon*.rpm urnetwork-daemon*.pkg.tar.zst)
+          fi
+          for f in "${required[@]}"; do
+            if [ -s "$f" ]; then
+              echo "ok  $f ($(stat -c %s "$f") bytes)"
+            else
+              echo "::error::missing or empty: $f"
+              fail=1
+            fi
+          done
+          for f in "${forbidden[@]}"; do
+            echo "::error::$f was produced by the '$ROLE' leg — the ROLES split did not take effect"
+            fail=1
+          done
+          # The .rpm, with the tolerance build-arch.sh gives it: it is built
+          # LAST, after the .deb and the tarball are already on disk, so a bad
+          # rpm cannot cost them. UR_REQUIRE_RPM=true turns the warning into a
+          # gate — which is what the linux repo's own CI runs with, and this
+          # workflow's default.
+          if [ "$ROLE" = daemon ]; then
+            rpm="urnetwork-daemon-${V}.${rpm_arch}.rpm"
+            if [ -s "$rpm" ]; then
+              echo "ok  $rpm ($(stat -c %s "$rpm") bytes)"
+            elif [ "$UR_REQUIRE_RPM" = "true" ]; then
+              echo "::error::no $rpm and UR_REQUIRE_RPM=true"
+              fail=1
+            else
+              echo "::warning::no $rpm — UR_REQUIRE_RPM is not 'true', so the build carried on without it"
+            fi
+          fi
+          exit $fail
+
+      - name: Upload the ${{ matrix.role }}/${{ matrix.arch }} artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-build-linux-${{ matrix.role }}-${{ matrix.arch }}
+          # Explicit patterns rather than the whole directory, and the
+          # .sha256/.asc sidecars the packaging scripts write next to their
+          # output are deliberately NOT among them — the same choice run.sh
+          # makes when it globs OUT_DIR to upload.
+          path: |
+            out/desktop/linux/*.deb
+            out/desktop/linux/*.install.tar.gz
+            out/desktop/linux/*.rpm
+            out/desktop/linux/*.pkg.tar.zst
+            out/desktop/linux/*.AppImage
+            out/desktop/linux/*.AppImage.zsync
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # THE RELEASE, on the fork.
+  #
+  # The minimal honest equivalent of run.sh's Linux uploads: the same six asset
+  # names, taken from the same scripts, published to whatever repository this
+  # workflow is running in. It does not touch run.sh, it cannot reach the
+  # apple/android/windows legs, and it publishes a PRERELEASE rather than
+  # run.sh's draft — a draft exists there because the macOS host uploads many
+  # platforms over hours and publishes at the end, whereas this run either has
+  # the whole Linux set or does not publish at all.
+  #
+  # ASSET NAMES ARE A CONTRACT. The packaging scripts decide them; this job
+  # only asserts them. The one rename it does perform is run.sh's own:
+  #     github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" \
+  #         "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+  # ---------------------------------------------------------------------------
