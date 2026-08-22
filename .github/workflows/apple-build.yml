@@ -1,0 +1,809 @@
+name: Apple build + test (iOS + macOS)
+
+# =============================================================================
+# WHAT THIS IS
+#
+# The Apple leg of all/run.sh, run on GitHub runners — UNSIGNED.
+#
+# run.sh's apple leg archives, signs and uploads: it assembles an App Store
+# Connect .p8 (all/run.sh:1326-1336), runs
+# `xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH …` for iOS
+# (:1339-1341) and macOS (:1365-1367), exports through ExportOptions.plist,
+# and hands the result to `altool --upload-app` (:1348-1349, :1369-1370). Every
+# one of those needs a credential, and none of them is in scope here.
+#
+# The unsigned equivalent already exists in the apple repo and is what this
+# calls: `apple/build.sh`, whose own header says it is "the local equivalent of
+# what build/all/run.sh does for apple" and that "The pipeline archives, signs
+# and uploads; this builds unsigned, so it verifies compilation and linking
+# only." It regenerates Localizable.xcstrings from the localization store, then
+# runs `xcodebuild … -destination 'generic/platform=iOS' … CODE_SIGNING_ALLOWED=NO
+# build`, the size gate, and the same for macOS. NO Apple ID, no keychain, no
+# provisioning profile, no App Store Connect key, and no -allowProvisioningUpdates.
+#
+# It then runs the half build.sh explicitly does not: the tests. See "WHAT IS
+# TESTED" below — the test half is secret-free too, but only for one of the two
+# test targets, and the workflow says which and why rather than running both
+# and watching one fail.
+#
+# -----------------------------------------------------------------------------
+# THE JOB GRAPH, AND THE ONE THING THAT MAKES IT EXPENSIVE
+#
+#   plan ──> build-sdk-apple ──> build-apple
+#   (ubuntu)   (macos-15)          (macos-15)
+#
+#   plan            ~20 s          ubuntu-24.04, 1x
+#   build-sdk-apple ~35-55 min     macos-15
+#   build-apple     ~35-55 min     macos-15
+#
+# THE XCFRAMEWORKS ARE A HARD PREREQUISITE, and they are the expensive half —
+# not xcodebuild. The app links the Go SDK as SwiftPM binaryTargets pointing
+# OUTSIDE the apple repo at a sibling checkout:
+#
+#   apple/app/URnetworkSdk/Package.swift           path "../../../sdk/build/apple/URnetworkSdk.xcframework"
+#   apple/app/URnetworkExtensionSdk/Package.swift  path "../../../sdk/build/apple/URnetworkExtensionSdk.xcframework"
+#
+# SwiftPM resolves a binaryTarget path against the package root, so `../../../`
+# from apple/app/<Pkg>/ is the BUILD REPO ROOT — i.e. <build>/sdk/build/apple/,
+# exactly this repo's submodule layout. Both packages are registered on the
+# project and both products are linked (the app against URnetworkSdk, the
+# URnetworkVPN app-extension against URnetworkExtensionSdk), so package
+# RESOLUTION fails — before any compilation — unless BOTH exist. Neither is
+# committed; apple/test-main.sh encodes the same precondition
+# (`[ -d "$root/sdk/build/apple/URnetworkSdk.xcframework" ] || die "Apple SDK is missing"`).
+#
+# AND THE CHEAP SHORTCUT DOES NOT EXIST. `URnetworkExtensionSdk` is never
+# published: sdk/build/Makefile:141-145 zips only URnetworkSdk.xcframework, so
+# run.sh:1237 has only that one asset to upload and no release carries the
+# extension one. Downloading the published URnetworkSdk zip and building only
+# the extension framework would also be wrong on its own terms — the released
+# asset is a tagged snapshot, so the app target would compile against a stale
+# SDK and CI would stop catching exactly the API breaks an apple job exists to
+# catch. The two binds share almost no Go build cache anyway, because
+# `-tags ios_extension` changes the build config hash for every package in the
+# graph. So both are built here, from the recorded sdk pin, every run.
+#
+# COST. Both jobs run on macOS. On a PUBLIC repository standard macOS runners
+# are billed at $0, so the real constraints are wall clock and the
+# five-concurrent-macOS-job cap — not money. If this repo (or a fork of it)
+# were ever made PRIVATE, macOS minutes bill at 10x and one full run of this
+# workflow would cost roughly 700-1100 billed minutes. That is the number to
+# weigh before turning the `push` trigger on for a private fork.
+#
+# -----------------------------------------------------------------------------
+# WHAT IS TESTED, AND THE ONE TARGET THAT IS DELIBERATELY SKIPPED
+#
+# The URnetwork scheme's TestAction wires two test targets:
+#
+#   networkTests      10 files of pure unit tests (globe geometry, world
+#                     topology, transport stats, VPN reconciliation, tunnel
+#                     memory bounds, presentation lifecycle, …). Simulator
+#                     runs need no signing and the xcframeworks carry an
+#                     iossimulator/arm64 slice, so these RUN HERE.
+#
+#   networkUITests    XCUITest. `testMainAcceptance` calls
+#                     requiredEnvironment("UR_ACCEPT_USER") and
+#                     ("UR_ACCEPT_PASS") — live account credentials. Absent,
+#                     the helper THROWS and the test FAILS; it does not skip.
+#                     So this target is excluded with -skip-testing, and that
+#                     is the honest answer rather than a job that is red on
+#                     every run for a reason unrelated to the code.
+#
+# apple/test-main.sh is the same story at the script level: it is the product
+# acceptance suite, it reads an acceptance vault, and it is out of scope.
+#
+# -----------------------------------------------------------------------------
+# SUBMODULES
+#
+#   sdk           (253 MB) build-sdk-apple only
+#   apple         (43 MB)  build-apple
+#   localizations (1.1 MB) build-apple
+#
+# connect, glog and goidenticons are NOT needed: at the recorded sdk pin
+# build/go.mod has NO replace directives and requires the published
+# github.com/urnetwork/sdk/v2026, so the module graph resolves from
+# proxy.golang.org against a committed build/go.sum. The guard below refuses
+# the replace form, as linux-build.yml:575-601 does.
+#
+# THE SUBMODULE URLS ARE SSH — every checkout does the GLOBAL rewrite first,
+# per linux-build.yml:540-553.
+#
+# -----------------------------------------------------------------------------
+# NOT ATTEMPTED HERE, DELIBERATELY
+#
+#   * `xcodebuild archive` / `-exportArchive` / ExportOptions.plist, and
+#     therefore any .ipa or .pkg. Those carry -allowProvisioningUpdates and
+#     produce SIGNED artifacts; they need an Apple Developer account.
+#   * TestFlight / App Store upload (`altool --upload-app`). Needs an App Store
+#     Connect API key.
+#   * apple/test-main.sh, the acceptance suite. Needs a vault credential, a
+#     signed macOS build, and a real network egress change to assert on.
+#   * networkUITests — see above.
+#   * Any release job. Nothing here writes.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, e.g. 2026.8.20-1024590520. Empty = derive a fork beta version. Only affects the SDK's baked Version string."
+        type: string
+        default: ""
+      sdk_repo:
+        description: "owner/repo to take the sdk tree from (only used when sdk_ref is set)"
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        description: "Branch/tag/sha for the sdk tree. Empty = the recorded submodule pin. See the guard in build-sdk-apple."
+        type: string
+        default: ""
+      apple_repo:
+        description: "owner/repo to take the apple tree from (only used when apple_ref is set)"
+        type: string
+        default: "urnetwork/apple"
+      apple_ref:
+        description: "Branch/tag/sha for the apple tree. Empty = the recorded submodule pin."
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: ""
+      sdk_repo:
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        type: string
+        default: ""
+      apple_repo:
+        type: string
+        default: "urnetwork/apple"
+      apple_ref:
+        type: string
+        default: ""
+  push:
+    branches:
+      - all-platform-ci
+      - upstream/all-platform-ci
+  pull_request:
+    branches:
+      - main
+      - all-platform-ci
+      - upstream/all-platform-ci
+
+permissions:
+  contents: read
+  # the version derive step reads this run's created_at through the actions api
+  actions: read
+
+concurrency:
+  group: apple-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# THE RUNNER LABEL, once, for both macOS jobs below. `runs-on` cannot read the
+# `env` context, so it is spelled out at each job rather than set here — but the
+# reasoning is one reasoning and belongs in one place:
+#   * macos-15 (arm64), pinned deliberately.
+#   * NOT macos-14: it carries the deprecation badge.
+#   * NOT macos-latest: it now resolves to macos-26 / Xcode 26, which would move
+#     under the project without anyone changing this file.
+#   * macos-15's DEFAULT Xcode is 16.4, giving the iOS 18.5 and macOS 15.5 SDKs
+#     and iPhone 16 simulators on iOS 18.5 and 18.6 — comfortably above what the
+#     project asks for.
+env:
+  # go <= 1.26 is a hard requirement for the gomobile half, not a preference:
+  # sdk/build/Makefile:110-112 says "gomobile/gobind must be built with go <=
+  # 1.26 -- the go 1.27 runtime fatals when this GODEBUG is set", the GODEBUG
+  # being gotypesalias=0 which build_apple exports at :115. Do NOT replace this
+  # with `stable` the way linux-build.yml:566 can afford to. It is also exactly
+  # what all/run.sh:213 requires of the release host.
+  UR_GO_VERSION: "1.26.6"
+  # Matches the release host (all/run.sh:221-227). Used only for the
+  # localization regeneration, whose one dependency is js-yaml.
+  UR_NODE_VERSION: "24.14.1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Decided once, on a 1x runner rather than a macOS one: a macOS job whose
+  # first minute is `gh api` and `date` would be a waste of the concurrency
+  # slot as well as the wall clock.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      warp_version: ${{ steps.version.outputs.warp_version }}
+      sdk_source: ${{ steps.sources.outputs.sdk_source }}
+      apple_source: ${{ steps.sources.outputs.apple_source }}
+    steps:
+      # No submodules: this job only reads the gitlink SHAs.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # DELIBERATELY THE SAME DERIVATION AS linux-build.yml:317-356, spelled
+      # out again rather than shared, so this file stays adoptable on its own
+      # and every line of it is covered by shell-lint.yml.
+      #
+      # On this platform the version reaches exactly one place: the
+      # `-ldflags "-X github.com/urnetwork/sdk.Version=…"` the gomobile binds
+      # bake into both xcframeworks (sdk/build/Makefile:127 and :137). The
+      # app's own CFBundleVersion comes from the project, not from here.
+      - name: Derive the version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+            echo "version pinned by workflow input: $version"
+          else
+            created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            base=$(date -u -d "$created" '+%Y.%-m.%-d')
+            founded=$(date -u -d "2023-05-23" +%s)
+            created_epoch=$(date -u -d "$created" +%s)
+            code=$(( (created_epoch - founded) * 10 ))
+            version="${base}-${code}-beta"
+            echo "run created $created -> version $version (code $code)"
+          fi
+          case "$version" in
+            *[!A-Za-z0-9._+-]*|'')
+              echo "::error::version '$version' must be non-empty and contain only [A-Za-z0-9._+-]"
+              exit 1
+              ;;
+          esac
+          # WARP_VERSION, the internal spelling (last '-' becomes '+'), mirroring
+          # all/build-linux.sh's derivation.
+          case "$version" in
+            *-*) warp="${version%-*}+${version##*-}" ;;
+            *)   warp="$version" ;;
+          esac
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "warp_version=$warp" >> "$GITHUB_OUTPUT"
+          echo "EXTERNAL_WARP_VERSION=$version  WARP_VERSION=$warp"
+
+      - name: Resolve which sdk and apple trees this run builds
+        id: sources
+        env:
+          INPUT_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+          INPUT_SDK_REF: ${{ inputs.sdk_ref || '' }}
+          INPUT_APPLE_REPO: ${{ inputs.apple_repo || 'urnetwork/apple' }}
+          INPUT_APPLE_REF: ${{ inputs.apple_ref || '' }}
+        run: |
+          set -euo pipefail
+          pin_sdk=$(git ls-tree HEAD sdk | awk '{print $3}')
+          pin_apple=$(git ls-tree HEAD apple | awk '{print $3}')
+          [ -n "$pin_sdk" ]   || { echo "::error::no 'sdk' submodule gitlink at HEAD"; exit 1; }
+          [ -n "$pin_apple" ] || { echo "::error::no 'apple' submodule gitlink at HEAD"; exit 1; }
+          if [ -n "$INPUT_SDK_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_SDK_REPO is a step env var
+            sdk_source="${INPUT_SDK_REPO}@${INPUT_SDK_REF} (override)"
+          else
+            sdk_source="urnetwork/sdk@${pin_sdk} (submodule pin)"
+          fi
+          if [ -n "$INPUT_APPLE_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_APPLE_REPO is a step env var
+            apple_source="${INPUT_APPLE_REPO}@${INPUT_APPLE_REF} (override)"
+          else
+            apple_source="urnetwork/apple@${pin_apple} (submodule pin)"
+          fi
+          echo "sdk_source=$sdk_source"     >> "$GITHUB_OUTPUT"
+          echo "apple_source=$apple_source" >> "$GITHUB_OUTPUT"
+          echo "sdk:   $sdk_source"
+          echo "apple: $apple_source"
+
+      - name: Write the run plan to the job summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WARP_VERSION: ${{ steps.version.outputs.warp_version }}
+          SDK_SOURCE: ${{ steps.sources.outputs.sdk_source }}
+          APPLE_SOURCE: ${{ steps.sources.outputs.apple_source }}
+        run: |
+          set -euo pipefail
+          {
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`$VERSION\` |"
+            echo "| internal (baked into both xcframeworks) | \`$WARP_VERSION\` |"
+            echo "| sdk | \`$SDK_SOURCE\` |"
+            echo "| apple | \`$APPLE_SOURCE\` |"
+            echo "| signing | none — CODE_SIGNING_ALLOWED=NO, no .ipa/.pkg, no upload |"
+            echo "| tests | networkTests on the simulator; networkUITests skipped (needs UR_ACCEPT_USER/PASS) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE TWO XCFRAMEWORKS. macOS, because `gomobile bind -target ios/…,macos/…`
+  # needs Xcode.
+  #
+  # This is `make init build_apple` — what apple/build.sh:28-31 runs under
+  # BUILD_SDK=1 — with ONE deliberate substitution, which the sdk repo itself
+  # documents: `make init` ends with `go clean -cache && go clean -modcache`
+  # (Makefile:189-190), which throws away whatever actions/setup-go just
+  # restored AND its own two `go mod download`s. Makefile:173-175 says setup
+  # should use `init_tools` "so acceptance builds do not install tools or clean
+  # shared Go caches". So: init_tools, then the single `go get` that `init`
+  # adds on top, then build_apple.
+  #
+  # `init_tools` alone is NOT sufficient and fails loudly rather than subtly: at
+  # the recorded pin sdk/build/go.mod has no golang.org/x/mobile requirement and
+  # go.sum has no x/mobile lines, so gomobile stops in the first seconds with
+  # "gomobile bind requires golang.org/x/mobile in the current module, but it is
+  # not in the module dependency graph".
+  #
+  # build_apple runs TWO binds over ios/arm64, iossimulator/arm64, macos/arm64
+  # and macos/amd64 — eight target builds of a module pulling gvisor,
+  # pion/webrtc and quic-go — and then gates on check_apple_size.sh's 56 MiB /
+  # 53 MiB ceilings, which exit 1. That gate is a real one: it can fail a PR on
+  # artifact size alone, which is the point of it.
+  # ---------------------------------------------------------------------------
+  build-sdk-apple:
+    name: Build the apple xcframeworks (iOS + iOS simulator + macOS)
+    needs: plan
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      WARP_VERSION: ${{ needs.plan.outputs.warp_version }}
+      UR_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+      UR_SDK_REF: ${{ inputs.sdk_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the sdk submodule over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 sdk \
+            || git submodule update --init sdk
+          git -C sdk log -1 --format='sdk pin: %H %s'
+
+      - name: Override the sdk ref
+        if: env.UR_SDK_REF != ''
+        run: |
+          set -euo pipefail
+          git -C sdk fetch --depth 1 "https://github.com/${UR_SDK_REPO}.git" "$UR_SDK_REF"
+          git -C sdk checkout --detach FETCH_HEAD
+          git -C sdk log -1 --format='sdk overridden to: %H %s'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # PINNED, not `stable` — see UR_GO_VERSION above. Go is NOT
+          # preinstalled on the macOS runner image, so this step is mandatory
+          # rather than a version preference.
+          go-version: ${{ env.UR_GO_VERSION }}
+          cache-dependency-path: sdk/build/go.sum
+
+      - name: Refuse a sibling-replace module graph
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          n=$(go mod edit -json | jq '.Replace | length')
+          if [ "$n" != "0" ]; then
+            go mod edit -json | jq -r '.Replace[] | "  \(.Old.Path) => \(.New.Path)"'
+            echo "::error::sdk/build/go.mod carries $n replace directive(s) pointing at sibling checkouts."
+            {
+              echo "This job builds the sdk ALONE. A ref whose build/go.mod replaces"
+              echo "github.com/urnetwork/{sdk,connect,glog,goidenticons} with ../.. paths"
+              echo "needs those trees checked out as siblings of sdk/ AND a generated"
+              echo "go.sum. The build repo's recorded sdk pin has NO replace directives:"
+              echo "it requires the published github.com/urnetwork/sdk/v2026 and resolves"
+              echo "from proxy.golang.org against a committed build/go.sum."
+              echo ""
+              echo "Build a ref like that, or add the sibling apparatus here deliberately"
+              echo "rather than by accident."
+            } >&2
+            exit 1
+          fi
+          echo "no replace directives — the module graph resolves from the proxy"
+
+      - name: Assert the toolchain and the Makefile contract
+        run: |
+          set -euo pipefail
+          fail=0
+          for tool in go make zip unzip jq xcodebuild; do
+            if command -v "$tool" > /dev/null 2>&1; then
+              echo "have $tool"
+            else
+              echo "::error::$tool is not on PATH"
+              fail=1
+            fi
+          done
+          xcodebuild -version
+          # This job stands in for the make target apple/build.sh:30 invokes
+          # under BUILD_SDK=1.
+          grep -q '^build_apple:' sdk/build/Makefile \
+            || { echo "::error::sdk/build/Makefile has no 'build_apple' target — this job is standing in for a recipe that moved"; fail=1; }
+          grep -q '^init_tools:' sdk/build/Makefile \
+            || { echo "::error::sdk/build/Makefile has no 'init_tools' target — this job would have to fall back to 'make init', which wipes the Go caches"; fail=1; }
+          # build_apple's last gate, and the script the APP job also needs — it
+          # lives in the sdk submodule, which the app job does not check out, so
+          # it travels in this job's artifact.
+          [ -x sdk/build/check_apple_size.sh ] \
+            || { echo "::error::sdk/build/check_apple_size.sh is missing or not executable at this sdk ref"; fail=1; }
+          exit $fail
+
+      - name: Install the pinned gomobile toolchain (make init_tools)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          make init_tools
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          ls -la "$HOME/go/bin"
+
+      # The single step `make init` does that `init_tools` does not, without the
+      # cache wipe that follows it there. This REWRITES sdk/build/go.mod and
+      # go.sum, leaving the sdk submodule dirty — harmless for a build-only run,
+      # but it must come after any submodule-cleanliness gate.
+      - name: Add golang.org/x/mobile to the build module (the one half of `make init` that is needed)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          # Read the pin out of the Makefile rather than hardcoding it here, so
+          # GOMOBILE_VERSION has exactly one home.
+          gomobile_version=$(sed -n 's/^GOMOBILE_VERSION *?= *//p' Makefile | head -n1)
+          [ -n "$gomobile_version" ] \
+            || { echo "::error::could not read GOMOBILE_VERSION from sdk/build/Makefile"; exit 1; }
+          echo "gomobile pin: $gomobile_version"
+          go get "golang.org/x/mobile/bind@${gomobile_version}"
+          git -C . diff --stat -- go.mod go.sum || true
+
+      - name: Build both xcframeworks (make build_apple)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          make build_apple
+          ls -la apple
+
+      # build_apple is a ';'-chained recipe opened with `set -e`, and it carries
+      # its own `test -d` after each bind — but the final publishing step is a
+      # `mv`, and the slices are what the app actually links. Assert on the
+      # published tree and on the three slices the two consumers need:
+      # ios-arm64 (the device build), ios-arm64-simulator (the TEST build) and
+      # a macos slice (the mac app).
+      - name: Verify both xcframeworks and the slices the app links
+        working-directory: sdk/build
+        run: |
+          set -uo pipefail
+          fail=0
+          for fw in URnetworkSdk URnetworkExtensionSdk; do
+            dir="apple/${fw}.xcframework"
+            if [ ! -d "$dir" ]; then
+              echo "::error::$dir was not produced — the gomobile bind failed (see the make output above)"
+              fail=1
+              continue
+            fi
+            [ -f "$dir/Info.plist" ] \
+              || { echo "::error::$dir has no Info.plist — it is not a valid xcframework"; fail=1; }
+            # An xcframework's slice directories are named <platform>-<archs>[-<variant>].
+            for slice in ios-arm64 ios-arm64-simulator; do
+              if [ -d "$dir/$slice" ]; then
+                echo "ok  $dir/$slice"
+              else
+                echo "::error::$dir is missing the '$slice' slice"
+                echo "  slices present:"
+                find "$dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sed 's/^/    /'
+                fail=1
+              fi
+            done
+            # The macOS slice's directory name carries the arch list, so match
+            # on the prefix rather than an exact name.
+            if find "$dir" -mindepth 1 -maxdepth 1 -type d -name 'macos-*' | grep -q .; then
+              echo "ok  $dir macos-* slice"
+            else
+              echo "::error::$dir has no macos-* slice — the macOS app could not link it"
+              fail=1
+            fi
+            # The device binary is what check_apple_size.sh measures and what
+            # the app links; a slice directory with no Mach-O in it is the
+            # shape a half-finished bind leaves behind.
+            bin="$dir/ios-arm64/${fw}.framework/${fw}"
+            if [ -s "$bin" ]; then
+              echo "ok  $bin ($(stat -f %z "$bin") bytes)"
+            else
+              echo "::error::$bin missing or empty"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # macOS .framework bundles inside an xcframework contain
+      # Versions/Current symlinks, and actions/upload-artifact does NOT preserve
+      # symlinks — it follows them, which both inflates the artifact and breaks
+      # the bundle layout Xcode expects. Tar first, untar in the app job.
+      #
+      # check_apple_size.sh rides along in the same tar: apple/build.sh:39-42
+      # invokes it as "$root/sdk/build/check_apple_size.sh", and the app job
+      # does not check out the 253 MB sdk submodule.
+      - name: Tar the xcframeworks for transport
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/urnetwork-sdk-apple.tar.gz" \
+            -C sdk/build \
+            apple/URnetworkSdk.xcframework \
+            apple/URnetworkExtensionSdk.xcframework \
+            check_apple_size.sh
+          ls -la "$RUNNER_TEMP/urnetwork-sdk-apple.tar.gz"
+          tar -tzf "$RUNNER_TEMP/urnetwork-sdk-apple.tar.gz" | head -n 5
+
+      - name: Upload the xcframework tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-sdk-apple
+          path: ${{ runner.temp }}/urnetwork-sdk-apple.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # THE APP. iOS and macOS in ONE job, because that is what apple/build.sh is:
+  # splitting them would pay for a second 43 MB checkout, a second SwiftPM
+  # resolve of the seven pinned Google/AppAuth packages, and a second unpack of
+  # the xcframeworks, to parallelise two builds that share a DerivedData.
+  # ---------------------------------------------------------------------------
+  build-apple:
+    name: Build + test the apple app
+    needs: [plan, build-sdk-apple]
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      UR_APPLE_REPO: ${{ inputs.apple_repo || 'urnetwork/apple' }}
+      UR_APPLE_REF: ${{ inputs.apple_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the apple and localizations submodules over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          for m in apple localizations; do
+            git submodule update --init --depth 1 "$m" \
+              || git submodule update --init "$m"
+            git -C "$m" log -1 --format="$m pin: %H %s"
+          done
+
+      - name: Override the apple ref
+        if: env.UR_APPLE_REF != ''
+        run: |
+          set -euo pipefail
+          git -C apple fetch --depth 1 "https://github.com/${UR_APPLE_REPO}.git" "$UR_APPLE_REF"
+          git -C apple checkout --detach FETCH_HEAD
+          git -C apple log -1 --format='apple overridden to: %H %s'
+
+      # Go is needed even though this job runs no Go build:
+      # check_apple_size.sh:108-111 requires `go` on PATH when --extension is
+      # passed, because it reads the appex's build metadata with `go version -m`
+      # to assert GOOS=ios and that FIPS 140 is off. Go is NOT on the macOS
+      # runner image, so without this the size gate exits 1 with
+      # "[apple-size] Go is required to verify the extension's FIPS build metadata".
+      - name: Set up Go (for the size gate's `go version -m` check)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.UR_GO_VERSION }}
+          # Nothing in this job compiles Go, so there is no go.sum to key a
+          # cache on; asking setup-go to find one would only log a warning.
+          cache: false
+
+      # apple/build.sh's first step is `npm ci && npm run gen:apple` in the
+      # localizations repo. js-yaml is its only dependency.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.UR_NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: localizations/package-lock.json
+
+      - name: Download the xcframework tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: urnetwork-sdk-apple
+          path: sdk-tar
+
+      # Put the xcframeworks exactly where the two Package.swift binaryTargets
+      # point, then prove they are there — SwiftPM's own failure for a missing
+      # binaryTarget path is a resolution error several screens into the
+      # xcodebuild output, and it is much clearer said here.
+      - name: Stage the xcframeworks into sdk/build/apple
+        run: |
+          set -euo pipefail
+          # Tripwires: this step hardcodes paths that belong to another repo's
+          # package manifests and to a script in a submodule this job does not
+          # check out. If either moves, staging silently puts the SDK somewhere
+          # nothing reads.
+          grep -q 'sdk/build/apple/URnetworkSdk.xcframework' apple/app/URnetworkSdk/Package.swift \
+            || { echo "::error::apple/app/URnetworkSdk/Package.swift no longer points its binaryTarget at ../../../sdk/build/apple/URnetworkSdk.xcframework"; exit 1; }
+          grep -q 'sdk/build/apple/URnetworkExtensionSdk.xcframework' apple/app/URnetworkExtensionSdk/Package.swift \
+            || { echo "::error::apple/app/URnetworkExtensionSdk/Package.swift no longer points its binaryTarget at ../../../sdk/build/apple/URnetworkExtensionSdk.xcframework"; exit 1; }
+          grep -q 'sdk/build/check_apple_size.sh' apple/build.sh \
+            || { echo "::error::apple/build.sh no longer calls \$root/sdk/build/check_apple_size.sh — this job ships that script in the SDK artifact for it"; exit 1; }
+          mkdir -p sdk/build
+          tar -xzf sdk-tar/urnetwork-sdk-apple.tar.gz -C sdk/build
+          chmod +x sdk/build/check_apple_size.sh
+          fail=0
+          for fw in URnetworkSdk URnetworkExtensionSdk; do
+            bin="sdk/build/apple/${fw}.xcframework/ios-arm64/${fw}.framework/${fw}"
+            if [ -s "$bin" ]; then
+              echo "staged $bin ($(stat -f %z "$bin") bytes)"
+            else
+              echo "::error::$bin missing or empty after unpacking the SDK artifact"
+              fail=1
+            fi
+          done
+          [ -x sdk/build/check_apple_size.sh ] \
+            || { echo "::error::sdk/build/check_apple_size.sh missing or not executable after unpacking"; fail=1; }
+          exit $fail
+
+      - name: Show the runner's Xcode and simulators
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --show-sdk-version --sdk iphoneos
+          xcrun --show-sdk-version --sdk macosx
+          xcrun simctl list runtimes
+
+      # ------------------------------------------------------------------
+      # THE ACTUAL BUILD. Everything below this line is the apple repo's own
+      # entry point: localization regeneration, iOS Release, the size gate
+      # against the built appex, then macOS Release — all with
+      # CODE_SIGNING_ALLOWED=NO.
+      #
+      # BUILD_SDK is deliberately NOT set: build-sdk-apple already built the
+      # xcframeworks, and setting it would run `make init build_apple` here —
+      # the cache-wiping form, on a runner with no Go module cache to wipe and
+      # 40 minutes of bind to redo.
+      #
+      # URNETWORK_ROOT is deliberately NOT set either: build.sh:19-20 defaults
+      # `root` to the parent of the apple repo, which in the submodule layout is
+      # already the build root.
+      # ------------------------------------------------------------------
+      - name: Build iOS + macOS unsigned (apple/build.sh)
+        run: ./apple/build.sh
+
+      # build.sh's own `set -euo pipefail` already fails on a bad xcodebuild, so
+      # this is not a duplicate of that: it asserts the PRODUCTS, which is what
+      # a later step (and a human) actually wants, and it is the check that
+      # would catch a build that succeeded while producing an app with no
+      # embedded extension.
+      - name: Assert the unsigned products
+        working-directory: apple/app/build/DerivedData/Build/Products
+        run: |
+          set -uo pipefail
+          fail=0
+          # The three bundles the two xcodebuild invocations produce. The appex
+          # path is the one apple/build.sh:39-42 itself passes to
+          # check_apple_size.sh, so it is guaranteed by the step above rather
+          # than guessed at.
+          for p in \
+            Release-iphoneos/URnetwork.app \
+            Release-iphoneos/URnetworkVPN.appex \
+            Release/URnetwork.app
+          do
+            if [ -d "$p" ]; then
+              echo "ok  $p"
+            else
+              echo "::error::$p was not produced"
+              fail=1
+            fi
+          done
+          # The appex's Mach-O, not just its bundle: it is what the 39 MiB size
+          # gate measures and what makes this a VPN client rather than a shell.
+          appex_bin="Release-iphoneos/URnetworkVPN.appex/URnetworkVPN"
+          if [ -s "$appex_bin" ]; then
+            echo "ok  $appex_bin ($(stat -f %z "$appex_bin") bytes)"
+          else
+            echo "::error::$appex_bin missing or empty"
+            fail=1
+          fi
+          # And the embedded copy inside the app. Deliberately a WARNING, not a
+          # gate: whether Xcode runs the Embed Foundation Extensions phase on a
+          # plain `build` (rather than on `archive`) is the one thing here that
+          # was not confirmed against a real run, and a false red would be worse
+          # than a note. Promote it to an error once a green run has shown the
+          # embedded path exists.
+          if find Release-iphoneos/URnetwork.app -name 'URnetworkVPN.appex' -print -quit | grep -q .; then
+            echo "ok  URnetworkVPN.appex is embedded in URnetwork.app"
+          else
+            echo "::warning::URnetworkVPN.appex was built but is not embedded inside Release-iphoneos/URnetwork.app — expected for a plain 'build' if the embed phase is archive-only, but worth confirming"
+          fi
+          exit $fail
+
+      # THE TEST HALF, which build.sh explicitly does not do — its header says
+      # it "verifies compilation and linking only".
+      #
+      # The destination is RESOLVED rather than hardcoded: a literal
+      # `name=iPhone 16` breaks silently the day the image drops that device,
+      # and the failure mode ("Unable to find a device matching...") is a lot
+      # less clear than the assertion below.
+      - name: Resolve an iOS simulator to test on
+        id: simulator
+        run: |
+          set -euo pipefail
+          devices="$RUNNER_TEMP/simctl-devices.json"
+          xcrun simctl list devices available --json > "$devices"
+          # The keys are runtime identifiers
+          # (com.apple.CoreSimulator.SimRuntime.iOS-18-5), so filter to iOS and
+          # take the first available iPhone rather than naming a model.
+          read -r udid name <<<"$(jq -r '[ .devices
+                                           | to_entries[]
+                                           | select(.key | test("SimRuntime[.]iOS"))
+                                           | .value[]
+                                           | select(.isAvailable == true)
+                                           | select(.name | startswith("iPhone")) ][0] // empty
+                                         | "\(.udid) \(.name)"' "$devices")" || true
+          # `|| true` above because `read` returns non-zero on an empty stream,
+          # and under `set -e` that would exit before the clear message below.
+          if [ -z "${udid:-}" ]; then
+            echo "::error::no available iPhone simulator on this runner — the image's simulator set changed"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "testing on ${name:-unknown} ($udid)"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          echo "name=${name:-unknown}" >> "$GITHUB_OUTPUT"
+
+      # -skip-testing:networkUITests, not -only-testing:networkTests, so a test
+      # target added later is picked up automatically. See the header for why
+      # that ONE target is excluded: its testMainAcceptance requires
+      # UR_ACCEPT_USER / UR_ACCEPT_PASS and FAILS (does not skip) without them.
+      #
+      # CODE_SIGNING_ALLOWED=NO for the same reason build.sh passes it: a
+      # simulator build needs no identity, and asking for one on a runner with
+      # an empty keychain is how this would demand a secret it does not need.
+      - name: Run the unit tests on the simulator
+        working-directory: apple/app
+        env:
+          SIM_UDID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -workspace app.xcodeproj/project.xcworkspace \
+            -scheme URnetwork \
+            -destination "platform=iOS Simulator,id=${SIM_UDID}" \
+            -derivedDataPath "$PWD/build/DerivedDataTests" \
+            -resultBundlePath "$RUNNER_TEMP/URnetworkTests.xcresult" \
+            -skip-testing:networkUITests \
+            CODE_SIGNING_ALLOWED=NO
+
+      # The .xcresult is the only readable record of WHICH tests ran, and it is
+      # the thing to look at when the run is red. Keep it on failure too.
+      - name: Upload the test result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-apple-xcresult
+          path: ${{ runner.temp }}/URnetworkTests.xcresult
+          if-no-files-found: warn
+
+      # The unsigned products, tarred for the same symlink reason the
+      # xcframeworks were: a .app bundle is full of them. These install
+      # nowhere — they carry no signature and no provisioning profile — but
+      # they are the deliverable this workflow's name promises, and they are
+      # what a human inspects when a size or link question comes up.
+      - name: Tar and upload the unsigned products
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/urnetwork-apple-unsigned.tar.gz" \
+            -C apple/app/build/DerivedData/Build/Products \
+            Release-iphoneos/URnetwork.app \
+            Release/URnetwork.app
+          ls -la "$RUNNER_TEMP/urnetwork-apple-unsigned.tar.gz"
+
+      - name: Upload the unsigned products
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-apple-unsigned
+          path: ${{ runner.temp }}/urnetwork-apple-unsigned.tar.gz
+          if-no-files-found: error

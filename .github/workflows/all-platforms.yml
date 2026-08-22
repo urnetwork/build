@@ -1,0 +1,189 @@
+name: All platforms build + test
+
+# =============================================================================
+# WHAT THIS IS
+#
+# One button that builds and tests EVERY platform all/run.sh ships, on GitHub
+# runners, without a single credential. It owns no build logic of its own: it
+# calls the five per-platform workflows, each of which is independently
+# dispatchable and independently adoptable.
+#
+#   linux      .github/workflows/linux-build.yml      (already upstream)
+#   apple      .github/workflows/apple-build.yml      iOS + macOS
+#   android    .github/workflows/android-build.yml
+#   windows    .github/workflows/windows-build.yml
+#   extension  .github/workflows/extension-build.yml  Chrome + Firefox
+#
+# DISPATCH ONLY, deliberately. Each platform workflow carries its own `push`
+# and `pull_request` triggers, so per-commit signal already exists per
+# platform; adding those triggers here too would run everything twice. This
+# file is for "build the whole thing", which is a thing a human asks for.
+#
+# -----------------------------------------------------------------------------
+# WHAT ONE FULL RUN COSTS
+#
+#   linux      ~25 min wall   ubuntu x5 jobs    1x   ~60 billed min
+#   android    ~60 min wall   ubuntu x3 jobs    1x   ~90 billed min
+#   windows    ~25 min wall   ubuntu x3, win x2 2x   ~50 billed min
+#   extension  ~8 min wall    ubuntu x1         1x   ~8 billed min
+#   apple      ~90 min wall   ubuntu x1, mac x2 10x  ~110 macOS min
+#
+# On a PUBLIC repository all of it is billed at $0 — the multipliers only
+# apply to private repositories. The apple leg is the long pole either way:
+# every other platform finishes while it is still binding gomobile.
+#
+# -----------------------------------------------------------------------------
+# PLATFORMS WITH NO JOB, AND WHY — so the omissions are legible rather than
+# looking like oversights.
+#
+#   * THE F-DROID ANDROID BUILD (all/build-fdroid.sh). Skipped inside the
+#     android workflow, not here; see its header. The github flavor still gets
+#     a compile check.
+#   * THE SERVER AND THE WEB SERVICE (the `server`, `web`, `sn` and `proxy`
+#     submodules). These are not client platforms and run.sh does not build
+#     them the way it builds the five above: it deploys them with
+#     `warpctl build <env> web/web/Makefile` and `warpctl deploy`
+#     (all/run.sh:1620-1626, :1650-1720), which needs a warpctl binary from
+#     the `warp` submodule, a container registry and a deployment environment.
+#     None of that is a build; all of it needs credentials. The proxy leg is
+#     commented out in run.sh itself.
+#   * SIGNING, NOTARIZATION, STORE UPLOAD, and VIRUSTOTAL SCANNING on every
+#     platform. Each needs a secret. Every workflow here produces UNSIGNED
+#     artifacts and says so; none of them silently skips a signing step it
+#     looks like it performs.
+#   * THE ACCEPTANCE SUITES (apple/test-main.sh, android/test-main.sh,
+#     windows/test-main.sh, all/acceptance/). They drive real accounts against
+#     production and read an acceptance vault. Out of scope for a secretless
+#     test-and-build, and a job that silently skipped them would be worse than
+#     no job.
+#
+# NOTHING HERE TOUCHES all/run.sh, and nothing here publishes.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux:
+        description: "Build + test linux (ubuntu, 1x)"
+        type: boolean
+        default: true
+      apple:
+        description: "Build + test iOS + macOS (macOS runners — the long pole)"
+        type: boolean
+        default: true
+      android:
+        description: "Build + test android (ubuntu, 1x)"
+        type: boolean
+        default: true
+      windows:
+        description: "Build + test windows (ubuntu + windows-2022, 2x)"
+        type: boolean
+        default: true
+      extension:
+        description: "Build + test the Chrome + Firefox extension (ubuntu, 1x)"
+        type: boolean
+        default: true
+
+# A called workflow cannot be granted more than its caller has. linux-build.yml
+# needs actions:read for its version derive step, so grant exactly that pair —
+# and nothing that would let any callee write.
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: all-platforms-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Each of these is a whole workflow, with its own plan/build-sdk/build graph.
+  # They are independent: nothing here fans one platform's artifact into
+  # another, because nothing in run.sh does either.
+  #
+  # `mode` is left at linux-build.yml's default (build-only). That input exists
+  # there so the fork's linux-release.yml can call it and publish; this file
+  # never sets it, so no run started from here can turn into a release.
+  linux:
+    if: ${{ inputs.linux }}
+    name: Linux
+    uses: ./.github/workflows/linux-build.yml
+    permissions:
+      contents: read
+      actions: read
+
+  apple:
+    if: ${{ inputs.apple }}
+    name: Apple
+    uses: ./.github/workflows/apple-build.yml
+    permissions:
+      contents: read
+      actions: read
+
+  android:
+    if: ${{ inputs.android }}
+    name: Android
+    uses: ./.github/workflows/android-build.yml
+    permissions:
+      contents: read
+
+  windows:
+    if: ${{ inputs.windows }}
+    name: Windows
+    uses: ./.github/workflows/windows-build.yml
+    permissions:
+      contents: read
+      actions: read
+
+  extension:
+    if: ${{ inputs.extension }}
+    name: Extension
+    uses: ./.github/workflows/extension-build.yml
+    permissions:
+      contents: read
+
+  # A single place to read the result. Without it, "did the whole thing pass?"
+  # means checking five job bubbles, and a platform that was switched OFF looks
+  # the same as one that failed.
+  summary:
+    name: All platforms — result
+    needs: [linux, apple, android, windows, extension]
+    # `always()` so this reports even when a leg failed or was skipped; the
+    # explicit accounting below is what turns it back into a gate.
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Report which platforms ran, passed and were skipped
+        env:
+          R_LINUX: ${{ needs.linux.result }}
+          R_APPLE: ${{ needs.apple.result }}
+          R_ANDROID: ${{ needs.android.result }}
+          R_WINDOWS: ${{ needs.windows.result }}
+          R_EXTENSION: ${{ needs.extension.result }}
+        run: |
+          set -uo pipefail
+          fail=0
+          {
+            echo "| platform | result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for entry in "linux:$R_LINUX" "apple:$R_APPLE" "android:$R_ANDROID" \
+                       "windows:$R_WINDOWS" "extension:$R_EXTENSION"; do
+            platform="${entry%%:*}"
+            result="${entry#*:}"
+            echo "| $platform | \`$result\` |" >> "$GITHUB_STEP_SUMMARY"
+            case "$result" in
+              success)
+                echo "ok       $platform"
+                ;;
+              skipped)
+                # Deselected by a dispatch input. Legible, not silent.
+                echo "skipped  $platform (deselected for this run)"
+                ;;
+              *)
+                echo "::error::$platform: $result"
+                fail=1
+                ;;
+            esac
+          done
+          exit $fail

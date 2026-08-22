@@ -1,0 +1,971 @@
+name: Windows build + test
+
+# =============================================================================
+# WHAT THIS IS
+#
+# The Windows leg of all/run.sh, run on GitHub runners — and the one leg whose
+# CI shape is deliberately NOT the release host's shape.
+#
+# THE RELEASE HOST BUILDS WINDOWS INSIDE A VIRTUAL MACHINE, and it cannot be
+# copied here. all/build-windows.sh delegates to all/windows/build.sh, which
+# boots an ARM Windows guest under QEMU with Hypervisor.framework acceleration
+# and ssh's windows/build-sdk.ps1 into it (all/windows/build.sh dies without a
+# pre-built base qcow2). That exists because the release host is an Apple
+# Silicon Mac and there was no other way to get a Windows toolchain onto it.
+# A GitHub runner has no Hypervisor.framework and needs none: GitHub has NATIVE
+# Windows runners. So this workflow does what the VM does, without the VM.
+#
+# The split it uses is the one urnetwork/windows' own CI already proves green
+# (its .github/workflows/build-and-test.yml, run 32508589187, 2026-08-21):
+#
+#   * The SDK is a cgo c-shared DLL and CROSS-BUILDS FROM LINUX. sdk/cgo's
+#     Makefile has a first-class `build_windows` target whose compilers are
+#     `x86_64-w64-mingw32-gcc` (apt's mingw-w64) and
+#     `aarch64-w64-mingw32-clang` (llvm-mingw), both declared with `?=` at
+#     sdk/cgo/Makefile:19-20 so the recipe runs UNMODIFIED once both are on
+#     PATH. That is a 1x ubuntu job of ~2-4 min instead of provisioning Go and
+#     llvm-mingw onto a 2x Windows runner.
+#     sdk/cgo/Makefile:99-105 says the shipped SDK builds in the VM because
+#     "There is no `llvm-mingw` Homebrew formula" — a macOS packaging gap, not
+#     a technical requirement, and Linux does not have it.
+#
+#   * The APP is WinUI 3 / MSVC and genuinely needs Windows. Two 2x jobs.
+#
+# -----------------------------------------------------------------------------
+# THE JOB GRAPH
+#
+#   plan ──> build-sdk-windows ──┬─> build-windows (x64)   ─> MSI + payload verify
+#            (ubuntu, 1x)        └─> build-windows (ARM64)
+#
+#   test-app-logic   (ubuntu, 1x) — independent, runs in parallel with everything
+#
+#   plan              ~20 s  1x   version + the four version spellings msbuild
+#                                 and WiX each need.
+#   build-sdk-windows ~4 min  1x   BOTH arches in one job: one Go module
+#                                 download, two cross-compiles, one zip.
+#   test-app-logic    ~2 min  1x   the only real unit tests this platform has.
+#   build-windows    ~8-20 min 2x  per platform, in parallel.
+#
+# -----------------------------------------------------------------------------
+# WHAT IS TESTED, AND WHAT "TESTED" HONESTLY MEANS HERE
+#
+# The Windows solution has NO test project: URnetwork.sln contains Common,
+# urnetworkd, URnetwork, SplitTunnel and Installer, and nothing else. The
+# repo's only executable test is windows/app/tools/globe-tests.cpp — an
+# "executable spec for the provider-locations pure logic", a port of the
+# android JVM tests GlobeGeometryTest.kt and WorldTopologyTest.kt, run against
+# the SAME C++ sources the app compiles. Its own header says it "builds and
+# runs anywhere with a C++20 compiler and nlohmann/json" because
+# GlobeGeometry / WorldTopology / ProviderLocations are deliberately WinRT-free.
+# NOTHING RUNS IT TODAY — not build.ps1, not tools/build-local.ps1, not
+# urnetwork/windows' own CI. `test-app-logic` below is that job, on a 1x
+# runner, and it is why this workflow's name says "test" and not just "build".
+#
+# The other assertion that is a real test rather than a compile: the MSI
+# payload check. Compiling the .wxs only proves it parses — and that blind
+# spot is exactly how this MSI shipped for months installing 7 files while
+# silently omitting WindowsAppRuntime and Assets\Fonts, so an install on a
+# clean machine could not start. windows/app/tools/verify-msi-payload.ps1
+# reads the built .msi back through the Windows Installer COM object.
+#
+# -----------------------------------------------------------------------------
+# TWO SUBMODULES, AND NOT ONE MORE
+#
+#   sdk     (253 MB) in build-sdk-windows only
+#   windows (6.4 MB) in the app jobs and in test-app-logic
+#
+# `connect` (312 MB), `glog` and `goidenticons` are NOT needed here, and that
+# is a real divergence from urnetwork/windows' own CI worth stating: that
+# workflow tracks sdk@main, whose cgo/go.mod carries four
+# `replace … => ../../<x>` directives, which is the entire reason it clones
+# three siblings and writes a RenderPngV2 shim (build-and-test.yml:83-105).
+# The build repo's recorded sdk pin has NO replace directives — cgo/go.mod
+# requires the published github.com/urnetwork/{sdk,connect,glog,goidenticons}
+# /v2026 modules and cgo/go.sum is TRACKED — so the graph resolves from
+# proxy.golang.org with no siblings at all. The guard below refuses the
+# replace form rather than pretending to support it, exactly as
+# linux-build.yml:575-601 does.
+#
+# `localizations` is NOT needed either: the .resw string resources are
+# committed under windows/app/src/App/Strings/ (28 locale directories).
+# windows/build.sh:21-24 regenerates them via `npm run gen:windows`, but that
+# script's own header calls itself the LOCAL smoketest path.
+#
+# THE SUBMODULE URLS ARE SSH and there is no key on a runner — every checkout
+# below does the GLOBAL url rewrite first, per linux-build.yml:540-553.
+#
+# -----------------------------------------------------------------------------
+# NOT ATTEMPTED HERE, DELIBERATELY
+#
+#   * SIGNING, and it is not a small omission on this platform: unsigned
+#     Windows binaries trip SmartScreen. windows/app/SIGNING.md:1-5 says both
+#     signing paths are "release infrastructure that needs certs + Partner
+#     Center accounts (can't run from the build host)". windows/app/build.ps1
+#     can call signtool (:195-203, :222-226) but only when -SignThumbprint is
+#     given; CI drives msbuild and dotnet directly and never calls build.ps1.
+#     Unsigned artifacts are the deliverable.
+#   * The split-tunnel driver. It needs the WDK, and it is already excluded
+#     from the solution's build configurations — URnetwork.sln gives
+#     SplitTunnel an ActiveCfg but no `.Build.0` — so no WDK is required.
+#     `-p:IncludeDriver=true` is likewise never passed to the MSI.
+#   * The ARM64 MSI. Deferred upstream to the signing milestone; the x64 MSI
+#     is the compile proof. Only the portable zip is built for ARM64.
+#   * windows/test-main.sh. That is the product acceptance test: it drives a
+#     real account through the app and needs an acceptance vault credential
+#     AND the QEMU VM. Both are out of scope for a secretless test-and-build.
+#   * Any release job. Nothing here writes.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Windows app platforms to build"
+        type: choice
+        default: "x64 ARM64"
+        options: ["x64 ARM64", "x64", "ARM64"]
+      version:
+        description: "Version, e.g. 2026.8.20-1024590520. Empty = derive a fork beta version."
+        type: string
+        default: ""
+      sdk_repo:
+        description: "owner/repo to take the sdk tree from (only used when sdk_ref is set)"
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        description: "Branch/tag/sha for the sdk tree. Empty = the recorded submodule pin. See the guard in build-sdk-windows."
+        type: string
+        default: ""
+      windows_repo:
+        description: "owner/repo to take the windows tree from (only used when windows_ref is set)"
+        type: string
+        default: "urnetwork/windows"
+      windows_ref:
+        description: "Branch/tag/sha for the windows tree. Empty = the recorded submodule pin."
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      platforms:
+        type: string
+        default: "x64 ARM64"
+      version:
+        type: string
+        default: ""
+      sdk_repo:
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        type: string
+        default: ""
+      windows_repo:
+        type: string
+        default: "urnetwork/windows"
+      windows_ref:
+        type: string
+        default: ""
+  push:
+    branches:
+      - all-platform-ci
+      - upstream/all-platform-ci
+  pull_request:
+    branches:
+      - main
+      - all-platform-ci
+      - upstream/all-platform-ci
+
+permissions:
+  contents: read
+  # the version derive step reads this run's created_at through the actions api
+  actions: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # llvm-mingw supplies `aarch64-w64-mingw32-clang`, the compiler
+  # sdk/cgo/Makefile:20 names for windows/arm64. There is no apt package, so
+  # the upstream release tarball IS the toolchain. Pinned, and pinned to the
+  # exact build urnetwork/windows' green SDK job uses.
+  UR_LLVM_MINGW_VERSION: "20250709"
+  # The Android NDK is irrelevant here; the only pinned toolchain versions this
+  # leg has are the two above and Go's, which setup-go resolves.
+  #
+  # apt's default is to wait forever on a stalled mirror; bounded at the
+  # transport, exactly as linux-build.yml:266-272 does.
+  UR_APT_OPTS: >-
+    -o Acquire::Retries=3
+    -o Acquire::http::Timeout=30
+    -o Acquire::https::Timeout=30
+    -o Acquire::http::No-Cache=true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Everything decided once for the whole run. Windows needs MORE version
+  # spellings than any other platform, and they are not interchangeable:
+  #
+  #   version        2026.8.21-1025613560-beta  the string msbuild stamps and
+  #                                             the portable zip is named with
+  #   version_code   1025613560                 the update checker's ordering key
+  #   major/minor/patch                         VERSIONINFO's numeric
+  #                                             FILEVERSION fields are 16-bit,
+  #                                             so each part is passed alone
+  #   msi_version    26.8.21                    the MSI's ProductVersion has
+  #                                             8-bit leading fields, so 2026
+  #                                             is not representable at all
+  #
+  # A wrong spelling here is not a cosmetic problem: absent UrVersion the app
+  # builds as 0.0.0-dev with code 0, which the in-app update checker reads as
+  # "never self-update".
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      warp_version: ${{ steps.version.outputs.warp_version }}
+      version_code: ${{ steps.version.outputs.version_code }}
+      version_major: ${{ steps.version.outputs.version_major }}
+      version_minor: ${{ steps.version.outputs.version_minor }}
+      version_patch: ${{ steps.version.outputs.version_patch }}
+      msi_version: ${{ steps.version.outputs.msi_version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+      sdk_source: ${{ steps.sources.outputs.sdk_source }}
+      windows_source: ${{ steps.sources.outputs.windows_source }}
+    steps:
+      # No submodules: this job only reads the gitlink SHAs.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # DELIBERATELY THE SAME DERIVATION AS linux-build.yml:317-356, spelled
+      # out again rather than shared, so this file stays adoptable on its own
+      # and every line of it is covered by shell-lint.yml. If the scheme ever
+      # changes it changes in every platform workflow at once.
+      #
+      # It is the official date format with warpctl's counter (seconds since
+      # the company founding times ten), derived from THIS RUN's created_at
+      # rather than from `date` at step time, so every job of one run agrees
+      # even across midnight UTC. The "-beta" suffix is what keeps a CI build
+      # from ever looking like an official urnetwork/build release tag.
+      - name: Derive the version, in all five spellings Windows needs
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+            created=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+            echo "version pinned by workflow input: $version"
+          else
+            created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            base=$(date -u -d "$created" '+%Y.%-m.%-d')
+            founded=$(date -u -d "2023-05-23" +%s)
+            created_epoch=$(date -u -d "$created" +%s)
+            code=$(( (created_epoch - founded) * 10 ))
+            version="${base}-${code}-beta"
+            echo "run created $created -> version $version (code $code)"
+          fi
+          case "$version" in
+            *[!A-Za-z0-9._+-]*|'')
+              echo "::error::version '$version' must be non-empty and contain only [A-Za-z0-9._+-]"
+              exit 1
+              ;;
+          esac
+          # WARP_VERSION, the internal spelling (last '-' becomes '+'). Mirrors
+          # all/build-linux.sh's derivation. The cgo build bakes it into
+          # -ldflags "-X github.com/urnetwork/sdk.Version=…".
+          case "$version" in
+            *-*) warp="${version%-*}+${version##*-}" ;;
+            *)   warp="$version" ;;
+          esac
+          # The numeric fields. Take them from the version string itself when
+          # one was supplied, so an input version and a derived one produce a
+          # consistent set rather than mixing a pinned string with today's date.
+          numeric="${version%%-*}"
+          major="${numeric%%.*}"
+          rest="${numeric#*.}"
+          minor="${rest%%.*}"
+          patch="${rest#*.}"
+          patch="${patch%%.*}"
+          case "$version" in
+            *-*) code="${version#*-}"; code="${code%%-*}" ;;
+            *)   code="0" ;;
+          esac
+          case "$major$minor$patch$code" in
+            *[!0-9]*|'')
+              echo "::error::version '$version' does not decompose into numeric major/minor/patch/code (got $major/$minor/$patch/$code) — msbuild's VERSIONINFO fields need integers"
+              exit 1
+              ;;
+          esac
+          # The MSI's ProductVersion is tighter still: its first two fields are
+          # effectively 8-bit, so 2026 cannot appear. Drop the century.
+          msi_version="$(( major % 100 )).${minor}.${patch}"
+          {
+            echo "version=$version"
+            echo "warp_version=$warp"
+            echo "version_code=$code"
+            echo "version_major=$major"
+            echo "version_minor=$minor"
+            echo "version_patch=$patch"
+            echo "msi_version=$msi_version"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=$version warp=$warp code=$code numeric=$major.$minor.$patch msi=$msi_version"
+
+      - name: Resolve which sdk and windows trees this run builds
+        id: sources
+        env:
+          INPUT_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+          INPUT_SDK_REF: ${{ inputs.sdk_ref || '' }}
+          INPUT_WINDOWS_REPO: ${{ inputs.windows_repo || 'urnetwork/windows' }}
+          INPUT_WINDOWS_REF: ${{ inputs.windows_ref || '' }}
+        run: |
+          set -euo pipefail
+          pin_sdk=$(git ls-tree HEAD sdk | awk '{print $3}')
+          pin_windows=$(git ls-tree HEAD windows | awk '{print $3}')
+          [ -n "$pin_sdk" ]     || { echo "::error::no 'sdk' submodule gitlink at HEAD"; exit 1; }
+          [ -n "$pin_windows" ] || { echo "::error::no 'windows' submodule gitlink at HEAD"; exit 1; }
+          if [ -n "$INPUT_SDK_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_SDK_REPO is a step env var
+            sdk_source="${INPUT_SDK_REPO}@${INPUT_SDK_REF} (override)"
+          else
+            sdk_source="urnetwork/sdk@${pin_sdk} (submodule pin)"
+          fi
+          if [ -n "$INPUT_WINDOWS_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_WINDOWS_REPO is a step env var
+            windows_source="${INPUT_WINDOWS_REPO}@${INPUT_WINDOWS_REF} (override)"
+          else
+            windows_source="urnetwork/windows@${pin_windows} (submodule pin)"
+          fi
+          echo "sdk_source=$sdk_source"         >> "$GITHUB_OUTPUT"
+          echo "windows_source=$windows_source" >> "$GITHUB_OUTPUT"
+          echo "sdk:     $sdk_source"
+          echo "windows: $windows_source"
+
+      - name: Build the platform matrix
+        id: matrix
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'x64 ARM64' }}
+        run: |
+          set -euo pipefail
+          read -r -a plat_arr <<<"$INPUT_PLATFORMS"
+          platforms="${plat_arr[*]}"
+          [ "${#plat_arr[@]}" -gt 0 ] || { echo "::error::no platforms selected"; exit 1; }
+          include=""
+          for p in "${plat_arr[@]}"; do
+            case "$p" in
+              # ARM64 cross-builds from the same x64 runner: the v143 toolset
+              # ships both, so only the /p:Platform argument changes.
+              x64|ARM64) ;;
+              *) echo "::error::unsupported platform '$p' (x64|ARM64)"; exit 1 ;;
+            esac
+            include="${include}${include:+,}{\"platform\":\"$p\"}"
+          done
+          matrix="{\"include\":[${include}]}"
+          # A malformed matrix does not fail a run — it produces zero jobs,
+          # which looks like a green build that did nothing.
+          echo "$matrix" | jq -e . > /dev/null \
+            || { echo "::error::generated matrix is not valid JSON: $matrix"; exit 1; }
+          {
+            echo "matrix=$matrix"
+            echo "platforms=$platforms"
+          } >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+      - name: Write the run plan to the job summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WARP_VERSION: ${{ steps.version.outputs.warp_version }}
+          MSI_VERSION: ${{ steps.version.outputs.msi_version }}
+          PLATFORMS: ${{ steps.matrix.outputs.platforms }}
+          SDK_SOURCE: ${{ steps.sources.outputs.sdk_source }}
+          WINDOWS_SOURCE: ${{ steps.sources.outputs.windows_source }}
+        run: |
+          set -euo pipefail
+          {
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`$VERSION\` |"
+            echo "| internal | \`$WARP_VERSION\` |"
+            echo "| msi ProductVersion | \`$MSI_VERSION\` |"
+            echo "| platforms | \`$PLATFORMS\` |"
+            echo "| sdk | \`$SDK_SOURCE\` |"
+            echo "| windows | \`$WINDOWS_SOURCE\` |"
+            echo "| signing | none — unsigned build+test only |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE CGO SDK for Windows — one ubuntu job, both arches, 1x billing.
+  #
+  # Modelled on linux-build.yml's build-sdk (:521-693), which already solves
+  # every build-repo-specific problem here; the only substitutions are the two
+  # toolchain installs (mingw-w64 + llvm-mingw, in place of the zig shim) and
+  # `make build_windows` in place of `make build_linux`.
+  #
+  # THE ASSERTION AT THE END IS NOT OPTIONAL. sdk/cgo/Makefile chains its
+  # recipes with '; \', so a failing `go build` does NOT fail the target — the
+  # trailing `cp` of the headers succeeds and make exits 0. On this very
+  # platform that is how a compile error shipped a "successful" SDK job whose
+  # zip contained three headers and no DLL, leaving the app jobs to fail forty
+  # lines later with a confusing missing-file error. `ls` and `test -s <zip>`
+  # both passed on that build.
+  # ---------------------------------------------------------------------------
+  build-sdk-windows:
+    name: Build the cgo SDK DLLs (windows/amd64 + arm64)
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      WARP_VERSION: ${{ needs.plan.outputs.warp_version }}
+      UR_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+      UR_SDK_REF: ${{ inputs.sdk_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the sdk submodule over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 sdk \
+            || git submodule update --init sdk
+          git -C sdk log -1 --format='sdk pin: %H %s'
+
+      - name: Override the sdk ref
+        if: env.UR_SDK_REF != ''
+        run: |
+          set -euo pipefail
+          git -C sdk fetch --depth 1 "https://github.com/${UR_SDK_REPO}.git" "$UR_SDK_REF"
+          git -C sdk checkout --detach FETCH_HEAD
+          git -C sdk log -1 --format='sdk overridden to: %H %s'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: sdk/cgo/go.sum
+
+      # THE ONE MODE THIS JOB CANNOT BUILD, refused in five seconds with the
+      # reason. Identical in substance to linux-build.yml:575-601 — the same
+      # module, the same guard — but the precedent to point at for windows is
+      # urnetwork/windows' build-and-test.yml:83-105 rather than
+      # urnetwork-linux's beta-build.yml.
+      - name: Refuse a sibling-replace module graph
+        working-directory: sdk/cgo
+        env:
+          # go.mod's `go` directive (1.26.5 at the pin) is newer than some
+          # `stable` releases; let the toolchain fetch itself.
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          n=$(go mod edit -json | jq '.Replace | length')
+          if [ "$n" != "0" ]; then
+            go mod edit -json | jq -r '.Replace[] | "  \(.Old.Path) => \(.New.Path)"'
+            echo "::error::sdk/cgo/go.mod carries $n replace directive(s) pointing at sibling checkouts."
+            {
+              echo "This job builds the sdk ALONE. A ref whose cgo/go.mod replaces"
+              echo "github.com/urnetwork/{sdk,connect,glog,goidenticons} with ../.. paths"
+              echo "needs those three trees checked out as siblings of sdk/ AND a"
+              echo "generated go.sum — that is what urnetwork/windows' own"
+              echo "build-and-test.yml does (see its connect/glog/goidenticons clone"
+              echo "steps and the RenderPngV2 shim that only a moving dependency HEAD"
+              echo "needs). It does that because it tracks sdk@main."
+              echo ""
+              echo "The build repo's recorded sdk pin has NO replace directives: it"
+              echo "resolves the published /v2026 modules from proxy.golang.org against"
+              echo "a committed cgo/go.sum. Build a ref like that, or add the sibling"
+              echo "apparatus here deliberately rather than by accident."
+            } >&2
+            exit 1
+          fi
+          echo "no replace directives — the module graph resolves from the proxy"
+          if [ ! -f go.sum ]; then
+            echo "::warning::cgo/go.sum absent at this ref — running 'go mod download all'"
+            go mod download all
+          fi
+
+      # amd64's compiler comes from apt. `zip` is not optional: build_windows'
+      # last command is `zip -r URnetworkSdkWindows.zip windows`, and `unzip`
+      # is what the assertion reads it back with.
+      - name: Install mingw-w64 (windows/amd64 target)
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # UR_APT_OPTS is a deliberate word list
+          sudo apt-get $UR_APT_OPTS update
+          # shellcheck disable=SC2086
+          sudo apt-get $UR_APT_OPTS install -y --no-install-recommends mingw-w64 zip unzip
+          x86_64-w64-mingw32-gcc --version | head -n1
+
+      # arm64's compiler has no apt package, so the pinned upstream release
+      # tarball IS the toolchain. Putting it on PATH — rather than overriding
+      # WINDOWS_ARM64_CC — is the same choice linux-build.yml:614-619 makes for
+      # zig: the Makefile recipe runs unmodified and the compiler pin stays
+      # where the Makefile documents it.
+      - name: Install llvm-mingw (windows/arm64 target, pinned)
+        run: |
+          set -euo pipefail
+          url="https://github.com/mstorsjo/llvm-mingw/releases/download/${UR_LLVM_MINGW_VERSION}/llvm-mingw-${UR_LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          curl -fsSL --retry 3 "$url" -o "$RUNNER_TEMP/llvm-mingw.tar.xz"
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xf "$RUNNER_TEMP/llvm-mingw.tar.xz" -C /opt/llvm-mingw --strip-components=1
+          echo "/opt/llvm-mingw/bin" >> "$GITHUB_PATH"
+          /opt/llvm-mingw/bin/aarch64-w64-mingw32-clang --version | head -n1
+
+      # Assert the environment AND the contract, instead of finding out inside
+      # a make recipe that chains with ';' and therefore exits 0 anyway.
+      - name: Assert the toolchain and the Makefile contract
+        run: |
+          set -euo pipefail
+          fail=0
+          for tool in go make zip unzip jq x86_64-w64-mingw32-gcc aarch64-w64-mingw32-clang; do
+            if command -v "$tool" > /dev/null 2>&1; then
+              echo "have $tool"
+            else
+              echo "::error::$tool is not on PATH"
+              fail=1
+            fi
+          done
+          # UNLIKE the linux leg, this job does NOT stand in for a line of a
+          # shell script: all/build-windows.sh hands off to all/windows/build.sh,
+          # which ssh's windows/build-sdk.ps1 into a VM, and that script
+          # re-implements the recipe rather than calling make. So the contract
+          # to assert is the Makefile TARGET this job invokes.
+          for target in build_windows build_windows_amd64 build_windows_arm64; do
+            grep -q "^${target}:" sdk/cgo/Makefile \
+              || { echo "::error::sdk/cgo/Makefile has no '${target}' target — this job is standing in for a recipe that moved"; fail=1; }
+          done
+          # And the compilers the recipe names must be the ones installed
+          # above, or the `?=` defaults would silently pick up something else.
+          grep -q 'WINDOWS_AMD64_CC ?= x86_64-w64-mingw32-gcc' sdk/cgo/Makefile \
+            || { echo "::error::sdk/cgo/Makefile no longer defaults WINDOWS_AMD64_CC to x86_64-w64-mingw32-gcc — this job installs the wrong toolchain"; fail=1; }
+          grep -q 'WINDOWS_ARM64_CC ?= aarch64-w64-mingw32-clang' sdk/cgo/Makefile \
+            || { echo "::error::sdk/cgo/Makefile no longer defaults WINDOWS_ARM64_CC to aarch64-w64-mingw32-clang — this job installs the wrong toolchain"; fail=1; }
+          # The recipes end by copying these three headers next to the DLL, and
+          # the .def is load-bearing: the app job runs lib.exe /def:… on it.
+          for h in urnetwork_sdk.h urnetwork_sdk.hpp urnetwork_sdk.def; do
+            [ -f "sdk/cgo/include/$h" ] || { echo "::error::sdk/cgo/include/$h is missing at this sdk ref"; fail=1; }
+          done
+          exit $fail
+
+      - name: Build the SDK DLLs
+        working-directory: sdk/cgo
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          make build_windows
+          ls -la build/windows/amd64 build/windows/arm64
+
+      # See the job header: `make` exiting 0 proves nothing here. Assert on the
+      # artifacts that matter — and on the .def, which neither
+      # urnetwork/windows' assertion nor linux-build.yml's currently checks,
+      # because without it the app job dies at lib.exe with a much less
+      # obvious error.
+      - name: Verify the SDK actually produced DLLs
+        working-directory: sdk/cgo
+        run: |
+          set -uo pipefail
+          fail=0
+          for arch in amd64 arm64; do
+            dll="build/windows/$arch/URnetworkSdk.dll"
+            if [ ! -f "$dll" ]; then
+              echo "::error::$dll was not produced — the cgo build failed (see the make output above)"
+              fail=1
+              continue
+            fi
+            size=$(stat -c %s "$dll")
+            echo "$dll: $size bytes"
+            # a real c-shared build of this sdk is tens of MB; anything tiny
+            # means a truncated or stub link, which would fail far downstream
+            if [ "$size" -lt 5000000 ]; then
+              echo "::error::$dll is only $size bytes — implausibly small for the sdk"
+              fail=1
+            fi
+            # PE32+ magic, so a host-targeted build cannot masquerade as a DLL
+            case "$(head -c 2 "$dll")" in
+              MZ) ;;
+              *) echo "::error::$dll does not start with the MZ PE signature — this is not a Windows binary"; fail=1 ;;
+            esac
+            for h in urnetwork_sdk.h urnetwork_sdk.hpp urnetwork_sdk.def; do
+              [ -f "build/windows/$arch/$h" ] \
+                || { echo "::error::build/windows/$arch/$h missing — app/tools/fetch-deps.ps1 runs lib.exe /def: on the .def"; fail=1; }
+            done
+          done
+          # And the ZIP must carry them, because the zip — not the build tree —
+          # is what the app jobs unpack through fetch-deps.ps1. The zip step is
+          # the LAST command of the same ';'-chained recipe, so it can fail on
+          # its own.
+          for arch in amd64 arm64; do
+            if ! unzip -l build/URnetworkSdkWindows.zip | grep -q "windows/$arch/URnetworkSdk.dll"; then
+              echo "::error::URnetworkSdkWindows.zip is missing windows/$arch/URnetworkSdk.dll"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Upload the SDK zip
+        uses: actions/upload-artifact@v4
+        with:
+          # Same artifact name urnetwork/windows' own CI uses, so the same
+          # `gh run download -n urnetwork-sdk-windows` works against either.
+          name: urnetwork-sdk-windows
+          path: sdk/cgo/build/URnetworkSdkWindows.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # THE ONLY REAL UNIT TESTS THIS PLATFORM HAS, and nothing else runs them.
+  #
+  # windows/app/tools/globe-tests.cpp is an executable spec for the
+  # provider-locations pure logic — a port of the android JVM tests
+  # GlobeGeometryTest.kt (25 cases) and WorldTopologyTest.kt (7 cases), run
+  # against the SAME C++ sources App.vcxproj compiles. Its header explains why
+  # it can run here at all: GlobeGeometry / WorldTopology / ProviderLocations
+  # are deliberately WinRT-free, so the harness needs only a C++20 compiler and
+  # nlohmann/json.
+  #
+  # It runs on UBUNTU, at 1x, in ~2 min, and it needs neither the SDK DLL nor a
+  # Windows runner — so it is not in the graph below and does not wait on it.
+  # ---------------------------------------------------------------------------
+  test-app-logic:
+    name: Test the app's pure logic (globe + topology + labels)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UR_WINDOWS_REPO: ${{ inputs.windows_repo || 'urnetwork/windows' }}
+      UR_WINDOWS_REF: ${{ inputs.windows_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the windows submodule over https
+        run: |
+          set -euo pipefail
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 windows \
+            || git submodule update --init windows
+          git -C windows log -1 --format='windows pin: %H %s'
+
+      - name: Override the windows ref
+        if: env.UR_WINDOWS_REF != ''
+        run: |
+          set -euo pipefail
+          git -C windows fetch --depth 1 "https://github.com/${UR_WINDOWS_REPO}.git" "$UR_WINDOWS_REF"
+          git -C windows checkout --detach FETCH_HEAD
+          git -C windows log -1 --format='windows overridden to: %H %s'
+
+      # nlohmann/json is the harness's only dependency. app/tools/fetch-deps.ps1
+      # downloads the single header from a GitHub release for the Windows
+      # build; on ubuntu the distro package is the same header and needs no
+      # pin management.
+      - name: Install a C++20 compiler and nlohmann/json
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # UR_APT_OPTS is a deliberate word list
+          sudo apt-get $UR_APT_OPTS update
+          # shellcheck disable=SC2086
+          sudo apt-get $UR_APT_OPTS install -y --no-install-recommends g++ nlohmann-json3-dev
+          g++ --version | head -n1
+
+      - name: Assert the test harness and its fixture are present
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in \
+            windows/app/tools/globe-tests.cpp \
+            windows/app/src/App/GlobeGeometry.cpp \
+            windows/app/src/App/WorldTopology.cpp \
+            windows/app/src/App/ProviderLocations.cpp \
+            windows/app/src/App/Assets/world-110m.json
+          do
+            if [ -s "$f" ]; then
+              echo "have $f"
+            else
+              echo "::error::$f is missing or empty at the windows pin"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # The compile line is the one the harness's own header documents.
+      - name: Build the test harness
+        working-directory: windows/app/tools
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -O1 -Wall \
+            -I ../src/App \
+            globe-tests.cpp \
+            ../src/App/GlobeGeometry.cpp \
+            ../src/App/WorldTopology.cpp \
+            ../src/App/ProviderLocations.cpp \
+            -o "$RUNNER_TEMP/globe-tests"
+          ls -la "$RUNNER_TEMP/globe-tests"
+
+      # The harness exits non-zero on a failed case — but the WorldTopology
+      # half SKIPS itself, printing "SKIP world-110m.json not found", when it
+      # cannot read the fixture, and still exits 0. A silent skip is exactly
+      # the "green run that tested nothing" this repo's CI is written to
+      # prevent, so grep the output and fail on it.
+      - name: Run the test harness
+        working-directory: windows/app/tools
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/globe-tests.out"
+          "$RUNNER_TEMP/globe-tests" ../src/App/Assets/world-110m.json | tee "$out"
+          if grep -q 'SKIP' "$out"; then
+            echo "::error::the harness skipped at least one suite — a skipped suite is not a passing suite"
+            exit 1
+          fi
+          # Belt and braces on the summary line the harness prints last, so a
+          # future refactor that runs zero cases cannot look green.
+          cases=$(sed -n 's/^\([0-9][0-9]*\) cases, .*/\1/p' "$out" | tail -n1)
+          echo "cases run: ${cases:-none}"
+          if [ -z "$cases" ] || [ "$cases" -lt 20 ]; then
+            echo "::error::expected at least 20 cases (the harness ports 25 GlobeGeometry + 7 WorldTopology cases), got '${cases:-none}'"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # THE WINDOWS APP. One job per platform, on windows-2022 at 2x billing.
+  #
+  # NOT windows-latest, and NOT windows-2025: that image has moved to Visual
+  # Studio 18 (toolset v180), which carries v143 for x64 but not the v143 ARM64
+  # cross tools, so ARM64 fails MSB8020 while x64 compiles. windows-2022 is the
+  # image whose toolchain matches the repo's documented prerequisites
+  # (VS 2022 v143) and the one urnetwork/windows' green runs used.
+  #
+  # Everything below is lifted from urnetwork/windows' own build-and-test.yml,
+  # which is the proof these steps work: it is the same repo at the same pin
+  # (the recorded `windows` gitlink is identical to that repo's main HEAD).
+  # The only changes are the checkout — a build-repo submodule instead of a
+  # bare repo — and the version, which comes from `plan` instead of a derive
+  # step inside this job.
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Windows app (${{ matrix.platform }})
+    needs: [plan, build-sdk-windows]
+    runs-on: windows-2022
+    # Measured upstream at ~8 min (x64) and ~10 min (ARM64) plus ~50 s for the
+    # MSI; generous against a cold NuGet restore.
+    timeout-minutes: 60
+    strategy:
+      # Let every platform report. Nothing publishes, so a partial set costs
+      # nothing but diagnosis.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      UR_WINDOWS_REPO: ${{ inputs.windows_repo || 'urnetwork/windows' }}
+      UR_WINDOWS_REF: ${{ inputs.windows_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # bash is available on windows runners and is the shell this repo's
+      # checkout recipe is written in; keeping it identical to the other jobs
+      # is worth more here than using pwsh for its own sake.
+      - name: Check out the windows submodule over https
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 windows \
+            || git submodule update --init windows
+          git -C windows log -1 --format='windows pin: %H %s'
+
+      - name: Override the windows ref
+        if: env.UR_WINDOWS_REF != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C windows fetch --depth 1 "https://github.com/${UR_WINDOWS_REPO}.git" "$UR_WINDOWS_REF"
+          git -C windows checkout --detach FETCH_HEAD
+          git -C windows log -1 --format='windows overridden to: %H %s'
+
+      - name: Download the SDK zip
+        uses: actions/download-artifact@v4
+        with:
+          name: urnetwork-sdk-windows
+          path: sdk-zip
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      # fetch-deps pins wintun by sha256 AND by upstream Authenticode signer,
+      # then unpacks the SDK zip and generates the per-arch import libs — which
+      # needs lib.exe, hence the VS dev shell. Every download it makes is plain
+      # public HTTPS (wintun.net, raw.githubusercontent.com, a GitHub release);
+      # none of it needs a token.
+      - name: Fetch vendored dependencies (wintun + SDK)
+        shell: pwsh
+        working-directory: windows/app
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          .\tools\fetch-deps.ps1 -SdkZip "$env:GITHUB_WORKSPACE\sdk-zip\URnetworkSdkWindows.zip"
+
+      # Directory.Build.props pins WindowsTargetPlatformVersion to 10.0.22621.0
+      # (the version on the real build box). Runner images carry a different
+      # set, so resolve what is actually installed and override it as a global
+      # property — /p: wins over the props file, and the repo keeps its pin for
+      # developers. The MIN version (19041, the app's floor) is untouched, so
+      # this changes which SDK headers build the app, not what it runs on.
+      - name: Resolve the installed Windows SDK version
+        id: winsdk
+        shell: pwsh
+        run: |
+          $roots = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Include",
+            "$env:ProgramFiles\Windows Kits\10\Include"
+          ) | Where-Object { Test-Path $_ }
+          $versions = $roots | ForEach-Object { Get-ChildItem $_ -Directory } |
+            Where-Object { $_.Name -match '^10\.0\.\d+\.\d+$' -and (Test-Path (Join-Path $_.FullName 'um\windows.h')) } |
+            Sort-Object { [version]$_.Name }
+          if (-not $versions) { throw "no Windows 10 SDK found on this runner" }
+          $chosen = $versions[-1].Name
+          Write-Host "available: $($versions.Name -join ', ')"
+          Write-Host "using: $chosen"
+          "version=$chosen" >> $env:GITHUB_OUTPUT
+
+      # The solution's build configurations cover Common, urnetworkd and the
+      # WinUI 3 app only — the split-tunnel driver (WDK) and the WiX installer
+      # are deliberately excluded from the solution build, so neither is needed
+      # here. No /p:SignThumbprint, no cert, nothing signed.
+      #
+      # The Ur* properties stamp the derived version into both exes
+      # (Directory.Build.props turns them into preprocessor definitions and
+      # VERSIONINFO fields). Absent, the build defaults to 0.0.0-dev / code 0,
+      # which the update checker treats as "never self-update".
+      - name: Build the solution (${{ matrix.platform }})
+        shell: pwsh
+        working-directory: windows/app
+        run: |
+          msbuild URnetwork.sln `
+            /restore `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /p:WindowsTargetPlatformVersion=${{ steps.winsdk.outputs.version }} `
+            /p:UrVersion=${{ needs.plan.outputs.version }} `
+            /p:UrVersionCode=${{ needs.plan.outputs.version_code }} `
+            /p:UrVersionMajor=${{ needs.plan.outputs.version_major }} `
+            /p:UrVersionMinor=${{ needs.plan.outputs.version_minor }} `
+            /p:UrVersionPatch=${{ needs.plan.outputs.version_patch }} `
+            /p:RestorePackagesConfig=true `
+            /m `
+            /v:minimal `
+            /clp:Summary `
+            /flp:LogFile=msbuild-${{ matrix.platform }}.log`;Verbosity=detailed
+
+      # The msbuild log is the whole point of the run when the toolchain moves
+      # under the solution, so keep it even on failure.
+      - name: Upload the msbuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msbuild-log-${{ matrix.platform }}
+          path: windows/app/msbuild-${{ matrix.platform }}.log
+          if-no-files-found: warn
+
+      # msbuild can report success while producing less than the app needs, so
+      # assert the three binaries the packager and the MSI both harvest.
+      - name: Assert the solution produced the app, the service and wintun
+        shell: pwsh
+        working-directory: windows/app
+        run: |
+          $binDir = "build\${{ matrix.platform }}\Release"
+          $fail = $false
+          foreach ($name in @('URnetwork.exe', 'urnetworkd.exe', 'wintun.dll')) {
+            $p = Join-Path $binDir $name
+            if (Test-Path $p) {
+              $len = (Get-Item $p).Length
+              Write-Host "ok  $p ($len bytes)"
+              if ($len -lt 1024) { Write-Host "::error::$p is only $len bytes"; $fail = $true }
+            } else {
+              Write-Host "::error::$p was not produced by the solution build"
+              $fail = $true
+            }
+          }
+          if ($fail) { exit 1 }
+
+      - name: Upload the build output
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-windows-${{ matrix.platform }}
+          # the WHOLE output dir, not a glob of exe/dll/pri: that pattern
+          # silently dropped Assets\Fonts (the brand typefaces the app copies
+          # next to the exe), and would drop the next asset added too.
+          path: windows/app/build/${{ matrix.platform }}/Release/
+          if-no-files-found: error
+
+      # Stage the zip exactly as a user (and the in-app updater) receives it:
+      # payload at the zip root, no wrapper folder, the release name grammar.
+      # The packager owns the payload rules so local runs and CI cannot drift.
+      - name: Package the portable zip
+        shell: pwsh
+        working-directory: windows/app
+        run: |
+          .\tools\package-portable.ps1 `
+            -Platform ${{ matrix.platform }} `
+            -Version ${{ needs.plan.outputs.version }}
+
+      - name: Upload the portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-windows-portable-${{ matrix.platform }}
+          path: windows/app/build/${{ matrix.platform }}/URnetwork-*-portable.zip
+          if-no-files-found: error
+
+      # THE MSI. Not msbuild: app/installer/Installer.wixproj is
+      # `<Project Sdk="WixToolset.Sdk/5.0.2">`, so `dotnet build` NuGet-restores
+      # the whole WiX 5 toolchain from public nuget.org — nothing installs on
+      # the runner, and windows-2022's bundled WiX 3.14 is unused. No cert is
+      # involved: signing the MSI is a separate, optional signtool call in
+      # build.ps1 that CI never makes.
+      #
+      # x64 only. The ARM64 MSI is deliberately deferred upstream to the
+      # signing milestone; the portable zip is the supported ARM64 artifact.
+      - name: Build the MSI (x64 compile proof)
+        if: matrix.platform == 'x64'
+        shell: pwsh
+        run: |
+          dotnet build windows/app/installer/Installer.wixproj `
+            -c Release `
+            -p:Platform=x64 `
+            -p:BinDir="$env:GITHUB_WORKSPACE\windows\app\build\x64\Release" `
+            -p:UrMsiVersion=${{ needs.plan.outputs.msi_version }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Flatten out of WiX's bin/<platform>/<config>/<culture>/ nest so
+          # later steps get a file, not a directory shape to guess at.
+          # Directory.Build.props redirects OutDir only for .vcxproj, so the
+          # MSI stays under app/installer/bin.
+          $msi = Get-ChildItem windows/app/installer/bin -Recurse -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw "dotnet build succeeded but produced no .msi" }
+          New-Item -ItemType Directory -Force windows/app/installer/dist | Out-Null
+          Copy-Item $msi.FullName windows/app/installer/dist/URnetwork.msi -Force
+
+      # The compile proof above only proves the .wxs parses — it says nothing
+      # about what landed inside the .msi, and that blind spot is exactly how
+      # this MSI shipped for months installing 7 files while silently omitting
+      # the self-contained WindowsAppRuntime and Assets\Fonts. Fail here,
+      # before the MSI is ever uploaded, if the payload regresses back to that
+      # shape. Uses the built-in Windows Installer COM object, so no extra
+      # tooling.
+      - name: Verify the MSI payload (file count + critical names)
+        if: matrix.platform == 'x64'
+        shell: pwsh
+        run: |
+          .\windows\app\tools\verify-msi-payload.ps1 -MsiPath windows\app\installer\dist\URnetwork.msi
+
+      - name: Upload the MSI
+        if: matrix.platform == 'x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-windows-msi
+          path: windows/app/installer/dist/URnetwork.msi
+          if-no-files-found: error

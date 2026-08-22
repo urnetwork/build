@@ -1,0 +1,793 @@
+name: Android build + test
+
+# =============================================================================
+# WHAT THIS IS
+#
+# The Android leg of all/run.sh, run on GitHub runners. run.sh's android leg is
+# one gradle line (all/run.sh:1462):
+#
+#     (cd $BUILD_HOME/android/app &&
+#         ./gradlew clean assemblePlayRelease bundlePlayRelease \
+#             assembleSolana_dappRelease assembleEthos_dappRelease)
+#
+# ...but that line is only half of what the pipeline actually does, and the
+# other half is the part that catches things. This workflow calls the android
+# repo's OWN documented entry point instead — `android/build.sh` with
+# SKIP_FDROID=1 — which is that gradle line plus two things run.sh does
+# elsewhere: the localization regeneration, and a compile check of the github
+# flavor whose APK the F-Droid container builds. Same philosophy as
+# linux-build.yml calling all/build-linux.sh rather than reimplementing meson.
+#
+# It then runs the half nothing in the pipeline runs: the JVM unit tests.
+# app/app/src/test holds 20 Kotlin test files (globe geometry, world topology,
+# VPN packet-flow configuration, foreground ownership, tunnel app split, …) and
+# no script and no CI executes them today.
+#
+# -----------------------------------------------------------------------------
+# THE JOB GRAPH
+#
+#   plan ──> build-sdk-android ──> build-android
+#
+#   plan              ~20 s  ubuntu-24.04, 1x
+#   build-sdk-android ~25-40 min  ubuntu-24.04, 1x
+#   build-android     ~20-30 min  ubuntu-24.04, 1x
+#
+# NO macOS RUNNER IS INVOLVED, so nothing here bills at the 10x multiplier.
+#
+# THE SDK IS A SEPARATE JOB because gradle does NOT build it. The app consumes
+# the SDK as a plain fileTree over <build>/sdk/build/android
+# (android app/app/build.gradle:490-494), and the `buildSdk` task that would
+# produce it (:449-454) is on NO assemble path: the
+# `tasks.withType(JavaCompile) { dependsOn buildSdk }` block that would have
+# wired it is commented out at :469-473 — and even uncommented it hooks
+# JavaCompile, never KotlinCompile, so it would not have covered a Kotlin-first
+# app anyway. The one live consumer, `goclientBuild` (:465-467), is reachable
+# from no assemble task. If the aar is absent the fileTree resolves to nothing,
+# the build CONFIGURES cleanly, and it then fails deep in Kotlin compilation on
+# unresolved `com.bringyour.sdk.*`. all/build-fdroid.sh:103 names it first for
+# exactly this reason: `./gradlew clean buildSdk assembleGithub`.
+#
+# One .aar carries all three ABIs (sdk/build/Makefile:52 binds
+# android/arm64,android/arm,android/amd64), so one SDK job serves every flavor.
+#
+# -----------------------------------------------------------------------------
+# THE VERSION COMES FROM THE ANDROID TREE, NOT FROM CI
+#
+# This is the one platform where the workflow does NOT derive a beta version,
+# and that is deliberate. `versionCode`/`versionName` are read at CONFIGURATION
+# time from android app/local.properties (build.gradle:94-137, called at
+# :151-152), which is committed at the pin (warp.version=2026.8.21,
+# warp.version_code=1025613560). If those keys are missing the helpers fall
+# back to exec'ing <build>/warp/warpctl/build/<os>/<arch>/warpctl — a binary no
+# fresh checkout has — and gradle fails during configuration, before any
+# compile task exists.
+#
+# So local.properties is the source of truth, `plan` reads it (over the API,
+# without checking out the 708 MB android repo), and the SDK job bakes the SAME
+# `<version>+<code>` string into the aar that build.gradle:452 would have. The
+# app job asserts the two agree, so an android_ref override cannot silently
+# produce an aar stamped with one version inside an app stamped with another.
+#
+# -----------------------------------------------------------------------------
+# SIGNING: A THROWAWAY KEY, GENERATED IN THE JOB, AND WHY THAT IS NOT A SECRET
+#
+# Android cannot package an installable APK at all without a signature, and
+# every release flavor here declares a signingConfig whose storeFile is
+# ${WARP_HOME}/release/android/signing/app.jks with passwords read from a
+# sibling app.properties (build.gradle:207-241, wired per flavor at :283, :322,
+# :341 and the ethos_dapp equivalent). A missing storeFile does not warn — it
+# fails validateSigning<Variant> — which is why all/build-fdroid.sh:135 has to
+# bind-mount $WARP_HOME/release into its container.
+#
+# The build-and-test answer is to generate a SELF-SIGNED THROWAWAY key in the
+# job, with a random password, and let the release variants package against it.
+# That is not the release key and nothing here can reach the release key: these
+# APKs install nowhere real, cannot update an installed app, and are not
+# distributable. It exercises the exact gradle line run.sh:1462 runs, which a
+# debug-variant substitute would not.
+#
+# -----------------------------------------------------------------------------
+# SUBMODULES
+#
+#   sdk           (253 MB) build-sdk-android only
+#   android       (708 MB full; --depth 1 is what makes this bearable)
+#   localizations (1.1 MB)  both in build-android
+#
+# connect, glog and goidenticons are NOT needed: at the recorded sdk pin
+# build/go.mod has NO replace directives and requires the published
+# github.com/urnetwork/sdk/v2026, so the module graph resolves from
+# proxy.golang.org. The guard below refuses the replace form, exactly as
+# linux-build.yml:575-601 does.
+#
+# `localizations` IS checked out here, unlike in the extension leg where it
+# would change the build. Here the generated res/values*/strings.xml files are
+# already committed (19 locale directories), so `npm run gen:android` is a
+# DRIFT CHECK: a string that exists in strings.xml but not in the store
+# disappears when the pipeline regenerates, and android/build.sh:6-9 says that
+# reproducing that failure mode locally is the point of the step.
+#
+# THE SUBMODULE URLS ARE SSH — every checkout does the GLOBAL rewrite first,
+# per linux-build.yml:540-553.
+#
+# -----------------------------------------------------------------------------
+# NOT ATTEMPTED HERE, DELIBERATELY
+#
+#   * THE F-DROID CONTAINER BUILD (all/build-fdroid.sh, the github flavor's
+#     APK). It pulls registry.gitlab.com/fdroid/fdroidserver:buildserver, then
+#     inside the container apt-installs a JDK, downloads Go, sdkmanager-installs
+#     the NDK and builds — tens of minutes on top of everything below, and it
+#     is run with --oom-kill-disable, a privileged docker flag. android's own
+#     build.sh has a SKIP_FDROID knob for precisely this situation. The github
+#     flavor still gets `compileGithubReleaseKotlin`, so a source break in it
+#     is still caught here; only its packaging is not.
+#   * INSTRUMENTED TESTS (app/app/src/androidTest). They need a booted emulator
+#     or a device; the JVM unit tests do not.
+#   * android/test-main.sh. It is the product acceptance test — it drives a
+#     real account and needs an acceptance vault credential.
+#   * ANDROID LINT. There is no lint configuration and no baseline in
+#     build.gradle, and no entry point in this repo runs it, so gating on it
+#     would be a new, unrelated cleanup rather than a regression check. The
+#     unit tests are the test gate here.
+#   * Play Store / Solana dApp store upload. Needs store credentials. run.sh
+#     uploads the .apk/.aab to a GitHub release and a human takes it from there.
+#   * Any release job. Nothing here writes.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_repo:
+        description: "owner/repo to take the sdk tree from (only used when sdk_ref is set)"
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        description: "Branch/tag/sha for the sdk tree. Empty = the recorded submodule pin. See the guard in build-sdk-android."
+        type: string
+        default: ""
+      android_repo:
+        description: "owner/repo to take the android tree from (only used when android_ref is set)"
+        type: string
+        default: "urnetwork/android"
+      android_ref:
+        description: "Branch/tag/sha for the android tree. Empty = the recorded submodule pin. Its app/local.properties supplies the version."
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      sdk_repo:
+        type: string
+        default: "urnetwork/sdk"
+      sdk_ref:
+        type: string
+        default: ""
+      android_repo:
+        type: string
+        default: "urnetwork/android"
+      android_ref:
+        type: string
+        default: ""
+  push:
+    branches:
+      - all-platform-ci
+      - upstream/all-platform-ci
+  pull_request:
+    branches:
+      - main
+      - all-platform-ci
+      - upstream/all-platform-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The NDK the app pins (android app/app/build.gradle:142 `ndkVersion`) and
+  # the one all/run.sh:209-212 installs on the release host. It is PREINSTALLED
+  # on ubuntu-24.04 (as $ANDROID_NDK_LATEST_HOME), so no sdkmanager download is
+  # needed — but the assertion steps check that rather than assume it, because
+  # sdk/build/Makefile:46-47 greps ANDROID_NDK_HOME for llvm-objcopy and fails
+  # the build if it is absent.
+  UR_ANDROID_NDK_VERSION: "29.0.14206865"
+  # go <= 1.26 is a hard requirement, not a preference: sdk/build/Makefile:23-25
+  # and :110-112 both say "gomobile/gobind must be built with go <= 1.26 -- the
+  # go 1.27 runtime fatals when this GODEBUG is set", the GODEBUG being
+  # gotypesalias=0, which the build_android recipe exports at :44. Do NOT
+  # replace this with `stable` the way linux-build.yml:566 can afford to.
+  # 1.26.6 is also exactly what all/run.sh:213 requires of the release host,
+  # and it is in the ubuntu-24.04 tool cache, so setup-go does not download.
+  UR_GO_VERSION: "1.26.6"
+  # Java 21 is not a choice either: build.gradle:430-436 sets
+  # sourceCompatibility/targetCompatibility VERSION_21 and jvmTarget JVM_21,
+  # and all/run.sh:217 requires openjdk 21.0.x. The ubuntu image DEFAULTS to
+  # 17, so this has to be set up explicitly.
+  UR_JAVA_VERSION: "21"
+  # Matches the release host, per all/run.sh:221-227. Only used for the
+  # localization regeneration, which needs nothing exotic — but pinning it
+  # keeps every leg of this repo's CI on one node.
+  UR_NODE_VERSION: "24.14.1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Read the version out of the android tree, without checking the android tree
+  # out. See the header: local.properties is the source of truth for both the
+  # app and the aar, and cloning a 708 MB repo to read 53 bytes would be
+  # absurd. Two contents-API reads and a gitlink lookup instead.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      warp_version: ${{ steps.version.outputs.warp_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      app_version_code: ${{ steps.version.outputs.app_version_code }}
+      sdk_source: ${{ steps.version.outputs.sdk_source }}
+      android_source: ${{ steps.version.outputs.android_source }}
+    steps:
+      # No submodules: this job reads gitlink SHAs and one 53-byte file.
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Read the version from the android tree's local.properties
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+          INPUT_SDK_REF: ${{ inputs.sdk_ref || '' }}
+          INPUT_ANDROID_REPO: ${{ inputs.android_repo || 'urnetwork/android' }}
+          INPUT_ANDROID_REF: ${{ inputs.android_ref || '' }}
+        run: |
+          set -euo pipefail
+          pin_sdk=$(git ls-tree HEAD sdk | awk '{print $3}')
+          pin_android=$(git ls-tree HEAD android | awk '{print $3}')
+          [ -n "$pin_sdk" ]     || { echo "::error::no 'sdk' submodule gitlink at HEAD"; exit 1; }
+          [ -n "$pin_android" ] || { echo "::error::no 'android' submodule gitlink at HEAD"; exit 1; }
+          if [ -n "$INPUT_SDK_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_SDK_REPO is a step env var
+            sdk_source="${INPUT_SDK_REPO}@${INPUT_SDK_REF} (override)"
+          else
+            sdk_source="urnetwork/sdk@${pin_sdk} (submodule pin)"
+          fi
+          if [ -n "$INPUT_ANDROID_REF" ]; then
+            # shellcheck disable=SC2153  # INPUT_ANDROID_REPO is a step env var
+            android_repo="$INPUT_ANDROID_REPO"
+            android_ref="$INPUT_ANDROID_REF"
+            android_source="${android_repo}@${android_ref} (override)"
+          else
+            android_repo="urnetwork/android"
+            android_ref="$pin_android"
+            android_source="urnetwork/android@${pin_android} (submodule pin)"
+          fi
+          # The two keys build.gradle:94-137 reads. Fetched from the exact ref
+          # the build job will check out, so the two cannot disagree.
+          props=$(gh api "repos/${android_repo}/contents/app/local.properties?ref=${android_ref}" --jq .content | base64 -d) \
+            || { echo "::error::could not read app/local.properties from ${android_repo}@${android_ref}"; exit 1; }
+          app_version=$(printf '%s\n' "$props" | sed -n 's/^warp\.version=//p' | tail -n1)
+          app_version_code=$(printf '%s\n' "$props" | sed -n 's/^warp\.version_code=//p' | tail -n1)
+          if [ -z "$app_version" ] || [ -z "$app_version_code" ]; then
+            echo "::error::${android_repo}@${android_ref} app/local.properties does not set both warp.version and warp.version_code"
+            {
+              echo "Without them, build.gradle's appVersion()/appVersionCode() fall back to"
+              echo "exec'ing <build>/warp/warpctl/build/<os>/<arch>/warpctl at CONFIGURATION"
+              echo "time. That binary does not exist in a fresh checkout, so gradle would fail"
+              echo "before any compile task is created. Point android_ref at a tree that"
+              echo "carries them (a release-staged branch does), or add the warp submodule and"
+              echo "a warpctl build to this workflow deliberately."
+            } >&2
+            exit 1
+          fi
+          case "$app_version_code" in
+            *[!0-9]*|'') echo "::error::warp.version_code '$app_version_code' is not an integer"; exit 1 ;;
+          esac
+          # The exact string android app/app/build.gradle:452 hands the buildSdk
+          # task, so the aar this run produces is stamped like the aar gradle
+          # would have produced.
+          warp_version="${app_version}+${app_version_code}"
+          {
+            echo "warp_version=$warp_version"
+            echo "app_version=$app_version"
+            echo "app_version_code=$app_version_code"
+            echo "sdk_source=$sdk_source"
+            echo "android_source=$android_source"
+          } >> "$GITHUB_OUTPUT"
+          echo "app $app_version ($app_version_code) -> WARP_VERSION=$warp_version"
+          {
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| warp.version | \`$app_version\` |"
+            echo "| warp.version_code | \`$app_version_code\` |"
+            echo "| WARP_VERSION (aar) | \`$warp_version\` |"
+            echo "| sdk | \`$sdk_source\` |"
+            echo "| android | \`$android_source\` |"
+            echo "| signing | throwaway self-signed key generated in the job — NOT distributable |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # THE GOMOBILE SDK — one job, all three ABIs, ubuntu at 1x.
+  #
+  # This is the `buildSdk` gradle task's `make init build_android`
+  # (build.gradle:449-454) with ONE deliberate substitution, which the android
+  # repo itself documents: `make init` ends with `go clean -cache && go clean
+  # -modcache` (sdk/build/Makefile:189-190), which throws away whatever
+  # actions/setup-go just restored AND the two `go mod download`s it just did.
+  # sdk/build/Makefile:173-175 says setup should use `init_tools` "so acceptance
+  # builds do not install tools or clean shared Go caches", and build.gradle
+  # registers a second task, `buildSdkAcceptance` (:458-463), for exactly this
+  # reason: "Keep the app build itself non-mutating".
+  #
+  # `init_tools` alone is NOT sufficient, and it fails loudly rather than
+  # subtly: at the recorded pin sdk/build/go.mod has no golang.org/x/mobile
+  # requirement and go.sum carries no x/mobile lines, so `gomobile bind` stops
+  # in the first seconds with "gomobile bind requires golang.org/x/mobile in the
+  # current module, but it is not in the module dependency graph". `init`'s
+  # `go get golang.org/x/mobile/bind@$(GOMOBILE_VERSION)` is what puts it there.
+  # So this job runs init_tools, then that one `go get`, and skips the cache
+  # wipe. The version is READ OUT OF THE MAKEFILE rather than hardcoded here,
+  # so the pin has one home.
+  # ---------------------------------------------------------------------------
+  build-sdk-android:
+    name: Build the gomobile SDK aar (arm64 + arm + amd64)
+    needs: plan
+    runs-on: ubuntu-24.04
+    # gomobile bind over three ABIs of a module pulling gvisor, pion/webrtc and
+    # quic-go, plus the gobind export-validation gate.
+    timeout-minutes: 75
+    env:
+      WARP_VERSION: ${{ needs.plan.outputs.warp_version }}
+      UR_SDK_REPO: ${{ inputs.sdk_repo || 'urnetwork/sdk' }}
+      UR_SDK_REF: ${{ inputs.sdk_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the sdk submodule over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 sdk \
+            || git submodule update --init sdk
+          git -C sdk log -1 --format='sdk pin: %H %s'
+
+      - name: Override the sdk ref
+        if: env.UR_SDK_REF != ''
+        run: |
+          set -euo pipefail
+          git -C sdk fetch --depth 1 "https://github.com/${UR_SDK_REPO}.git" "$UR_SDK_REF"
+          git -C sdk checkout --detach FETCH_HEAD
+          git -C sdk log -1 --format='sdk overridden to: %H %s'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # PINNED, not `stable`. See UR_GO_VERSION above: go 1.27 fatals under
+          # the GODEBUG the bind recipe requires.
+          go-version: ${{ env.UR_GO_VERSION }}
+          # Without this, setup-go looks for a go.sum at the REPO ROOT, finds
+          # none and silently caches nothing.
+          cache-dependency-path: sdk/build/go.sum
+
+      # `jar` comes from the JDK and build_android uses it to repack the aar
+      # after stripping .comment from the .so's.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.UR_JAVA_VERSION }}
+
+      # THE ONE MODE THIS JOB CANNOT BUILD, refused in five seconds with the
+      # reason. Same guard as linux-build.yml:575-601, against sdk/build rather
+      # than sdk/cgo.
+      - name: Refuse a sibling-replace module graph
+        working-directory: sdk/build
+        env:
+          # go.mod's `go` directive (1.26.5 at the pin) may be newer than the
+          # pinned toolchain's own version; let it fetch itself rather than
+          # failing on the version line.
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          n=$(go mod edit -json | jq '.Replace | length')
+          if [ "$n" != "0" ]; then
+            go mod edit -json | jq -r '.Replace[] | "  \(.Old.Path) => \(.New.Path)"'
+            echo "::error::sdk/build/go.mod carries $n replace directive(s) pointing at sibling checkouts."
+            {
+              echo "This job builds the sdk ALONE. A ref whose build/go.mod replaces"
+              echo "github.com/urnetwork/{sdk,connect,glog,goidenticons} with ../.. paths"
+              echo "needs those trees checked out as siblings of sdk/ AND a generated"
+              echo "go.sum. The build repo's recorded sdk pin has NO replace directives:"
+              echo "it requires the published github.com/urnetwork/sdk/v2026 and resolves"
+              echo "from proxy.golang.org against a committed build/go.sum."
+              echo ""
+              echo "Build a ref like that, or add the sibling apparatus here deliberately"
+              echo "rather than by accident."
+            } >&2
+            exit 1
+          fi
+          echo "no replace directives — the module graph resolves from the proxy"
+
+      - name: Assert the NDK and the toolchain contract
+        id: ndk
+        run: |
+          set -euo pipefail
+          fail=0
+          for tool in go make jar unzip zip jq; do
+            if command -v "$tool" > /dev/null 2>&1; then
+              echo "have $tool"
+            else
+              echo "::error::$tool is not on PATH"
+              fail=1
+            fi
+          done
+          ndk="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk/${UR_ANDROID_NDK_VERSION}"
+          if [ -d "$ndk" ]; then
+            echo "have NDK $UR_ANDROID_NDK_VERSION at $ndk"
+          else
+            echo "::error::NDK ${UR_ANDROID_NDK_VERSION} is not installed at $ndk — the runner image no longer ships it, so this job needs an sdkmanager install step"
+            ls -1 "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk" 2>/dev/null || true
+            fail=1
+          fi
+          # sdk/build/Makefile:46-47 finds llvm-objcopy under ANDROID_NDK_HOME
+          # and `test -n` fails the build if it is absent.
+          if [ -d "$ndk" ] && [ -z "$(find "$ndk" -type f -name llvm-objcopy -print -quit)" ]; then
+            echo "::error::no llvm-objcopy under $ndk — build_android's .comment strip would fail"
+            fail=1
+          fi
+          # Tripwire on run.sh, so UR_ANDROID_NDK_VERSION cannot drift away
+          # from the version the release host installs.
+          grep -q "ANDROID_NDK_VERSION=${UR_ANDROID_NDK_VERSION}" all/run.sh \
+            || { echo "::error::all/run.sh no longer installs NDK ${UR_ANDROID_NDK_VERSION} — update UR_ANDROID_NDK_VERSION in this workflow"; fail=1; }
+          # And the make target this job stands in for.
+          grep -q '^build_android:' sdk/build/Makefile \
+            || { echo "::error::sdk/build/Makefile has no 'build_android' target — this job is standing in for a recipe that moved"; fail=1; }
+          echo "ndk_home=$ndk" >> "$GITHUB_OUTPUT"
+          exit $fail
+
+      # init_tools installs the PINNED gomobile, gobind and checksec (and
+      # reinstalls gobind after `gomobile init`, which installs gobind@latest —
+      # keep that ordering if this is ever inlined). It does NOT touch the
+      # module graph and does NOT clean any cache.
+      - name: Install the pinned gomobile toolchain (make init_tools)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          make init_tools
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          ls -la "$HOME/go/bin"
+
+      # The single step `make init` does that `init_tools` does not, without
+      # the `go clean -cache && go clean -modcache` that follows it there.
+      #
+      # This REWRITES sdk/build/go.mod and go.sum, leaving the sdk submodule
+      # dirty. Harmless for a build-only run, but it must come AFTER any
+      # submodule-cleanliness gate or that gate would fail on this workflow's
+      # own edit.
+      - name: Add golang.org/x/mobile to the build module (the one half of `make init` that is needed)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          # Read the pin out of the Makefile rather than hardcoding it here, so
+          # GOMOBILE_VERSION has exactly one home.
+          gomobile_version=$(sed -n 's/^GOMOBILE_VERSION *?= *//p' Makefile | head -n1)
+          [ -n "$gomobile_version" ] \
+            || { echo "::error::could not read GOMOBILE_VERSION from sdk/build/Makefile"; exit 1; }
+          echo "gomobile pin: $gomobile_version"
+          go get "golang.org/x/mobile/bind@${gomobile_version}"
+          git -C . diff --stat -- go.mod go.sum || true
+
+      - name: Build the SDK aar (make build_android)
+        working-directory: sdk/build
+        env:
+          GOTOOLCHAIN: auto
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk_home }}
+        run: |
+          set -euo pipefail
+          make build_android
+          ls -la android
+
+      # build_android is a single ';'-chained recipe opened with `set -e`, so
+      # unlike the cgo Makefile a failing step there does abort it — but the
+      # recipe's own `test -s` checks run BEFORE the aar is repacked by `jar`,
+      # and the final `mv` is what publishes it. Assert on the published tree,
+      # and on the three ABIs, because a bind that silently dropped one would
+      # produce an app that crashes only on that architecture.
+      - name: Verify the SDK actually produced a usable aar
+        working-directory: sdk/build
+        run: |
+          set -uo pipefail
+          fail=0
+          aar="android/URnetworkSdk.aar"
+          src="android/URnetworkSdk-sources.jar"
+          if [ ! -f "$aar" ]; then
+            echo "::error::$aar was not produced — the gomobile bind failed (see the make output above)"
+            exit 1
+          fi
+          size=$(stat -c %s "$aar")
+          echo "$aar: $size bytes"
+          # a real bind of this sdk is tens of MB across three ABIs
+          if [ "$size" -lt 20000000 ]; then
+            echo "::error::$aar is only $size bytes — implausibly small for a three-ABI bind of the sdk"
+            fail=1
+          fi
+          # build.gradle:492 puts the sources jar on the compileOnly classpath;
+          # without it the app compiles but every SDK symbol loses its javadoc
+          # and, more importantly, its absence means the bind half-ran.
+          if [ -s "$src" ]; then
+            echo "ok  $src ($(stat -c %s "$src") bytes)"
+          else
+            echo "::error::$src missing or empty"
+            fail=1
+          fi
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if unzip -l "$aar" | grep -q "jni/$abi/libgojni.so"; then
+              echo "ok  jni/$abi/libgojni.so"
+            else
+              echo "::error::$aar carries no jni/$abi/libgojni.so — the -target list did not produce all three ABIs"
+              fail=1
+            fi
+          done
+          # The app imports com.bringyour.sdk.*; the bind's -javapkg is
+          # com.bringyour on module .../sdk/v2026, which is what yields it.
+          if ! unzip -l "$aar" | grep -q 'classes.jar'; then
+            echo "::error::$aar carries no classes.jar"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Upload the SDK aar
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-sdk-android
+          path: |
+            sdk/build/android/URnetworkSdk.aar
+            sdk/build/android/URnetworkSdk-sources.jar
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # THE APP. One job: the repo's own entry point, then the unit tests.
+  # ---------------------------------------------------------------------------
+  build-android:
+    name: Build + test the android app
+    needs: [plan, build-sdk-android]
+    runs-on: ubuntu-24.04
+    # Four release variants (three APK splits plus a universal each) and an
+    # .aab, on a cold gradle cache.
+    timeout-minutes: 75
+    env:
+      UR_ANDROID_REPO: ${{ inputs.android_repo || 'urnetwork/android' }}
+      UR_ANDROID_REF: ${{ inputs.android_ref || '' }}
+      UR_APP_VERSION: ${{ needs.plan.outputs.app_version }}
+      UR_APP_VERSION_CODE: ${{ needs.plan.outputs.app_version_code }}
+      # build.gradle:33-34 reads WARP_HOME for the signing root. Pointing it at
+      # a temp dir keeps the throwaway keystore out of the checkout entirely.
+      WARP_HOME: ${{ github.workspace }}/.ci-warp-home
+      # Gradle's daemon buys nothing in a one-shot container and costs memory
+      # the Kotlin compiler wants; the same reasoning all/build-fdroid.sh:100
+      # applies inside its container.
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # android is the largest submodule in the repo (708 MB with history), so
+      # --depth 1 is doing real work here. localizations is 1.1 MB.
+      - name: Check out the android and localizations submodules over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          for m in android localizations; do
+            git submodule update --init --depth 1 "$m" \
+              || git submodule update --init "$m"
+            git -C "$m" log -1 --format="$m pin: %H %s"
+          done
+
+      - name: Override the android ref
+        if: env.UR_ANDROID_REF != ''
+        run: |
+          set -euo pipefail
+          git -C android fetch --depth 1 "https://github.com/${UR_ANDROID_REPO}.git" "$UR_ANDROID_REF"
+          git -C android checkout --detach FETCH_HEAD
+          git -C android log -1 --format='android overridden to: %H %s'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.UR_JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # android/build.sh's first step is `npm ci && npm run gen:android` in the
+      # localizations repo. js-yaml is its only dependency.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.UR_NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: localizations/package-lock.json
+
+      - name: Download the SDK aar
+        uses: actions/download-artifact@v4
+        with:
+          name: urnetwork-sdk-android
+          path: sdk-aar
+
+      # Put the aar where build.gradle's fileTree looks for it, then prove it
+      # is there. The `sdk` submodule itself is NOT checked out in this job —
+      # 253 MB for a directory whose only role now is to hold build output.
+      - name: Stage the SDK aar into sdk/build/android
+        run: |
+          set -euo pipefail
+          # Tripwires: this step hardcodes a path that belongs to another repo's
+          # build file. If it moves, staging silently puts the aar somewhere the
+          # build does not read, and the failure surfaces much later as
+          # unresolved com.bringyour.sdk.* deep in Kotlin compilation.
+          grep -q 'sdk/build/android' android/app/app/build.gradle \
+            || { echo "::error::android app/app/build.gradle no longer reads the SDK from \${bringyourHomeDir}/sdk/build/android — this staging step is putting the aar somewhere unused"; exit 1; }
+          # bringyourHomeDir is BRINGYOUR_HOME or rootDir/../.. — rootDir is
+          # <build>/android/app, so the drop path is <build>/sdk/build/android.
+          # This workflow deliberately does NOT set BRINGYOUR_HOME, so the
+          # default has to be the one that resolves here.
+          grep -q "BRINGYOUR_HOME" android/app/app/build.gradle \
+            || { echo "::error::android app/app/build.gradle no longer honours BRINGYOUR_HOME/rootDir fallback — re-check the drop path"; exit 1; }
+          mkdir -p sdk/build/android
+          mv sdk-aar/URnetworkSdk.aar sdk-aar/URnetworkSdk-sources.jar sdk/build/android/
+          fail=0
+          for f in URnetworkSdk.aar URnetworkSdk-sources.jar; do
+            if [ -s "sdk/build/android/$f" ]; then
+              echo "staged sdk/build/android/$f ($(stat -c %s "sdk/build/android/$f") bytes)"
+            else
+              echo "::error::sdk/build/android/$f missing or empty after staging"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # The version contract: `plan` read local.properties over the API to
+      # stamp the aar, and this job checked the tree out for real. If the two
+      # disagree the aar and the app carry different versions, which is exactly
+      # the kind of mismatch that only shows up in a crash report months later.
+      - name: Assert the app's version matches the aar the SDK job stamped
+        run: |
+          set -euo pipefail
+          props=android/app/local.properties
+          [ -f "$props" ] || { echo "::error::$props is missing — gradle would fall back to exec'ing warpctl at configuration time and fail"; exit 1; }
+          have_version=$(sed -n 's/^warp\.version=//p' "$props" | tail -n1)
+          have_code=$(sed -n 's/^warp\.version_code=//p' "$props" | tail -n1)
+          echo "local.properties: $have_version ($have_code); plan resolved: $UR_APP_VERSION ($UR_APP_VERSION_CODE)"
+          fail=0
+          [ "$have_version" = "$UR_APP_VERSION" ] \
+            || { echo "::error::warp.version is '$have_version' but the aar was stamped for '$UR_APP_VERSION'"; fail=1; }
+          [ "$have_code" = "$UR_APP_VERSION_CODE" ] \
+            || { echo "::error::warp.version_code is '$have_code' but the aar was stamped for '$UR_APP_VERSION_CODE'"; fail=1; }
+          # And the NDK the app pins must be the one this runner has, or AGP
+          # fails with its own (much later) message.
+          grep -q "ndkVersion '${UR_ANDROID_NDK_VERSION}'" android/app/app/build.gradle \
+            || { echo "::error::android app/app/build.gradle no longer pins ndkVersion '${UR_ANDROID_NDK_VERSION}' — update UR_ANDROID_NDK_VERSION in this workflow"; fail=1; }
+          ndk="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk/${UR_ANDROID_NDK_VERSION}"
+          [ -d "$ndk" ] || { echo "::error::NDK ${UR_ANDROID_NDK_VERSION} is not installed at $ndk"; fail=1; }
+          exit $fail
+
+      # THE THROWAWAY SIGNING KEY. See the header for why this is not a secret
+      # and why a debug-variant substitute would test less. Everything here is
+      # generated in this step, used by this job, and destroyed with the runner.
+      - name: Generate a throwaway signing key for the release variants
+        run: |
+          set -euo pipefail
+          signing="$WARP_HOME/release/android/signing"
+          mkdir -p "$signing"
+          # Random, so nothing here is a reusable credential even by accident,
+          # and never echoed. keytool needs it three times per alias.
+          pass=$(openssl rand -hex 24)
+          # PKCS12 (keytool's default since JDK 9) requires the key password to
+          # equal the store password, which is why one password is used for
+          # every field below rather than five.
+          for alias in github play solana_dapp ethos_dapp; do
+            keytool -genkeypair -noprompt \
+              -keystore "$signing/app.jks" \
+              -storetype PKCS12 \
+              -alias "$alias" \
+              -dname "CN=urnetwork-ci, OU=CI, O=URnetwork, L=San Francisco, S=California, C=US" \
+              -storepass "$pass" \
+              -keypass "$pass" \
+              -keyalg RSA -keysize 2048 \
+              -validity 3650
+          done
+          # The keys build.gradle's signingSecret() looks up (:39-49, :215-241).
+          {
+            echo "password=$pass"
+            for alias in github play solana_dapp ethos_dapp; do
+              echo "${alias}.password=$pass"
+            done
+          } > "$signing/app.properties"
+          chmod 600 "$signing/app.properties"
+          # Prove the aliases exist without printing the password.
+          keytool -list -keystore "$signing/app.jks" -storepass "$pass" \
+            | sed -n 's/^\([a-z_]*\),.*PrivateKeyEntry.*/alias: \1/p'
+          echo "throwaway keystore at $signing/app.jks (NOT a release key; these APKs are not distributable)"
+
+      # ------------------------------------------------------------------
+      # THE ACTUAL BUILD. Everything below this line is the android repo's own
+      # entry point: localization regeneration, then the pipeline's gradle
+      # line, then a compile check of the github flavor.
+      #
+      # SKIP_FDROID=1 skips the F-Droid buildserver container (see the header).
+      # BUILD_SDK is deliberately NOT set: build-sdk-android already built the
+      # aar, and setting it would run `./gradlew goclientBuild` -> `make init
+      # build_android` -> the cache wipe this workflow exists to avoid.
+      # URNETWORK_ROOT defaults to the parent of the android repo, which in the
+      # submodule layout is already the build root.
+      # ------------------------------------------------------------------
+      - name: Build the android app (android/build.sh)
+        env:
+          SKIP_FDROID: "1"
+        run: ./android/build.sh
+
+      # THE TEST HALF, which nothing in the pipeline runs. The suites live in
+      # app/app/src/test (flavor-independent JVM tests, no device and no
+      # emulator); `github` is the flavor build.gradle:261 marks isDefault, so
+      # one variant's unit-test task covers them once.
+      - name: Run the JVM unit tests
+        working-directory: android/app
+        run: ./gradlew --no-daemon testGithubDebugUnitTest
+
+      - name: Upload the unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-android-test-report
+          path: android/app/app/build/reports/tests/
+          if-no-files-found: warn
+
+      # run.sh:1464-1487 uploads four artifacts by exact name. The names are
+      # produced by AGP from build.gradle:154-156's archivesName
+      # ("${applicationId}-${versionName}-${versionCode}") plus the flavor and
+      # the `universalApk true` split (:420-427) — i.e. from local.properties,
+      # NOT from any CI-derived version, which is why this asserts against the
+      # values `plan` read rather than against a run version.
+      - name: Assert the artifacts run.sh uploads were produced
+        working-directory: android/app/app/build/outputs
+        run: |
+          set -uo pipefail
+          fail=0
+          v="${UR_APP_VERSION}-${UR_APP_VERSION_CODE}"
+          for flavor in play solana_dapp ethos_dapp; do
+            apk="apk/${flavor}/release/com.bringyour.network-${v}-${flavor}-universal-release.apk"
+            if [ -s "$apk" ]; then
+              echo "ok  $apk ($(stat -c %s "$apk") bytes)"
+            else
+              echo "::error::missing or empty: $apk"
+              echo "  present under apk/${flavor}/release:"
+              find "apk/${flavor}/release" -maxdepth 1 -type f -printf '    %f\n' 2>/dev/null || echo "    (no such directory)"
+              fail=1
+            fi
+          done
+          aab="bundle/playRelease/com.bringyour.network-${v}-play-release.aab"
+          if [ -s "$aab" ]; then
+            echo "ok  $aab ($(stat -c %s "$aab") bytes)"
+          else
+            echo "::error::missing or empty: $aab"
+            find bundle/playRelease -maxdepth 1 -type f -printf '    %f\n' 2>/dev/null || echo "    (no such directory)"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Upload the android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-build-android
+          # The four names run.sh uploads, plus the per-ABI split APKs the same
+          # build produced. Signed only with the throwaway key from this run.
+          path: |
+            android/app/app/build/outputs/apk/*/release/*.apk
+            android/app/app/build/outputs/bundle/playRelease/*.aab
+          if-no-files-found: error
