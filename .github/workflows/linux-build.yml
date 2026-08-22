@@ -871,9 +871,11 @@ jobs:
           # module built nothing. Deliberately loose -- this is a floor, not a budget.
           [ "$bytes" -ge 5000000 ] \
             || { echo "::error::$bundle is only $bytes bytes — the app module likely built nothing"; exit 1; }
-          echo "### Flatpak build test" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`$(basename "$bundle")\` — $bytes bytes, amd64 only (flatpak-builder cannot cross-compile)." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Flatpak build test"
+            echo ""
+            echo "\`$(basename "$bundle")\` — $bytes bytes, amd64 only (flatpak-builder cannot cross-compile)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the bundle
         uses: actions/upload-artifact@v4
