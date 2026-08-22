@@ -629,12 +629,88 @@ warp.version_code=$WARP_VERSION_CODE
 error_trap 'android edit settings'
 
 
-# metadata
-# copy the pending change log into place if it exists
-if [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
+# metadata -- THE STORE CHANGELOG
+#
+# What this replaced: a straight `cp pending.txt <version code>.txt`. pending.txt
+# is a static one-liner that nobody has edited in months, so every changelog this
+# repo has ever published is byte-identical -- 1025763520, 1025613560, 1025339670
+# and 1025223880 all read "- Bug and performance fixes.". all/changelog.py builds
+# the note out of the actual commits between the last release's submodule pins and
+# the ones this release is about to tag. `--to worktree` because at this point in
+# the run the new release is not committed or tagged yet: every submodule is
+# sitting on the main HEAD it was pulled to, which is exactly what will be pinned.
+#
+# 500 CHARACTERS, and the generator does the trimming, not the store. fdroidserver
+# sets char_limits['whatsNew'] = 500 and update.py slices `text[:limit]` with no
+# warning and no error, so an over-long note is published cut mid-sentence and
+# nothing anywhere says so. Play's cap is the same 500 and it rejects rather than
+# truncates. The generator packs whole bullets inside that budget; nothing here
+# can produce a half-sentence.
+#
+# pending.txt keeps its job. If somebody wrote a headline for this release it goes
+# above the generated bullets (--lede); if it still holds the shipped placeholder
+# text the generator ignores it and says so on stderr.
+#
+# warn_trap, not error_trap: a changelog is not worth losing a release over. The
+# generator renders both artifacts in full before it opens either output file, so
+# a failure of any kind -- no python3, GitHub unreachable, a rate limit -- leaves
+# the tree untouched and the `-s` guard below falls back to exactly the old
+# behaviour. GITHUB_API_KEY is already exported above for the ur.io changelog and
+# raises the API limit here too; every repo walked is public, so it is optional.
+#
+# THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
+# shows no changelog for this app at all today. fdroiddata's
+# com.bringyour.network.yml carries `VercodeOperation: ['%c + 2', '%c + 3']`, so
+# F-Droid builds and indexes version codes base+2 and base+3, while this block was
+# writing only <base>.txt. fdroidserver matches changelog files by EXACT filename
+# -- update.py's `f == str(CurrentVersionCode) + '.txt'` and its
+# `int(base) in [b["versionCode"] for b in builds]` -- so 42 of the 45 builds in
+# that recipe have no changelog and f-droid.org renders none. Writing the same
+# text under each offset fixes that with no fdroiddata change needed. The offsets
+# are read from FDROID_VERSION_CODE_OFFSETS rather than hardcoded a third time,
+# because fdroiddata owns them and a third ABI would silently break this again.
+# default.txt is fdroidserver's documented fallback (update.py: used only when no
+# version-specific entry was set, so it can never clobber a real one) and costs one
+# more cp: if the offsets ever drift, F-Droid degrades to a present-but-generic
+# note instead of a blank one.
+FDROID_VERSION_CODE_OFFSETS="${FDROID_VERSION_CODE_OFFSETS:-0 2 3}"
+BUILD_CHANGELOG_STORE="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.txt"
+# exported: github_finalize_release() below reads it, long after this block
+export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.md"
+rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"
+builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
+python3 "$BUILD_HOME/all/changelog.py" \
+    --repo "$BUILD_HOME" \
+    --to worktree \
+    --to-label "v${EXTERNAL_WARP_VERSION}" \
+    --lede "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
+    --store-out "$BUILD_CHANGELOG_STORE" \
+    --full-out "$BUILD_CHANGELOG_FULL"
+warn_trap 'generate changelog'
+if [ ! -s "$BUILD_CHANGELOG_STORE" ] && [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
+    builder_message "warning: changelog generation produced no store note; falling back to metadata/en-US/changelogs/pending.txt. Build will continue."
+    cp "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" "$BUILD_CHANGELOG_STORE"
+fi
+if [ -s "$BUILD_CHANGELOG_STORE" ]; then
+    # ${=...} so zsh word-splits the offset list; zsh does not split on
+    # whitespace by default the way bash does.
+    for changelog_offset in ${=FDROID_VERSION_CODE_OFFSETS}; do
+        cp \
+            "$BUILD_CHANGELOG_STORE" \
+            "$BUILD_HOME/metadata/en-US/changelogs/$((WARP_VERSION_CODE+changelog_offset)).txt"
+    done
     cp \
-        "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
-        "$BUILD_HOME/metadata/en-US/changelogs/${WARP_VERSION_CODE}.txt"
+        "$BUILD_CHANGELOG_STORE" \
+        "$BUILD_HOME/metadata/en-US/changelogs/default.txt"
+    # $( ) rather than backticks: this nests a command substitution inside a
+    # double-quoted string that already contains backticks (the Slack code
+    # fence), and backticks cannot nest there. `wc -m` counts CHARACTERS, which
+    # is the unit both stores enforce -- `wc -c` would under-report the moment a
+    # commit subject carries an em dash or a non-ASCII name.
+    builder_message "store changelog ($(wc -m < "$BUILD_CHANGELOG_STORE" | tr -d ' ')/500 chars):
+\`\`\`
+$(cat "$BUILD_CHANGELOG_STORE")
+\`\`\`"
 fi
 
 
@@ -1175,6 +1251,44 @@ ${HEADER}
         RELEASE_BODY="$RELEASE_BODY
 $a"
     done
+
+    # THE FULL CHANGELOG, and this is the only place it goes.
+    #
+    # Every commit in every submodule since the previous release, grouped by
+    # component, with bodies and links -- the thing that cannot fit in the
+    # 500-character store note. The GitHub release body is where it belongs: it
+    # is the artifact Obtainium users and anyone following releases already read,
+    # and it is public, unlike mmm/ur.io.
+    #
+    # BASE RELEASE ONLY ($1 is set for the +2/+3 architecture-specific releases).
+    # Those are the same release re-tagged per ABI -- their body already says so
+    # -- and repeating tens of kilobytes three times is noise that would also
+    # triple the exposure to the size limit below.
+    #
+    # THAT LIMIT IS A RELEASE-LOSING ONE, which is why it is checked rather than
+    # assumed. The API answers 422 "body is too long (maximum is 125000
+    # characters)", $BUILD_CURL carries --fail-with-body so any HTTP >= 400 exits
+    # non-zero, and the error_trap below then exits the run -- AFTER every artifact
+    # has already been uploaded. changelog.py budgets itself to 120000 by default;
+    # this re-checks against what the header and the VirusTotal table actually
+    # took, and drops the section with a warning rather than risking the release.
+    #
+    # Set BUILD_RELEASE_BODY_CHANGELOG= to publish without it (see README): the
+    # ur.io site changelog is generated by walking these release bodies from a
+    # repo this one cannot see, so this is the kill switch if that walk ever
+    # objects to the longer body.
+    if [ ! "$1" ] && [ "${BUILD_RELEASE_BODY_CHANGELOG:-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
+        RELEASE_CHANGELOG=`cat "$BUILD_CHANGELOG_FULL"`
+        if [ $((${#RELEASE_BODY} + ${#RELEASE_CHANGELOG} + 8)) -le 124000 ]; then
+            RELEASE_BODY="$RELEASE_BODY
+
+---
+
+$RELEASE_CHANGELOG"
+        else
+            builder_message "warning: the full changelog (${#RELEASE_CHANGELOG} chars) does not fit the GitHub release body next to the artifact table; publishing without it. Build will continue."
+        fi
+    fi
 
     GITHUB_RELEASE=`$BUILD_CURL \
         -X PATCH \

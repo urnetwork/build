@@ -9,6 +9,51 @@ The project uses warp versions, `yyyy.mm.dd-version_code`, so that versions are 
 `metadata/en-US/changelogs` will be populated for each version code that is published in a store.
 
 
+## Changelogs
+
+Changelogs are generated from the commits, not written by hand. `all/changelog.py`
+reads the submodule pins of two releases -- a release tag in this repo pins every
+submodule at an exact commit -- walks the commit range that fell between them in
+each component, and renders two different artifacts, because there are two
+audiences with very different limits:
+
+- **the store note**, `metadata/en-US/changelogs/<version code>.txt`. Capped at
+  **500 characters**: F-Droid truncates at 500 silently (`fdroidserver`'s
+  `char_limits['whatsNew']`) and Google Play rejects an over-length note outright.
+  The generator packs whole bullets inside that budget, so it is never a store
+  that does the cutting. It draws only on the components that ship inside the
+  Android artifact, and holds back commits that touched only CI, tests, docs or
+  build scripts -- those did not change the app anyone installed.
+- **the full changelog**, in the GitHub release body. Every commit in every
+  submodule, grouped by component, with the first paragraph of each commit body
+  and a link to each commit. Budgeted against GitHub's 125,000-character release
+  body limit.
+
+`all/run.sh` generates both during a release. It runs under `warn_trap`: if the
+generator fails for any reason the release still completes and the store note
+falls back to `metadata/en-US/changelogs/pending.txt`, which is also where you can
+put a human-written headline for the next release -- it is placed above the
+generated bullets.
+
+The same text is written under the base version code and under each offset in
+`FDROID_VERSION_CODE_OFFSETS` (default `0 2 3`), plus `default.txt`. That is not
+redundancy: fdroiddata's recipe declares `VercodeOperation: ['%c + 2', '%c + 3']`
+for the ABI-split APKs and fdroidserver matches changelog files by exact
+filename, so a base-code-only file means F-Droid shows no changelog at all.
+
+Set `BUILD_RELEASE_BODY_CHANGELOG=` to publish releases without the full
+changelog in the body.
+
+Run it by hand for any pair of releases -- it is deterministic, and it needs no
+token for these repos because they are all public:
+
+```
+all/changelog.py --from v2026.8.21-1025339670 --to v2026.8.21-1025613560
+all/changelog.py --help          # filters, budgets, audiences
+all/changelog.py --self-test     # no network
+```
+
+
 ## Build and deploy all
 
 `all/run.sh` runs daily:
