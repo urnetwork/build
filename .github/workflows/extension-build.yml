@@ -1,0 +1,306 @@
+name: Extension build + test (Chrome + Firefox)
+
+# =============================================================================
+# WHAT THIS IS
+#
+# The browser-extension leg of all/run.sh, run on a GitHub runner. run.sh's
+# whole extension leg is three lines:
+#
+#     all/run.sh:1305   (cd $BUILD_HOME/extension && make)
+#     all/run.sh:1308   upload crx-@urnetwork-extension-${EXTENSION_VERSION}.zip
+#     all/run.sh:1309   upload crx-@urnetwork-extension-${EXTENSION_VERSION}-firefox.zip
+#
+# This runs the first line and asserts the two files the other two would have
+# uploaded. It does NOT upload them anywhere: publishing to the Chrome Web
+# Store / addons.mozilla.org needs store credentials and is out of scope. An
+# unsigned .zip that compiles and passes its tests is the deliverable.
+#
+# It also runs the half run.sh never runs: extension/test.sh, the repo's own
+# top-level test entry point (tsc over the test project, then the vitest
+# suite), plus `npm run lint`. `make` alone type-checks the app but runs no
+# tests at all.
+#
+# -----------------------------------------------------------------------------
+# THE JOB GRAPH
+#
+#   build-test   ONE job. ~6-8 min, ubuntu-24.04, 1x billing.
+#
+# There is no matrix and no SDK job, and both are deliberate:
+#
+#   * CHROME AND FIREFOX ARE ONE JOB. They are two invocations of the same
+#     toolchain over the same node_modules — `npm run build` and
+#     `npm run build:firefox` (extension/package.json:12 and :20, both driven
+#     by the Makefile's `build` target). Splitting them across two runners
+#     would pay for a second ~1 min `npm ci` and a second 17.9 MB sdk-js
+#     download to save a couple of minutes of vite.
+#
+#   * THERE IS NO GO SDK TO BUILD. Unlike every other platform in this repo,
+#     the extension does not consume a locally built SDK. It depends on the
+#     PUBLISHED `@urnetwork/sdk-js` npm package (extension/package.json:27),
+#     wasm included: extension/vite.config.ts:115-120 copies
+#     `node_modules/@urnetwork/sdk-js/wasm/*` into the bundle, and
+#     package-lock.json resolves that dependency to a registry.npmjs.org
+#     tarball with an integrity hash. So this leg needs no Go toolchain, no
+#     gomobile, and not the 253 MB `sdk` submodule — which is why it is the
+#     cheapest platform in the whole pipeline.
+#
+# -----------------------------------------------------------------------------
+# EXACTLY ONE SUBMODULE, AND THAT IS A CORRECTNESS CONSTRAINT, NOT A SAVING
+#
+# `extension` (28 MB) is checked out and NOTHING else. In particular
+# `localizations` is deliberately NOT checked out, and `submodules: recursive`
+# must never be used here:
+#
+#   extension/scripts/build-locales.js resolves a SIBLING localization store at
+#   `../../localizations` and PREFERS it over the published
+#   @urnetwork/localizations package when that path exists. In this repo's
+#   submodule layout that path is <build>/localizations. Checking the submodule
+#   out would therefore silently change which locale store the bundle is built
+#   from — from the version pinned in package-lock.json to whatever the
+#   submodule points at. Leaving it out is what makes this build reproducible
+#   from the lockfile alone.
+#
+# THE SUBMODULE URL IS SSH (`git@github.com:urnetwork/extension.git` in
+# .gitmodules) and there is no key on a runner. The fix is the GLOBAL url
+# rewrite linux-build.yml:540-553 already proved; a repo-local
+# `git config url...insteadOf` is silently ignored by the `git clone` that
+# submodule--helper spawns, and the job then hangs on an ssh handshake.
+#
+# -----------------------------------------------------------------------------
+# NOT ATTEMPTED HERE, DELIBERATELY
+#
+#   * Publishing to the Chrome Web Store or AMO. Both need store credentials
+#     (and AMO additionally signs). run.sh does not do it either — it uploads
+#     the two zips to a GitHub release and a human takes them from there.
+#   * extension/build.sh. That is the LOCAL smoketest path: it rsyncs a
+#     sibling `../localizations/keys/` over the installed npm package before
+#     building, which is exactly the deviation the section above says must not
+#     happen in CI. `make` is what run.sh:1305 calls and what this calls.
+#   * A version override. The zip names come from extension/package.json's own
+#     `version` field via vite.config.ts:126-128, not from a CI-derived
+#     version, so this workflow has no `version` input and no plan job. The
+#     assertion below reads package.json rather than assuming a value.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      extension_repo:
+        description: "owner/repo to take the extension tree from (only used when extension_ref is set)"
+        type: string
+        default: "urnetwork/extension"
+      extension_ref:
+        description: "Branch/tag/sha for the extension tree. Empty = the recorded submodule pin."
+        type: string
+        default: ""
+  # REUSABLE, so all-platforms.yml can run every leg from one dispatch. This
+  # workflow BUILDS AND TESTS and has no release job, so there is nothing a
+  # caller could turn into a publish.
+  workflow_call:
+    inputs:
+      extension_repo:
+        type: string
+        default: "urnetwork/extension"
+      extension_ref:
+        type: string
+        default: ""
+  push:
+    branches:
+      - all-platform-ci
+      - upstream/all-platform-ci
+  pull_request:
+    branches:
+      - main
+      - all-platform-ci
+      - upstream/all-platform-ci
+
+# This workflow only ever READS. It has no release job and never needs
+# contents: write.
+permissions:
+  contents: read
+
+concurrency:
+  group: extension-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # run.sh:221-227 hard-fails the release host unless it is running exactly
+  # this node and exactly this npm. Node ships npm with it, so ONE pinned node
+  # satisfies both checks: nodejs.org's release index records v24.14.1 ->
+  # npm 11.11.0. The assertion step below re-reads run.sh rather than trusting
+  # these two lines to have been kept in sync with it.
+  #
+  # For a BUILD the pin is not load-bearing (npm ci never rewrites a lockfile,
+  # and nothing in the resolved tree declares an npm engine tighter than
+  # >=8), but matching the release host costs nothing and keeps CI honest to
+  # the script it stands in for.
+  UR_NODE_VERSION: "24.14.1"
+  UR_NPM_VERSION: "11.11.0"
+
+jobs:
+  build-test:
+    name: Build + test the extension
+    runs-on: ubuntu-24.04
+    # Generous against a cold npm cache and the 17.9 MB sdk-js tarball; the
+    # job itself is ~6-8 min.
+    timeout-minutes: 30
+    env:
+      UR_EXTENSION_REPO: ${{ inputs.extension_repo || 'urnetwork/extension' }}
+      UR_EXTENSION_REF: ${{ inputs.extension_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      # `submodules:` is left at its default (false). See the header: checking
+      # out `localizations` here would change which locale store the bundle is
+      # built from, so `recursive` is not merely expensive, it is wrong.
+      - name: Check out the extension submodule over https
+        run: |
+          set -euo pipefail
+          # GLOBAL, not repo-local — see linux-build.yml:543-547 for why.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 extension \
+            || git submodule update --init extension
+          git -C extension log -1 --format='extension pin: %H %s'
+          # The constraint from the header, asserted rather than assumed: an
+          # empty gitlink directory is what makes build-locales.js fall back to
+          # the lockfile-pinned npm package.
+          if [ -e localizations/package.json ]; then
+            echo "::error::the 'localizations' submodule is checked out — extension/scripts/build-locales.js prefers a sibling store over the lockfile-pinned @urnetwork/localizations package, so this build would no longer be reproducible from package-lock.json alone"
+            exit 1
+          fi
+          echo "localizations is not checked out — build-locales.js will use the lockfile-pinned package"
+
+      - name: Override the extension ref
+        if: env.UR_EXTENSION_REF != ''
+        run: |
+          set -euo pipefail
+          git -C extension fetch --depth 1 "https://github.com/${UR_EXTENSION_REPO}.git" "$UR_EXTENSION_REF"
+          git -C extension checkout --detach FETCH_HEAD
+          git -C extension log -1 --format='extension overridden to: %H %s'
+
+      # The extension repo pins nothing itself — no .nvmrc, no .node-version,
+      # no `engines` — while vite 7 and vitest 4 both refuse Node below
+      # 20.19/22.12. Inheriting the runner image's default node would make this
+      # job's toolchain move whenever the image does, so pin it here and pin it
+      # to the version the release host is required to run.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.UR_NODE_VERSION }}
+          cache: npm
+          # Without this, setup-node looks for a lockfile at the REPO ROOT,
+          # finds none, and caches nothing — the same failure mode
+          # linux-build.yml:567-571 documents for setup-go.
+          cache-dependency-path: extension/package-lock.json
+
+      # Assert the environment AND the contract. This job stands in for one
+      # line of all/run.sh and for two version checks near the top of it; if
+      # either moves, the job should say so rather than build the wrong thing.
+      - name: Assert the toolchain and the run.sh contract
+        run: |
+          set -euo pipefail
+          fail=0
+          node_have=$(node --version)
+          npm_have=$(npm --version)
+          echo "node $node_have, npm $npm_have"
+          [ "$node_have" = "v${UR_NODE_VERSION}" ] \
+            || { echo "::error::node is $node_have, expected v${UR_NODE_VERSION}"; fail=1; }
+          [ "$npm_have" = "${UR_NPM_VERSION}" ] \
+            || { echo "::error::npm is $npm_have, expected ${UR_NPM_VERSION} (the version node ${UR_NODE_VERSION} bundles)"; fail=1; }
+          # Tripwires on run.sh's own guards, so UR_NODE_VERSION/UR_NPM_VERSION
+          # above cannot drift away from what the release host demands.
+          grep -q "v${UR_NODE_VERSION}" all/run.sh \
+            || { echo "::error::all/run.sh no longer requires node ${UR_NODE_VERSION} — update UR_NODE_VERSION in this workflow"; fail=1; }
+          grep -q "${UR_NPM_VERSION}" all/run.sh \
+            || { echo "::error::all/run.sh no longer requires npm ${UR_NPM_VERSION} — update UR_NPM_VERSION in this workflow"; fail=1; }
+          # This job stands in for run.sh's `(cd $BUILD_HOME/extension && make)`.
+          # If that line ever stops being a bare `make`, this job is building
+          # something the pipeline no longer builds.
+          # -F (fixed string), because the pattern contains a '$' that BRE
+          # would not treat as a literal here.
+          # shellcheck disable=SC2016  # matching run.sh's literal text, not expanding it
+          grep -qF 'cd $BUILD_HOME/extension && make' all/run.sh \
+            || { echo "::error::all/run.sh no longer builds the extension with a bare 'make' — this job is standing in for a line that moved"; fail=1; }
+          # And the entry points this job calls must exist at the pinned tree.
+          for f in extension/Makefile extension/test.sh extension/package.json extension/package-lock.json; do
+            [ -f "$f" ] || { echo "::error::$f is missing at the extension pin"; fail=1; }
+          done
+          exit $fail
+
+      # ------------------------------------------------------------------
+      # THE ACTUAL BUILD. `make` is `clean` + `npm ci` + `npm run build` +
+      # `npm run build:firefox` — the same target run.sh:1305 invokes.
+      # ------------------------------------------------------------------
+      - name: Build both targets (extension/Makefile)
+        working-directory: extension
+        run: make
+
+      # `make` produces the zips through vite-plugin-zip-pack, which is the
+      # LAST plugin in each of two separate vite builds. A failure in the
+      # firefox half after a successful chrome half would leave one zip on
+      # disk, and `make` would have exited non-zero — but the run.sh leg it
+      # stands in for uploads BOTH names unconditionally, so assert both.
+      #
+      # The names come from extension/package.json's own name+version
+      # (vite.config.ts:7 imports them, :126-128 formats them), NOT from any
+      # CI-derived version, so read them from package.json instead of guessing.
+      - name: Assert both crx zips were produced
+        working-directory: extension
+        run: |
+          set -uo pipefail
+          fail=0
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name.replace('/','-')")
+          echo "package: $name@$version"
+          for suffix in "" "-firefox"; do
+            zipname="release/crx-${name}-${version}${suffix}.zip"
+            if [ -s "$zipname" ]; then
+              echo "ok  $zipname ($(stat -c %s "$zipname") bytes)"
+            else
+              echo "::error::missing or empty: $zipname"
+              fail=1
+              continue
+            fi
+            # A zip that parses but carries no manifest is not an extension.
+            # crxjs writes the manifest at the zip root.
+            if ! unzip -l "$zipname" | grep -q 'manifest.json'; then
+              echo "::error::$zipname contains no manifest.json"
+              fail=1
+            fi
+            # The wasm is the SDK. vite.config.ts:115-120 copies it in and
+            # manifest.config.ts declares wasm/sdk.wasm as a web-accessible
+            # resource; a bundle without it loads and then cannot connect.
+            if ! unzip -l "$zipname" | grep -q 'wasm/sdk.wasm'; then
+              echo "::error::$zipname is missing wasm/sdk.wasm — the @urnetwork/sdk-js static copy did not run"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # THE TEST HALF, which run.sh does not run at all. test.sh is the
+      # extension repo's own top-level entry point: `npm run test:types`
+      # (tsc -p tsconfig.test.json) then `npm test` (vitest run). It reuses the
+      # node_modules `make` just populated. The suites mock the chrome API
+      # (tests/chrome-mock.ts) and run in the node environment, so no browser
+      # and no credential is involved.
+      - name: Run the extension test suite (extension/test.sh)
+        working-directory: extension
+        run: ./test.sh
+
+      # eslint is configured in-repo (extension/eslint.config.js) and exposed
+      # as `npm run lint`. Nothing in the pipeline runs it, so a lint break can
+      # only be found here. It is a gate: the repo is clean today.
+      - name: Lint the extension (eslint)
+        working-directory: extension
+        run: npm run lint
+
+      - name: Upload the crx zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-extension-crx
+          # Only the two release zips, not dist/ and dist-firefox/ — each of
+          # those embeds its own 45 MB copy of the wasm, and the zips already
+          # contain everything that ships.
+          path: extension/release/*.zip
+          if-no-files-found: error
