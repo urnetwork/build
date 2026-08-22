@@ -845,10 +845,35 @@ jobs:
           # GNOME runtime itself, and prefers a native flatpak-builder when one
           # exists -- installing the distro's would pick a different builder
           # version than the release host uses.
-          sudo apt-get install -y --no-install-recommends flatpak
+          # flatpak-builder NATIVELY, which matters. make-flatpak.sh prefers a
+          # native builder and otherwise falls back to `flatpak run
+          # org.flatpak.Builder` -- the only option on an immutable host like
+          # Bazzite, and the path this job first took. That sandboxed builder
+          # could not see the user-installed runtime and died with "Failed to
+          # init: Unable to find sdk org.gnome.Sdk version 49" even though the
+          # install had just succeeded. A GitHub runner is not immutable, so it
+          # should take the native path; the sandboxed fallback is exercised on
+          # the hosts that actually need it.
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
           flatpak --version
+          flatpak-builder --version
           flatpak remote-add --if-not-exists --user \
             flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      # Explicit, and BEFORE make-flatpak.sh, for one reason: that script pipes
+      # its own runtime install to /dev/null, so when the runtime is the problem
+      # the log says nothing. Installing it here first makes a download failure
+      # legible and turns the script's install into a no-op. --user to match the
+      # remote added above; RUNTIME_VERSION tracks make-flatpak.sh's default.
+      - name: Install the GNOME runtime
+        env:
+          RUNTIME_VERSION: "49"
+        run: |
+          set -euo pipefail
+          flatpak install -y --noninteractive --user flathub \
+            "org.gnome.Platform//${RUNTIME_VERSION}" "org.gnome.Sdk//${RUNTIME_VERSION}"
+          flatpak list --user --runtime --columns=application,branch | grep '^org\.gnome\.' \
+            || { echo "::error::org.gnome.Platform/Sdk //${RUNTIME_VERSION} is not installed"; exit 1; }
 
       - name: Build the bundle
         run: |
