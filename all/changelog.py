@@ -44,9 +44,9 @@
 # limit, the format, the field -- is shared between them:
 #
 #   android   500 chars   plain text      metadata/en-US/changelogs/<code>.txt
-#   apple    4000 chars   plain text      store-notes/apple/en-US/release_notes.txt
-#   windows  1500 chars   plain text      store-notes/windows/en-US/whats_new.txt
-#   linux     no limit    AppStream XML   store-notes/linux/release-description.xml
+#   apple    4000 chars   plain text      changelogs/<versionCode>_Apple.txt
+#   windows  1500 chars   plain text      changelogs/<versionCode>_Windows.txt
+#   linux     no limit    AppStream XML   changelogs/<versionCode>_Linux.xml
 #
 # A single 500-character plain-text note for all four would waste seven eighths
 # of what App Store Connect accepts, and would be INVALID on Linux, where the
@@ -105,7 +105,7 @@
 #
 #   all/changelog.py --from v2026.8.21-1025339670 --to v2026.8.21-1025613560
 #   all/changelog.py --to worktree --store-out store.txt --full-out full.md
-#   all/changelog.py --to worktree --store-notes-dir store-notes
+#   all/changelog.py --to worktree --notes-dir changelogs
 #   all/changelog.py --audience apple --to v2026.8.21-1025763520
 #   all/changelog.py --self-test
 # =============================================================================
@@ -215,16 +215,22 @@ SHARED_COMPONENTS = ["sdk", "connect", "glog", "goidenticons"]
 #   None            do not mark a boundary at all (the "all" audience, which has
 #                   no shared tier because it has no app tier either).
 #
-# "out" is where --store-notes-dir writes the note, RELATIVE to that directory,
-# and android's is deliberately None: its home is metadata/en-US/changelogs/
-# <versionCode>.txt, all/run.sh writes it there once per FDROID_VERSION_CODE_OFFSETS
-# entry, and a second copy under store-notes/ would be a second source of truth
-# for the one file a robot reads unattended. Nothing else may be written under
-# metadata/ either -- fdroidserver globs `build/[A-Za-z]*/metadata/[a-z][a-z]*`
-# and then os.walk()s it, matching changelog files by bare filename at ANY depth,
-# so a per-store tree under metadata/ would either collide with the real en-US
-# note or fabricate a locale in the F-Droid index. store-notes/ is a sibling of
-# metadata/, invisible to that glob.
+# "out" is the SUFFIX of the file --notes-dir writes, which lands there as
+# "<prefix>_<suffix>" -- 1025763520_Apple.txt, 1025763520_Linux.xml. The prefix is
+# the release's version code, so the directory is a per-release archive that sorts
+# chronologically, the same convention metadata/en-US/changelogs/<versionCode>.txt
+# already uses.
+#
+# android has a file here AND its fastlane copy: F-Droid reads
+# metadata/en-US/changelogs/<versionCode>.txt unattended and that path cannot move,
+# while the copy here is what a human opens when writing the Play note. run.sh
+# writes the fastlane one; both come from this same render, so they cannot drift.
+#
+# The notes directory must stay OUT of metadata/. fdroidserver globs
+# `build/[A-Za-z]*/metadata/[a-z][a-z]*` and then os.walk()s the result, matching
+# changelog files by bare filename at any depth -- a directory under metadata/
+# would fabricate a locale in the F-Droid index. A top-level changelogs/ is
+# invisible to that glob.
 AUDIENCES = {
     # F-Droid reads this file off this repository with no human in between, and
     # Google Play gets the same text pasted by hand (run.sh:1603 is still
@@ -235,7 +241,12 @@ AUDIENCES = {
         "limit": 500,
         "format": "text",
         "boundary": "",
-        "out": None,
+        # A file here AND the fastlane copy run.sh writes. The fastlane path is
+        # what F-Droid reads unattended and cannot move; this one is the
+        # per-release record a human opens when writing the Play note, and it
+        # sits beside the other storefronts so nobody has to know that Android
+        # keeps its real copy somewhere else.
+        "out": "Android.txt",
         "where": "metadata/en-US/changelogs/<versionCode>.txt (F-Droid, unattended) "
                  "and Play Console -> release notes (pasted by hand)",
     },
@@ -262,7 +273,7 @@ AUDIENCES = {
         # and en-US is a real App Store Connect locale), so if the manual paste is
         # ever replaced by `deliver -p ios` / `deliver -p osx` the file is already
         # where that tool looks. Nothing in urnetwork/apple uses fastlane today.
-        "out": "apple/en-US/release_notes.txt",
+        "out": "Apple.txt",
         "where": "App Store Connect -> What's New in This Version (iOS and macOS)",
     },
     # Manual submission today: all/windows/README.md says "MSIs are uploaded to
@@ -275,7 +286,7 @@ AUDIENCES = {
         "limit": 1500,
         "format": "text",
         "boundary": "Under the hood",
-        "out": "windows/en-US/whats_new.txt",
+        "out": "Windows.txt",
         "where": "Partner Center -> Store listings -> <language> -> "
                  "What's new in this version",
     },
@@ -305,7 +316,7 @@ AUDIENCES = {
         "app_limit": 1000,
         "format": "appstream",
         "boundary": "Under the hood",
-        "out": "linux/release-description.xml",
+        "out": "Linux.xml",
         "where": "urnetwork/linux app/packaging/com.bringyour.network.metainfo.xml.in "
                  "-> <releases><release><description>",
     },
@@ -318,8 +329,8 @@ AUDIENCES = {
         "limit": 500,
         "format": "text",
         "boundary": None,
-        "out": None,
-        "where": "nothing -- this is the everything-included view, for reading",
+        "out": "Simple.txt",
+        "where": "no storefront -- the everything-included short view, for reading",
     },
 }
 
@@ -1318,18 +1329,18 @@ def build(args, token):
     meta = {"from_label": from_label, "to_label": args.to_label or to_label}
     full = fit_full(meta, sections, filtered_counts, unwalkable, args)
 
-    # Render the note --audience selected, plus -- when --store-notes-dir was
+    # Render the note --audience selected, plus -- when --notes-dir was
     # given -- every storefront that has a file of its own. One walk, four notes:
     # the ranges are already in memory and commit_files() is cached, so the extra
     # storefronts cost no API requests that the first one did not already make.
     wanted = [args.audience]
-    if args.store_notes_dir:
+    if args.notes_dir:
         wanted += [n for n in sorted(AUDIENCES)
                    if AUDIENCES[n]["out"] and n not in wanted]
     notes = {}
     for name in wanted:
         notes[name] = render_note(name, sections, args, token)
-    return full, notes, sections, filtered_counts, unwalkable
+    return full, notes, sections, filtered_counts, unwalkable, meta
 
 
 def render_note(name, sections, args, token):
@@ -1471,11 +1482,12 @@ def self_test():
     check("every storefront has its own limit, none inherits 500",
           [AUDIENCES[a]["limit"] for a in ("android", "windows", "apple")]
           == [500, 1500, 4000])
-    check("apple, linux and windows each write one file",
-          all(AUDIENCES[a]["out"] for a in ("apple", "linux", "windows")))
-    check("android writes no file of its own (metadata/ is its home)",
-          AUDIENCES["android"]["out"] is None)
-    check("no storefront file is written under metadata/",
+    check("every storefront plus the short view writes one file",
+          all(AUDIENCES[a]["out"]
+              for a in ("android", "apple", "linux", "windows", "all")))
+    check("note filenames are flat suffixes, not nested paths",
+          not any("/" in (AUDIENCES[a]["out"] or "") for a in AUDIENCES))
+    check("no note is written under metadata/ (fdroid globs locales there)",
           not any((AUDIENCES[a]["out"] or "").startswith("metadata")
                   for a in AUDIENCES))
     check("all four apps share exactly one sdk tier",
@@ -1699,14 +1711,16 @@ def main(argv=None):
     p.add_argument("--repo", default=here, help="the build repo checkout (default: %(default)s)")
     p.add_argument("--store-out", metavar="PATH",
                    help="write the --audience storefront's note here")
-    p.add_argument("--store-notes-dir", metavar="DIR",
-                   help="ALSO write one note per storefront under DIR, each in that "
-                        "store's own format at that store's own limit: "
-                        "apple/en-US/release_notes.txt, windows/en-US/whats_new.txt, "
-                        "linux/release-description.xml. android is not written here "
-                        "-- its home is metadata/en-US/changelogs/<versionCode>.txt "
-                        "and all/run.sh puts it there, once per "
-                        "FDROID_VERSION_CODE_OFFSETS entry")
+    p.add_argument("--notes-dir", metavar="DIR",
+                   help="ALSO write one file per storefront under DIR, plus the full "
+                        "changelog and the short everything-included view, each named "
+                        "<--notes-prefix>_Full.md, _Simple.txt, _Android.txt, "
+                        "_Apple.txt, _Windows.txt, _Linux.xml. Each store's note is "
+                        "rendered in that store's own format at that store's own "
+                        "limit. Keep DIR out of metadata/ -- see AUDIENCES.")
+    p.add_argument("--notes-prefix", metavar="TEXT",
+                   help="filename prefix inside --notes-dir (default: the version "
+                        "code trailing --to-label, else the label itself)")
     p.add_argument("--full-out", metavar="PATH", help="write the full changelog here")
     p.add_argument("--store-limit", type=int, default=None, metavar="N",
                    help="override the store note budget in characters. There is no "
@@ -1799,7 +1813,7 @@ def main(argv=None):
                  "already does) or pass --no-store-path-check to skip the check "
                  "deliberately rather than by accident.")
 
-    full, notes, sections, filtered, unwalkable = build(args, token)
+    full, notes, sections, filtered, unwalkable, meta = build(args, token)
     selected = notes[args.audience]
 
     # EVERY artifact is fully rendered before ANY file is opened, so a failure
@@ -1814,14 +1828,29 @@ def main(argv=None):
 
     if args.store_out:
         write_text(args.store_out, selected["text"])
-    if args.store_notes_dir:
+    if args.notes_dir:
+        # "v2026.8.21-1025763520" -> "1025763520". The version code alone is the
+        # filename prefix: it sorts chronologically, it is what
+        # metadata/en-US/changelogs/ already keys on, and it survives the tag
+        # being re-cut under a different name. A label with no trailing code
+        # (a branch, "worktree") is sanitised and used whole rather than
+        # silently collapsing every run onto one set of filenames.
+        prefix = args.notes_prefix
+        if not prefix:
+            label = meta["to_label"] or "release"
+            m = re.search(r"-(\d+)$", label)
+            prefix = m.group(1) if m else re.sub(r"[^A-Za-z0-9._-]", "_", label)
         for name in sorted(notes):
             if notes[name]["out"]:
-                write_text(os.path.join(args.store_notes_dir, notes[name]["out"]),
+                write_text(os.path.join(args.notes_dir,
+                                        "%s_%s" % (prefix, notes[name]["out"])),
                            notes[name]["text"])
+        # The full changelog goes in beside them, and is the file the release
+        # body links to instead of inlining 100k of markdown.
+        write_text(os.path.join(args.notes_dir, "%s_Full.md" % prefix), full)
     if args.full_out:
         write_text(args.full_out, full)
-    if not args.store_out and not args.full_out and not args.store_notes_dir:
+    if not args.store_out and not args.full_out and not args.notes_dir:
         sys.stdout.write(full)
 
     warn("%d component(s), %d commit(s), %d filtered as builder noise, %d unwalkable"

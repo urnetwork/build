@@ -684,7 +684,12 @@ export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP
 # they submit. `git add .` below carries the whole tree into the release commit
 # and the release tag, so every published version can be traced to the exact
 # text that was offered for it.
-BUILD_STORE_NOTES="$BUILD_HOME/store-notes"
+# One directory, one file per audience, every file prefixed with the version code
+# so the directory is a browsable per-release archive that sorts chronologically --
+# the same key metadata/en-US/changelogs/<versionCode>.txt already uses. Exported:
+# github_finalize_release() links the _Full.md and inlines the _Simple.txt.
+export BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
+export BUILD_NOTES_PREFIX="$WARP_VERSION_CODE"
 rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"
 builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
 python3 "$BUILD_HOME/all/changelog.py" \
@@ -693,7 +698,8 @@ python3 "$BUILD_HOME/all/changelog.py" \
     --to-label "v${EXTERNAL_WARP_VERSION}" \
     --lede "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
     --store-out "$BUILD_CHANGELOG_STORE" \
-    --store-notes-dir "$BUILD_STORE_NOTES" \
+    --notes-dir "$BUILD_NOTES_DIR" \
+    --notes-prefix "$BUILD_NOTES_PREFIX" \
     --full-out "$BUILD_CHANGELOG_FULL"
 warn_trap 'generate changelog'
 if [ ! -s "$BUILD_CHANGELOG_STORE" ] && [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
@@ -730,33 +736,34 @@ fi
 # stores are not that. Their limits are 4000 (App Store Connect), 1500 (Partner
 # Center) and none at all (AppStream, which is not even text -- it is markup
 # inside urnetwork/linux's metainfo XML, and appstreamcli gates that repo's build
-# on it). changelog.py --store-notes-dir writes one file per storefront, each in
+# on it). changelog.py --notes-dir writes one file per storefront, each in
 # its own format at its own limit; see AUDIENCES in all/changelog.py for the
 # citation behind every one of those numbers.
 #
 # Each file is that app's own changes first, then the shared sdk/connect changes
 # after a boundary marker, so whoever submits can delete the tail in one motion
-# if that store's reviewers do not need it. store-notes/README.md says which
+# if that store's reviewers do not need it. changelogs/README.md says which
 # field each file is pasted into.
 #
 # NOT UNDER metadata/. That tree belongs to F-Droid: fdroidserver globs
 # `build/[A-Za-z]*/metadata/[a-z][a-z]*` and then os.walk()s it, matching
 # changelog files by bare filename at any depth, so an apple or windows note
 # dropped in there would either overwrite the real en-US note or invent a locale
-# in the F-Droid index. store-notes/ is a sibling and is invisible to that glob.
+# in the F-Droid index. changelogs/ is a sibling and is invisible to that glob.
 #
 # NO trap on this block. The generator already ran under warn_trap above; what
 # is left is cat/wc/cp over files it either produced or did not, and every one
 # of them is guarded. A missing note is reported and skipped.
-if [ -d "$BUILD_STORE_NOTES" ]; then
+if [ -d "$BUILD_NOTES_DIR" ]; then
     for store_note in \
-        "apple/en-US/release_notes.txt:App Store Connect -> What's New in This Version (iOS and macOS), 4000 chars" \
-        "windows/en-US/whats_new.txt:Partner Center -> Store listings -> What's new in this version, 1500 chars" \
-        "linux/release-description.xml:urnetwork/linux metainfo <release><description>, AppStream XML"
+        "Android.txt:Play Console -> release notes (pasted by hand), 500 chars. The unattended F-Droid copy is under metadata/en-US/changelogs/" \
+        "Apple.txt:App Store Connect -> What's New in This Version (iOS and macOS), 4000 chars" \
+        "Windows.txt:Partner Center -> Store listings -> What's new in this version, 1500 chars" \
+        "Linux.xml:urnetwork/linux metainfo <release><description>, AppStream XML"
     do
         # ${x%%:*} / ${x#*:} rather than `cut`: no subprocess, and the field is
         # a path that must not be word-split.
-        store_note_path="$BUILD_STORE_NOTES/${store_note%%:*}"
+        store_note_path="$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_${store_note%%:*}"
         if [ ! -s "$store_note_path" ]; then
             builder_message "warning: no store note at ${store_note%%:*}. Build will continue."
             continue
@@ -784,12 +791,12 @@ $(cat "$store_note_path")
     # dropping an unreferenced file into another repository's tree is not this
     # script's call to make.
     linux_release_description="$BUILD_HOME/linux/app/packaging/release-description.xml"
-    if [ -s "$BUILD_STORE_NOTES/linux/release-description.xml" ]; then
+    if [ -s "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml" ]; then
         if [ -e "$linux_release_description" ]; then
-            cp "$BUILD_STORE_NOTES/linux/release-description.xml" "$linux_release_description"
+            cp "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml" "$linux_release_description"
             builder_message "linux release description staged into app/packaging/release-description.xml"
         else
-            builder_message "note: urnetwork/linux has no app/packaging/release-description.xml, so the generated AppStream release description was not staged there. It is in store-notes/linux/release-description.xml in this repo, ready for whoever wires the meson side. Build will continue."
+            builder_message "note: urnetwork/linux has no app/packaging/release-description.xml, so the generated AppStream release description was not staged there. It is in changelogs/${BUILD_NOTES_PREFIX}_Linux.xml in this repo, ready for whoever wires the meson side. Build will continue."
         fi
     fi
 fi
@@ -1360,14 +1367,48 @@ $a"
     # objects to the longer body.
     if [ ! "$1" ] && [ "${BUILD_RELEASE_BODY_CHANGELOG:-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
         RELEASE_CHANGELOG=`cat "$BUILD_CHANGELOG_FULL"`
-        if [ $((${#RELEASE_BODY} + ${#RELEASE_CHANGELOG} + 8)) -le 124000 ]; then
-            RELEASE_BODY="$RELEASE_BODY
+        # THE LINK FIRST, and it resolves because of ordering, not luck: the
+        # `git add . && git commit && git_tag` on $BUILD_HOME above ran before
+        # github_create_draft_release(), so v${EXTERNAL_WARP_VERSION} already
+        # exists and already contains changelogs/. Pinned to the tag rather than
+        # to a branch so the link keeps showing THIS release's changelog forever.
+        RELEASE_BODY="$RELEASE_BODY
 
 ---
 
-$RELEASE_CHANGELOG"
+Full changelog: [changelogs/${BUILD_NOTES_PREFIX}_Full.md](https://github.com/urnetwork/build/blob/v${EXTERNAL_WARP_VERSION}/changelogs/${BUILD_NOTES_PREFIX}_Full.md) -- every commit in every component since the previous release. Per-store notes for Play, App Store Connect, Partner Center and AppStream are in [that same directory](https://github.com/urnetwork/build/tree/v${EXTERNAL_WARP_VERSION}/changelogs)."
+        # THE SHORT VIEW INLINE, so the body still says something on its own.
+        RELEASE_NOTE_SIMPLE="$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Simple.txt"
+        if [ -s "$RELEASE_NOTE_SIMPLE" ]; then
+            RELEASE_BODY="$RELEASE_BODY
+
+$(cat "$RELEASE_NOTE_SIMPLE")"
+        fi
+        # THE FULL TEXT STAYS, FOLDED. ur.io's site changelog is generated by
+        # walking these release bodies (`node react/scripts/generate-changelog.mjs`,
+        # near the top of this script) from a repo this one cannot see, so
+        # replacing the text with a link would quietly starve a public website of
+        # its content. <details> collapses it in the GitHub UI -- uncluttered to
+        # read, still present to scrape. Drop the fold once someone has confirmed
+        # what that generator actually reads; BUILD_RELEASE_BODY_CHANGELOG= turns
+        # this whole section off in the meantime.
+        #
+        # THE SIZE CHECK IS STILL A RELEASE-LOSING ONE. The API answers 422 above
+        # 125000 characters and $BUILD_CURL --fail-with-body would exit the run
+        # AFTER every artifact has been uploaded. Now that the link carries the
+        # changelog on its own, an over-budget body drops only the fold, and the
+        # reader still gets there in one click -- which is what makes dropping it
+        # safe rather than lossy.
+        if [ $((${#RELEASE_BODY} + ${#RELEASE_CHANGELOG} + 128)) -le 124000 ]; then
+            RELEASE_BODY="$RELEASE_BODY
+
+<details><summary>Full changelog</summary>
+
+$RELEASE_CHANGELOG
+
+</details>"
         else
-            builder_message "warning: the full changelog (${#RELEASE_CHANGELOG} chars) does not fit the GitHub release body next to the artifact table; publishing without it. Build will continue."
+            builder_message "note: the full changelog (${#RELEASE_CHANGELOG} chars) does not fit the release body next to the artifact table, so the body links to it instead of embedding it. Build will continue."
         fi
     fi
 

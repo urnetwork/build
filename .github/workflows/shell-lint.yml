@@ -281,40 +281,45 @@ jobs:
 
           fail = 0
           seen = 0
-          root = pathlib.Path('store-notes')
+          root = pathlib.Path('changelogs')
           for name, a in sorted(changelog.AUDIENCES.items()):
               if not a['out']:
                   continue
-              p = root / a['out']
-              if not p.exists():
+              # Files are <versionCode>_<suffix>, one set per release, so this
+              # checks EVERY release's note rather than one fixed path: a note
+              # that went over its limit six releases ago is still wrong, and the
+              # archive is what people actually read.
+              found = sorted(root.glob('*_' + a['out']))
+              if not found:
                   # These are written by a release run, not committed by hand, so
                   # "not there yet" is normal and is not a failure.
-                  print(f"skip {p} (no release has written it yet)")
+                  print(f"skip *_{a['out']} (no release has written it yet)")
                   continue
-              seen += 1
-              raw = p.read_bytes()
-              if raw.startswith(b'\xef\xbb\xbf'):
-                  print(f"::error file={p}::UTF-8 BOM")
-                  fail = 1
-              text = raw.decode('utf-8')
-              if a['format'] == 'appstream':
-                  problems = changelog.appstream_problems(text)
-                  for msg in problems:
-                      print(f"::error file={p}::appstreamcli would fail this: {msg}")
+              seen += len(found)
+              for p in found:
+                  raw = p.read_bytes()
+                  if raw.startswith(b'\xef\xbb\xbf'):
+                      print(f"::error file={p}::UTF-8 BOM")
                       fail = 1
-                  print(f"ok   {p}: {len(text)} chars of AppStream XML, "
-                        f"{len(problems)} problem(s)")
-                  continue
-              if text[:1].isspace():
-                  print(f"::error file={p}::leading whitespace")
-                  fail = 1
-              n = len(text.rstrip('\n'))
-              if n > a['limit']:
-                  print(f"::error file={p}::{n} characters, {name} accepts "
-                        f"{a['limit']}")
-                  fail = 1
-              print(f"ok   {p}: {n}/{a['limit']} characters ({name})")
-          print(f"checked {seen} per-store note(s)")
+                  text = raw.decode('utf-8')
+                  if a['format'] == 'appstream':
+                      problems = changelog.appstream_problems(text)
+                      for msg in problems:
+                          print(f"::error file={p}::appstreamcli would fail this: {msg}")
+                          fail = 1
+                      print(f"ok   {p}: {len(text)} chars of AppStream XML, "
+                            f"{len(problems)} problem(s)")
+                      continue
+                  if text[:1].isspace():
+                      print(f"::error file={p}::leading whitespace")
+                      fail = 1
+                  n = len(text.rstrip('\n'))
+                  if n > a['limit']:
+                      print(f"::error file={p}::{n} characters, {name} accepts "
+                            f"{a['limit']}")
+                      fail = 1
+                  print(f"ok   {p}: {n}/{a['limit']} characters ({name})")
+          print(f"checked {seen} note file(s) across all releases")
           sys.exit(fail)
           PY
 
@@ -338,7 +343,7 @@ jobs:
             python3 all/changelog.py \
               --from "$FROM_TAG" --to "$TO_TAG" \
               --store-out "$RUNNER_TEMP/store$i.txt" \
-              --store-notes-dir "$RUNNER_TEMP/notes$i" \
+              --notes-dir "$RUNNER_TEMP/notes$i" \
               --full-out "$RUNNER_TEMP/full$i.md"
           done
           diff -u "$RUNNER_TEMP/store1.txt" "$RUNNER_TEMP/store2.txt"
