@@ -162,8 +162,13 @@ on:
       apple_ref:
         type: string
         default: ""
+  # main included deliberately. Releases push STRAIGHT to main -- they never
+  # open a pull request -- so without this, the branch releases are cut from
+  # is the only one nothing builds. That is exactly how a degoogled android
+  # submodule pin sat on main undetected until a PR happened to trip over it.
   push:
     branches:
+      - main
       - all-platform-ci
       - upstream/all-platform-ci
   pull_request:
@@ -179,7 +184,11 @@ permissions:
 
 concurrency:
   group: apple-build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # push included: a release pushes to main several times in quick succession
+  # and only the final state is worth building. Deliberately NOT workflow_call
+  # or workflow_dispatch -- those are release runs, and cancelling one loses
+  # artifacts that were already uploaded.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 # THE RUNNER LABEL, once, for both macOS jobs below. `runs-on` cannot read the
 # `env` context, so it is spelled out at each job rather than set here — but the

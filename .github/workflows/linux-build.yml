@@ -234,8 +234,13 @@ on:
   # Per-commit signal on the fork's Linux branch. NEVER publishes: this workflow
   # has no release job, Upstream adopting this file would put its own branches
   # here (or drop the trigger and keep the dispatch).
+  # main included deliberately. Releases push STRAIGHT to main -- they never
+  # open a pull request -- so without this, the branch releases are cut from
+  # is the only one nothing builds. That is exactly how a degoogled android
+  # submodule pin sat on main undetected until a PR happened to trip over it.
   push:
     branches:
+      - main
       - linux-release-matrix
   pull_request:
     branches:
@@ -255,7 +260,11 @@ permissions:
 # Serialize per ref; cancel superseded PR runs, which never publish anyway.
 concurrency:
   group: linux-release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # push included: a release pushes to main several times in quick succession
+  # and only the final state is worth building. Deliberately NOT workflow_call
+  # or workflow_dispatch -- those are release runs, and cancelling one loses
+  # artifacts that were already uploaded.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 env:
   # zig is used ONLY as a glibc-pinning cross compiler for the cgo SDK:
