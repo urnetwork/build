@@ -900,13 +900,53 @@ jobs:
           flatpak list --user --runtime --columns=application,branch | grep '^org\.gnome\.' \
             || { echo "::error::org.gnome.Platform/Sdk //${RUNTIME_VERSION} is not installed"; exit 1; }
 
+      # THE SOURCE TARBALLS, CACHED. The manifest pulls six archives from four
+      # third-party hosts, and one of them -- www.cairographics.org, which serves
+      # cairomm -- is a single unmirrored machine that times out under load. It
+      # took this job down once already:
+      #
+      #   Failed to download sources: module cairomm: Failed to connect to
+      #   www.cairographics.org port 443 after 60000 ms: Timeout was reached
+      #
+      # cairomm 1.18.0 is not on download.gnome.org (which stops at 1.15) and not
+      # in Debian's pool (which stops at 1.14.6), so there is no mirror-urls entry
+      # to add. Caching the downloads is the available fix: hit those hosts once
+      # per manifest change instead of once per run, and a flaky upstream stops
+      # being every contributor's problem.
+      #
+      # Keyed on the manifest, because that file is what decides which archives
+      # and which checksums are wanted. flatpak-builder verifies every download
+      # against the sha256 in the manifest, so a stale or poisoned cache entry
+      # fails the build rather than silently building the wrong source.
+      - name: Cache the flatpak source downloads
+        uses: actions/cache@v4
+        with:
+          path: linux/.flatpak-builder/downloads
+          key: flatpak-downloads-${{ hashFiles('linux/packaging/flatpak/com.bringyour.network.yml') }}
+          restore-keys: flatpak-downloads-
+
       - name: Build the bundle
         run: |
           set -euo pipefail
-          VERSION="${EXTERNAL_WARP_VERSION}" \
-          LINUX_DIR="$PWD/linux" \
-          OUT_DIR="$PWD/out/linux" \
-            bash all/linux/build-flatpak.sh
+          # RETRIED, for the same flaky host. A download failure lands in the
+          # first minute, and flatpak-builder commits each completed module to
+          # its cache, so a second attempt resumes rather than rebuilding -- the
+          # retry is cheap exactly when it is needed. Two attempts, not five: if
+          # the host is genuinely down, more tries only burn the runner.
+          for attempt in 1 2; do
+            if VERSION="${EXTERNAL_WARP_VERSION}" \
+               LINUX_DIR="$PWD/linux" \
+               OUT_DIR="$PWD/out/linux" \
+                 bash all/linux/build-flatpak.sh; then
+              exit 0
+            fi
+            if [ "$attempt" = 1 ]; then
+              echo "::warning::flatpak build attempt 1 failed; retrying once in 30s"
+              sleep 30
+            fi
+          done
+          echo "::error::flatpak build failed twice"
+          exit 1
 
       # A .flatpak that exists but is a few KB is a build that produced an empty
       # app. Assert the shape, not just the filename.
