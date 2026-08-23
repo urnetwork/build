@@ -1754,6 +1754,13 @@ builder_message "android \`${EXTERNAL_WARP_VERSION}\` available - https://github
 
 # Github / Ungoogle
 # note for F-Droid, the -ungoogle tag should be aliased to -fdroid to trigger their build
+#
+# REMEMBER WHERE THE RELEASE COMMIT IS, because everything below moves the
+# android submodule off it and onto a degoogled branch, and the build repo has
+# to be put back afterwards. See the restore at the end of this section for why
+# that matters.
+ANDROID_RELEASE_COMMIT=`cd $BUILD_HOME/android && git rev-parse HEAD`
+error_trap 'android release commit'
 (cd $BUILD_HOME/android &&
     git checkout -b v${EXTERNAL_WARP_VERSION}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
@@ -1809,6 +1816,47 @@ if [ "$BUILD_OUT" ]; then
     (mkdir -p "$BUILD_OUT/apk-github" && 
         find $BUILD_HOME/android/app/app/build/outputs/apk -iname '*.apk' -exec cp {} "$BUILD_OUT/apk-github" \;)
     error_trap 'android github local copy'
+fi
+
+
+# PUT THE ANDROID PIN BACK. Everything the degoogled tree was needed for is
+# done: the -ungoogle branch and tag are pushed, build-fdroid.sh has run, and
+# the apks are uploaded and copied. What is left is a build repo whose main
+# records the degoogled android commit as its submodule pin, and that is not a
+# state anybody should inherit.
+#
+# The degoogled build.gradle comments out every play-services dependency, but
+# the play and solana_dapp sources still import GoogleSignIn, LocationServices
+# and friends. So main pinned there cannot compile those flavors: every CI run
+# and every pull request against main fails the android job until the next
+# release moves the pin again. The `builder build ungoogle` commit is what
+# leaves it there, and it has been doing so every release -- it only became
+# visible when the android build+test workflow was added.
+#
+# The -ungoogle TAG still points at the degoogled tree, which is the point of
+# it: F-Droid builds from that tag. This restores only main, to the same commit
+# v${EXTERNAL_WARP_VERSION} already records.
+#
+# THE WORKING TREE IS RESTORED TOO, not just the index. The next run opens with
+# `git diff --quiet && git diff --cached --quiet` on $BUILD_HOME (see the pull
+# near the top), and a submodule whose checkout disagrees with the recorded pin
+# reads as a dirty diff -- which would short-circuit that && chain and abort the
+# run at 'pull'. Fixing the pin without the checkout would trade a broken CI for
+# a broken build host.
+if [ "$ANDROID_RELEASE_COMMIT" ]; then
+    (cd $BUILD_HOME/android && git checkout "$ANDROID_RELEASE_COMMIT")
+    error_trap 'android restore release commit'
+    # --quiet is the no-op guard: when the pin already matches (nothing staged),
+    # `git commit` would exit non-zero and error_trap would sink a good release.
+    (cd $BUILD_HOME &&
+        git add android &&
+        (git diff --cached --quiet ||
+            (git commit -m "${EXTERNAL_WARP_VERSION} restore android pin" &&
+                (git push || (git pull --rebase && git push)))))
+    error_trap 'restore android pin'
+    builder_message "android pin restored to \`${ANDROID_RELEASE_COMMIT}\` (the \`${EXTERNAL_WARP_VERSION}\` release commit); the degoogled tree stays on the \`v${EXTERNAL_WARP_VERSION}-ungoogle\` tag"
+else
+    builder_message "warning: ANDROID_RELEASE_COMMIT is empty, so main is still pinned to the degoogled android tree. Every CI run against main will fail the android job until that is corrected."
 fi
 
 # Upload releases to testing channels
