@@ -1640,9 +1640,8 @@ fi
 # versions exported above; they can also be re-run standalone after this
 # pipeline, e.g. when a flaky VM/container build needs a retry.
 #
-# Non-blocking: a flaky desktop build must NOT sink the release. On failure,
-# warn and skip that platform's artifacts (don't upload stale/partial ones);
-# the pipeline continues.
+# Required: both desktop builds are release gates. On failure, stop before
+# uploading that platform's stale or partial artifacts.
 #
 # SUBMISSION/PUBLISHING is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
@@ -1657,42 +1656,38 @@ fi
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
 
 builder_message "building windows app (cgo sdk + MSI in the local QEMU ARM Windows VM)"
-if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
-    github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
-    for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
-        github_release_upload "$(basename "$msi")" "$msi"
-    done
-    builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
-else
-    builder_message "warning: windows build did not finish — skipping the windows sdk + MSI artifacts (release continues)"
-fi
+OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"
+error_trap 'windows build'
+github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
+for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
+    github_release_upload "$(basename "$msi")" "$msi"
+done
+builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 builder_message "building linux app (cgo sdk + deb/install-tarball/rpm on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container)"
-if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
-    github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
-    # Four artifact types per arch (names normative — linux/MIGRATION.md):
-    # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
-    # urnetwork-daemon-<v>.<rpmarch>.rpm, URnetwork-<v>-<arch>.AppImage +
-    # .AppImage.zsync. (N) nullglobs each pattern so a missing type uploads
-    # nothing rather than a literal '*' — which is also what makes the .rpm's
-    # warn-and-continue behaviour in build-linux.sh work at this level: a
-    # release without one simply uploads the other four.
-    #
-    # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
-    # appear here. The .sha256/.asc sidecars the packaging scripts write are
-    # deliberately NOT uploaded, matching the .deb's existing behaviour.
-    for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
-                    "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
-                    "$DESKTOP_OUT/linux/"*.rpm(N) \
-                    "$DESKTOP_OUT/linux/"*.pkg.tar.zst(N) \
-                    "$DESKTOP_OUT/linux/"*.AppImage(N) \
-                    "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
-        github_release_upload "$(basename "$artifact")" "$artifact"
-    done
-    builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
-else
-    builder_message "warning: linux build did not finish — skipping the linux sdk + deb/install-tarball/rpm/AppImage artifacts (release continues)"
-fi
+OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
+error_trap 'linux build'
+github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+# Four artifact types per arch (names normative — linux/MIGRATION.md):
+# urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
+# urnetwork-daemon-<v>.<rpmarch>.rpm, URnetwork-<v>-<arch>.AppImage +
+# .AppImage.zsync. (N) nullglobs each pattern so a missing type uploads
+# nothing rather than a literal '*' — which is also what makes the .rpm's
+# warn-and-continue behaviour in build-linux.sh work at this level: a
+# release without one simply uploads the other four.
+#
+# A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
+# appear here. The .sha256/.asc sidecars the packaging scripts write are
+# deliberately NOT uploaded, matching the .deb's existing behaviour.
+for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
+                "$DESKTOP_OUT/linux/"*.install.tar.gz(N) \
+                "$DESKTOP_OUT/linux/"*.rpm(N) \
+                "$DESKTOP_OUT/linux/"*.pkg.tar.zst(N) \
+                "$DESKTOP_OUT/linux/"*.AppImage(N) \
+                "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
+    github_release_upload "$(basename "$artifact")" "$artifact"
+done
+builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 (cd $BUILD_HOME/android/app &&
