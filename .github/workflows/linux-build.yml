@@ -29,7 +29,8 @@ name: Linux build + test
 #   plan ──> build-sdk ──┬─> build (daemon, amd64) ─┐
 #                        ├─> build (gui,    amd64) ─┤
 #                        ├─> build (daemon, arm64) ─┼─> release
-#                        └─> build (gui,    arm64) ─┘
+#                        ├─> build (gui,    arm64) ─┘
+#                        └─> build-flatpak (amd64)      opt-in, never publishes
 #
 #   plan       ~20 s   version, matrix, publish switch. Cheap and separate so
 #                      the (role x arch) matrix can come from a dispatch input.
@@ -157,6 +158,11 @@ on:
         type: choice
         default: "true"
         options: ["true", "false"]
+      flatpak:
+        description: "Also build-test the Flatpak. OFF by default: ~2 GB runtime download, 30-50 min, and it can only build this runner's arch."
+        type: choice
+        default: "false"
+        options: ["false", "true"]
       version:
         description: "Release version, e.g. 2026.8.20-1024590520. Empty = derive a fork beta version."
         type: string
@@ -198,6 +204,9 @@ on:
       require_rpm:
         type: string
         default: "true"
+      flatpak:
+        type: string
+        default: "false"
       version:
         type: string
         default: ""
@@ -749,6 +758,166 @@ jobs:
   # expects a `v<version>` branch; a submodule is checked out DETACHED, so that
   # returns empty and the script exits 1 by design.
   # ---------------------------------------------------------------------------
+  # =============================================================================
+  # THE FLATPAK, BUILD-TESTED ONLY.
+  #
+  # OPT-IN (`flatpak: true`), and off by default, because it is expensive in a
+  # way the other legs are not: flatpak-builder pulls the ~2 GB org.gnome.Sdk
+  # runtime before it compiles a line, and the whole job runs 30-50 minutes.
+  # Paying that on every push to gate an artifact whose packaging lives in
+  # ANOTHER repo (urnetwork/linux) would be a poor trade.
+  #
+  # IT NEVER PUBLISHES. Upstream cuts releases with all/run.sh on its own build
+  # servers, and that is where the shipped .flatpak comes from -- run.sh calls
+  # all/linux/build-flatpak.sh directly. This job exists so a change to the
+  # manifest or to the packaging script is caught here instead of during a
+  # release, which is the same reason every other job in this file exists.
+  #
+  # ONE ARCH, ALWAYS THIS RUNNER'S. flatpak-builder has no cross-compile mode,
+  # so there is no arm64 leg to add. See build-flatpak.sh's header.
+  build-flatpak:
+    name: Flatpak (build test, ${{ needs.plan.outputs.version }})
+    needs: [plan, build-sdk]
+    if: inputs.flatpak == 'true'
+    runs-on: ubuntu-24.04
+    # The runtime download dominates and is not something this job controls.
+    timeout-minutes: 75
+    env:
+      EXTERNAL_WARP_VERSION: ${{ needs.plan.outputs.version }}
+      UR_LINUX_REPO: ${{ inputs.linux_repo || 'urnetwork/linux' }}
+      UR_LINUX_REF: ${{ inputs.linux_ref || '' }}
+    steps:
+      - name: Check out the build repo
+        uses: actions/checkout@v4
+
+      - name: Check out the linux submodule over https
+        run: |
+          set -euo pipefail
+          # See build-sdk for why this rewrite has to be global.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 linux \
+            || git submodule update --init linux
+          git -C linux log -1 --format='linux pin: %H %s'
+
+      - name: Point the linux tree at a different ref, when asked
+        if: env.UR_LINUX_REF != ''
+        run: |
+          set -euo pipefail
+          rm -rf linux
+          git clone --depth 1 --branch "$UR_LINUX_REF" \
+            "https://github.com/${UR_LINUX_REPO}.git" linux
+          git -C linux log -1 --format='linux ref: %H %s'
+
+      # Fail before the 2 GB download rather than after it.
+      - name: Assert this linux ref actually has the flatpak channel
+        run: |
+          set -euo pipefail
+          for f in packaging/make-flatpak.sh packaging/flatpak/com.bringyour.network.yml; do
+            [ -f "linux/$f" ] \
+              || { echo "::error::linux/$f missing — this linux ref predates the flatpak channel"; exit 1; }
+          done
+          echo "flatpak channel present"
+
+      - name: Fetch the cgo SDK built by build-sdk
+        uses: actions/download-artifact@v4
+        with:
+          name: urnetwork-sdk-linux
+          path: sdk/cgo/build
+
+      # The manifest vendors libURnetworkSdk.so out of the tree, so it has to be
+      # staged first. This is the same script all/linux/build.sh runs on the host
+      # for exactly the same reason -- called directly here because this job wants
+      # the staging WITHOUT the container builds that follow it there.
+      - name: Stage the SDK into the linux tree
+        run: |
+          set -euo pipefail
+          fetch_deps=linux/app/scripts/fetch-deps.sh
+          [ -f "$fetch_deps" ] \
+            || { echo "::error::$fetch_deps missing — the linux repo's SDK vendoring script"; exit 1; }
+          "$fetch_deps" sdk/cgo/build/URnetworkSdkLinux.zip
+          ls -l linux/app/third_party/urnetwork-sdk/amd64/libURnetworkSdk.so
+
+      - name: Install flatpak
+        run: |
+          set -euo pipefail
+          sudo apt-get update -o Acquire::Retries=3
+          # flatpak only. make-flatpak.sh installs org.flatpak.Builder and the
+          # GNOME runtime itself, and prefers a native flatpak-builder when one
+          # exists -- installing the distro's would pick a different builder
+          # version than the release host uses.
+          # flatpak-builder NATIVELY, which matters. make-flatpak.sh prefers a
+          # native builder and otherwise falls back to `flatpak run
+          # org.flatpak.Builder` -- the only option on an immutable host like
+          # Bazzite, and the path this job first took. That sandboxed builder
+          # could not see the user-installed runtime and died with "Failed to
+          # init: Unable to find sdk org.gnome.Sdk version 49" even though the
+          # install had just succeeded. A GitHub runner is not immutable, so it
+          # should take the native path; the sandboxed fallback is exercised on
+          # the hosts that actually need it.
+          #
+          # elfutils comes WITH that choice. flatpak-builder strips debuginfo out
+          # of every module it builds and shells out to eu-strip/eu-elfcompress
+          # to do it. The sandboxed org.flatpak.Builder ships its own copy; a
+          # native builder expects them on the host, and without them the run
+          # dies on the first module: "Failed to execute child process eu-strip".
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder elfutils
+          flatpak --version
+          flatpak-builder --version
+          eu-strip --version | head -1
+          flatpak remote-add --if-not-exists --user \
+            flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      # Explicit, and BEFORE make-flatpak.sh, for one reason: that script pipes
+      # its own runtime install to /dev/null, so when the runtime is the problem
+      # the log says nothing. Installing it here first makes a download failure
+      # legible and turns the script's install into a no-op. --user to match the
+      # remote added above; RUNTIME_VERSION tracks make-flatpak.sh's default.
+      - name: Install the GNOME runtime
+        env:
+          RUNTIME_VERSION: "49"
+        run: |
+          set -euo pipefail
+          flatpak install -y --noninteractive --user flathub \
+            "org.gnome.Platform//${RUNTIME_VERSION}" "org.gnome.Sdk//${RUNTIME_VERSION}"
+          flatpak list --user --runtime --columns=application,branch | grep '^org\.gnome\.' \
+            || { echo "::error::org.gnome.Platform/Sdk //${RUNTIME_VERSION} is not installed"; exit 1; }
+
+      - name: Build the bundle
+        run: |
+          set -euo pipefail
+          VERSION="${EXTERNAL_WARP_VERSION}" \
+          LINUX_DIR="$PWD/linux" \
+          OUT_DIR="$PWD/out/linux" \
+            bash all/linux/build-flatpak.sh
+
+      # A .flatpak that exists but is a few KB is a build that produced an empty
+      # app. Assert the shape, not just the filename.
+      - name: Assert the bundle is real
+        run: |
+          set -euo pipefail
+          bundle="out/linux/URnetwork-${EXTERNAL_WARP_VERSION}-amd64.flatpak"
+          [ -s "$bundle" ] || { echo "::error::$bundle missing"; exit 1; }
+          bytes=$(stat -c %s "$bundle")
+          echo "bundle: $bundle ($bytes bytes)"
+          # The GUI plus its vendored SDK; anything near zero means the app
+          # module built nothing. Deliberately loose -- this is a floor, not a budget.
+          [ "$bytes" -ge 5000000 ] \
+            || { echo "::error::$bundle is only $bytes bytes — the app module likely built nothing"; exit 1; }
+          {
+            echo "### Flatpak build test"
+            echo ""
+            echo "\`$(basename "$bundle")\` — $bytes bytes, amd64 only (flatpak-builder cannot cross-compile)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: urnetwork-flatpak-amd64
+          path: out/linux/*.flatpak
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: ${{ matrix.role }} / ${{ matrix.arch }}
     needs: [plan, build-sdk]
