@@ -30,7 +30,7 @@ name: Linux build + test
 #                        ├─> build (gui,    amd64) ─┤
 #                        ├─> build (daemon, arm64) ─┼─> release
 #                        ├─> build (gui,    arm64) ─┘
-#                        └─> build-flatpak (amd64)      opt-in, never publishes
+#                        └─> build-flatpak (amd64)      never publishes
 #
 #   plan       ~20 s   version, matrix, publish switch. Cheap and separate so
 #                      the (role x arch) matrix can come from a dispatch input.
@@ -159,10 +159,10 @@ on:
         default: "true"
         options: ["true", "false"]
       flatpak:
-        description: "Also build-test the Flatpak. OFF by default: ~2 GB runtime download, 30-50 min, and it can only build this runner's arch."
+        description: "Build-test the Flatpak. On by default; set false to skip it for a quicker run. amd64 only -- flatpak-builder cannot cross-compile."
         type: choice
-        default: "false"
-        options: ["false", "true"]
+        default: "true"
+        options: ["true", "false"]
       version:
         description: "Release version, e.g. 2026.8.20-1024590520. Empty = derive a fork beta version."
         type: string
@@ -206,7 +206,7 @@ on:
         default: "true"
       flatpak:
         type: string
-        default: "false"
+        default: "true"
       version:
         type: string
         default: ""
@@ -761,11 +761,20 @@ jobs:
   # =============================================================================
   # THE FLATPAK, BUILD-TESTED ONLY.
   #
-  # OPT-IN (`flatpak: true`), and off by default, because it is expensive in a
-  # way the other legs are not: flatpak-builder pulls the ~2 GB org.gnome.Sdk
-  # runtime before it compiles a line, and the whole job runs 30-50 minutes.
-  # Paying that on every push to gate an artifact whose packaging lives in
-  # ANOTHER repo (urnetwork/linux) would be a poor trade.
+  # RUNS BY DEFAULT, like every other leg. It was briefly opt-in on the theory
+  # that a ~2 GB org.gnome.Sdk download was too expensive to repeat -- but Actions
+  # is free on public repositories and every urnetwork repo is public, so there
+  # was no bill to avoid. The only real cost is wall clock, and the measured job
+  # is 14m09s against 4m31s for gui/amd64 beside it: the longest leg here, but a
+  # parallel one.
+  #
+  # The skip also cost coverage exactly where it was most wanted. The manifest
+  # lives in urnetwork/linux, but all/linux/build-flatpak.sh lives HERE, and a
+  # pull request editing it got no flatpak run at all. Both failures this job hit
+  # when it was first written were in files this repo owns.
+  #
+  # `flatpak: false` still turns it off for a deliberately quick dispatch. The
+  # switch is inverted rather than removed: default on, explicitly opt OUT.
   #
   # IT NEVER PUBLISHES. Upstream cuts releases with all/run.sh on its own build
   # servers, and that is where the shipped .flatpak comes from -- run.sh calls
@@ -776,11 +785,19 @@ jobs:
   # ONE ARCH, ALWAYS THIS RUNNER'S. flatpak-builder has no cross-compile mode,
   # so there is no arm64 leg to add. See build-flatpak.sh's header.
   build-flatpak:
-    name: Flatpak (build test, ${{ needs.plan.outputs.version }})
+    # STATIC NAME, no ${{ needs.* }} in it. GitHub does not evaluate a skipped
+    # job's name expression, so an interpolated one renders as the literal
+    # "${{ needs.plan.outputs.version }}" in the checks list and reads as broken.
+    # The version is in the job's own step summary instead.
+    name: Flatpak (build test, amd64)
     needs: [plan, build-sdk]
-    if: inputs.flatpak == 'true'
+    # Runs unless explicitly disabled. On push and pull_request the `inputs`
+    # context is empty, so this is true and the job runs -- which is the point.
+    if: inputs.flatpak != 'false'
     runs-on: ubuntu-24.04
-    # The runtime download dominates and is not something this job controls.
+    # Measured at 14m09s. The ceiling is generous because the runtime download
+    # is the variable part and is not something this job controls; it exists to
+    # bound a hang, not to budget the build.
     timeout-minutes: 75
     env:
       EXTERNAL_WARP_VERSION: ${{ needs.plan.outputs.version }}
