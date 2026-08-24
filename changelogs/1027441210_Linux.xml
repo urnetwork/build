@@ -1,0 +1,6 @@
+        <ul>
+          <li>Enforce 20 MiB mobile memory profile</li>
+          <li>Sdk: keep the identicon raster stack out of the iOS extension</li>
+          <li>Bound mobile connection memory</li>
+          <li>Allocate message pool capacity lazily</li>
+        </ul>

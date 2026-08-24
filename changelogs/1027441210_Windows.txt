@@ -1,6 +1,3 @@
-- Add streamlined memory validation
-- Harden Android build toolchain setup
-
 - Enforce 20 MiB mobile memory profile
 - Sdk: keep the identicon raster stack out of the iOS extension
 - Bound mobile connection memory

@@ -1,7 +1,9 @@
 - Add streamlined memory validation
 - Harden Android build toolchain setup
-
+- Linux: bump the pin to pick up the cairomm git source
+- Android: stop leaving main pinned to the degoogled tree
 - Enforce 20 MiB mobile memory profile
 - Sdk: keep the identicon raster stack out of the iOS extension
 - Bound mobile connection memory
 - Allocate message pool capacity lazily
+- Key the operator report on a peer network, and say why it logs a raw ip
