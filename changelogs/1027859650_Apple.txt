@@ -1,3 +1,1 @@
-- Adopt 24 MiB mobile memory target
-
 - Rebalance mobile memory policy for performance
