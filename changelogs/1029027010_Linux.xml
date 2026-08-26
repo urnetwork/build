@@ -1,0 +1,8 @@
+        <ul>
+          <li>Enable lossless mobile H1 backpressure</li>
+          <li>Enable bounded lanes for explicit mobile H1</li>
+          <li>Expose adaptive H1 memory telemetry</li>
+          <li>Make reliable H1 receive handoffs lossless</li>
+          <li>Optimize bounded H1 flow isolation</li>
+          <li>Add adaptive H1 receive depth diagnostics</li>
+        </ul>

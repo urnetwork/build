@@ -1,3 +1,6 @@
+- Add the Build on UR page and wire it into the site
+- Fix launch video never opening on the home page
+- 2026.8.25-1028682810 restore android pin
 - Enable lossless mobile H1 backpressure
 - Enable bounded lanes for explicit mobile H1
 - Expose adaptive H1 memory telemetry
