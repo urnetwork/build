@@ -1,2 +1,3 @@
 - Keep reliable mobile handoffs lossless
 - Preserve reliable carrier lanes under backpressure
+- Preserve reliable server receive lanes
