@@ -1,4 +1,6 @@
 - Regenerate fresh-flow affinity strings
-
+- Regenerate fresh-flow affinity catalogs
+- Regenerate fresh-flow affinity resources
 - Expand provider memory load measurements
 - Balance provider memory and fresh-flow performance
+- Add fresh-flow affinity localization keys

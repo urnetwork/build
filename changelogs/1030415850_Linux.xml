@@ -1,0 +1,10 @@
+        <ul>
+          <li>Regenerate fresh-flow affinity catalogs</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Expand provider memory load measurements</li>
+          <li>Balance provider memory and fresh-flow performance</li>
+        </ul>
+        <!-- end of the shared section -->
