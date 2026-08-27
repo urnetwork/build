@@ -1,0 +1,4 @@
+        <ul>
+          <li>Expose provider recovery diagnostics</li>
+          <li>Fix poisoned H1 exit recovery</li>
+        </ul>

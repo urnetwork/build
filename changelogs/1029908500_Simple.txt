@@ -1,0 +1,5 @@
+- 2026.8.26-1029569170 restore android pin
+- Expose provider recovery diagnostics
+- Fix poisoned H1 exit recovery
+- Warpctl: encode IPv6 forwarded addresses
+- Server: improve main reliability and acceptance coverage
