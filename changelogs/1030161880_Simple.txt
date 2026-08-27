@@ -1,4 +1,5 @@
 - Add fresh-flow diagnostics and video probe
-
+- 2026.8.26-1029908500 restore android pin
 - Expose fresh-flow provider routing controls
 - Route fresh flows by measured provider quality
+- Publish provider selection metadata
