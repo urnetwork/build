@@ -1,0 +1,8 @@
+- Forward canonical client addresses from local nginx
+- Expand main signup and proxy acceptance coverage
+- 2026.8.27-1030474020 restore android pin
+- Add provisioned Grafana logs drilldown
+- Reconcile edge policy routes and normalize forwarded addresses
+- Add lightnode smoke profile
+- Link service logs dashboard to logs drilldown
+- Harden authentication, client attribution, and subtensor monitoring
