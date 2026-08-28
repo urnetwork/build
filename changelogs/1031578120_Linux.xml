@@ -1,0 +1,5 @@
+        <ul>
+          <li>Isolate hosted device sessions and budgets</li>
+          <li>Handle missing DoH route endpoints</li>
+          <li>Harden transport retry and device budgets</li>
+        </ul>

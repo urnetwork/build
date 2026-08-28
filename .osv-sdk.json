@@ -412,6 +412,22 @@
                 }
               },
               "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6303"
+              ],
+              "aliases": [
+                "CVE-2026-56854",
+                "GO-2026-6303"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6303": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
             }
           ],
           "vulnerabilities": [
@@ -482,6 +498,72 @@
               ],
               "schema_version": "1.7.5",
               "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6303.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/ssh",
+                        "symbols": [
+                          "NewServerConn",
+                          "connection.serverAuthenticate"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.55.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56854"
+              ],
+              "credits": [
+                {
+                  "name": "Longwei Wang (@gn00295120)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6303"
+              },
+              "details": "The source-address critical option in the Permissions returned by an authentication callback was only enforced for the PublicKeyCallback and VerifiedPublicKeyCallback paths, extending the fix for CVE-2026-46595. Permissions returned by the PasswordCallback, KeyboardInteractiveCallback, NoClientAuthCallback, and GSSAPIWithMICConfig.AllowLogin callbacks were not validated against the client's remote address, so a source-address restriction set by those callbacks was silently ignored. The check is now applied to the Permissions returned by any authentication callback.",
+              "id": "GO-2026-6303",
+              "modified": "2026-08-28T15:15:16.725706233Z",
+              "published": "2026-08-28T14:47:45Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80213"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/797040"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Source-address critical option not enforced for non-public-key auth callbacks in golang.org/x/crypto/ssh"
             }
           ]
         },
@@ -894,6 +976,22 @@
                 }
               },
               "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6303"
+              ],
+              "aliases": [
+                "CVE-2026-56854",
+                "GO-2026-6303"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6303": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
             }
           ],
           "vulnerabilities": [
@@ -964,6 +1062,72 @@
               ],
               "schema_version": "1.7.5",
               "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6303.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/ssh",
+                        "symbols": [
+                          "NewServerConn",
+                          "connection.serverAuthenticate"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.55.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56854"
+              ],
+              "credits": [
+                {
+                  "name": "Longwei Wang (@gn00295120)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6303"
+              },
+              "details": "The source-address critical option in the Permissions returned by an authentication callback was only enforced for the PublicKeyCallback and VerifiedPublicKeyCallback paths, extending the fix for CVE-2026-46595. Permissions returned by the PasswordCallback, KeyboardInteractiveCallback, NoClientAuthCallback, and GSSAPIWithMICConfig.AllowLogin callbacks were not validated against the client's remote address, so a source-address restriction set by those callbacks was silently ignored. The check is now applied to the Permissions returned by any authentication callback.",
+              "id": "GO-2026-6303",
+              "modified": "2026-08-28T15:15:16.725706233Z",
+              "published": "2026-08-28T14:47:45Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80213"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/797040"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Source-address critical option not enforced for non-public-key auth callbacks in golang.org/x/crypto/ssh"
             }
           ]
         },
@@ -1370,6 +1534,16 @@
                 "GO-2026-5932"
               ],
               "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6303"
+              ],
+              "aliases": [
+                "CVE-2026-56854",
+                "GO-2026-6303"
+              ],
+              "max_severity": ""
             }
           ],
           "vulnerabilities": [
@@ -1440,6 +1614,72 @@
               ],
               "schema_version": "1.7.5",
               "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6303.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/ssh",
+                        "symbols": [
+                          "NewServerConn",
+                          "connection.serverAuthenticate"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.55.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56854"
+              ],
+              "credits": [
+                {
+                  "name": "Longwei Wang (@gn00295120)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6303"
+              },
+              "details": "The source-address critical option in the Permissions returned by an authentication callback was only enforced for the PublicKeyCallback and VerifiedPublicKeyCallback paths, extending the fix for CVE-2026-46595. Permissions returned by the PasswordCallback, KeyboardInteractiveCallback, NoClientAuthCallback, and GSSAPIWithMICConfig.AllowLogin callbacks were not validated against the client's remote address, so a source-address restriction set by those callbacks was silently ignored. The check is now applied to the Permissions returned by any authentication callback.",
+              "id": "GO-2026-6303",
+              "modified": "2026-08-28T15:15:16.725706233Z",
+              "published": "2026-08-28T14:47:45Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80213"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/797040"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Source-address critical option not enforced for non-public-key auth callbacks in golang.org/x/crypto/ssh"
             }
           ]
         },
