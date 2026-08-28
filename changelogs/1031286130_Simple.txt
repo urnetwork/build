@@ -1,0 +1,10 @@
+- Standardize forwarded client addresses and SEO
+- 2026.8.28-1031115710 restore android pin
+- Include command stderr in Warp failures
+- Add web search analytics pipeline and operational signals
+- Finalize sim-latency baseline and launch reports
+- Retry wrapped connection failures
+- Enforce full-window matchmaking coverage
+- Exercise contract validation in measured sim traffic
+- Keep competition migrations after origin migrations
+- Fix per-seed crawl topology collapse
