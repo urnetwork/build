@@ -9,6 +9,7 @@ umask 077
 : "${UR_ACCEPT_VERSION:?set UR_ACCEPT_VERSION}"
 : "${UR_ACCEPT_REPEAT:?set UR_ACCEPT_REPEAT}"
 : "${UR_ACCEPT_FIXTURE:?set UR_ACCEPT_FIXTURE}"
+: "${UR_ACCEPT_TESTS:?set UR_ACCEPT_TESTS}"
 : "${UR_ACCEPT_ARTIFACTS:?set UR_ACCEPT_ARTIFACTS}"
 
 agent=/opt/urnetwork-acceptance/agent
@@ -82,6 +83,7 @@ done
 set +e
 URNETWORK_CONTROL_SOCKET="$socket" "$agent" \
   -credentials "$credentials" \
+  -tests "$UR_ACCEPT_TESTS" \
   -fixture "$UR_ACCEPT_FIXTURE" \
   -active-client "$UR_ACCEPT_ARTIFACTS/active-client-id" \
   -state-dir "$work/agent" \

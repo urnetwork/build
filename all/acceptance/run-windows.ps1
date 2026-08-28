@@ -8,6 +8,7 @@ param(
   [Parameter(Mandatory = $true)][int]$Repeat,
   [Parameter(Mandatory = $true)][string]$Agent,
   [Parameter(Mandatory = $true)][string]$Credentials,
+  [Parameter(Mandatory = $true)][string]$Tests,
   [Parameter(Mandatory = $true)][string]$Fixture,
   [Parameter(Mandatory = $true)][string]$WorkDir
 )
@@ -57,6 +58,7 @@ try {
 
   & $Agent `
     -credentials $Credentials `
+    -tests $Tests `
     -fixture $Fixture `
     -active-client (Join-Path $WorkDir "active-client-id") `
     -state-dir $stateDir `
@@ -101,6 +103,26 @@ finally {
       "urnetworkd remained installed after MSI removal" | Set-Content -LiteralPath (Join-Path $WorkDir "uninstall-failure.txt")
       $exitCode = 1
     }
+  }
+
+  $privateInputCleanupFailed = $false
+  foreach ($privateInput in @($Credentials, $Tests)) {
+    try {
+      if (Test-Path -LiteralPath $privateInput) {
+        Remove-Item -LiteralPath $privateInput -Force
+      }
+      if (Test-Path -LiteralPath $privateInput) {
+        $privateInputCleanupFailed = $true
+      }
+    }
+    catch {
+      $privateInputCleanupFailed = $true
+    }
+  }
+  if ($privateInputCleanupFailed) {
+    "private acceptance inputs could not be removed from the guest" |
+      Set-Content -LiteralPath (Join-Path $WorkDir "private-input-cleanup-failure.txt")
+    $exitCode = 1
   }
 }
 

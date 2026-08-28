@@ -10,6 +10,9 @@
 set -euo pipefail
 umask 077
 
+here="$(cd "$(dirname "$0")" && pwd)"
+source "$here/signing.sh"
+
 device_name="${UR_ACCEPT_APPLE_SIMULATOR:-urnetwork-acceptance}"
 development_team="6BGU69Q742"
 recreate=0
@@ -28,7 +31,7 @@ case "$tools_dir" in
   *) tools_dir="$root/$tools_dir" ;;
 esac
 command -v timeout >/dev/null 2>&1 || { echo "ERROR: GNU timeout is required" >&2; exit 1; }
-for command_name in xcodebuild xcrun go make node security pbcopy pbpaste osascript; do
+for command_name in xcodebuild xcrun go make node security openssl pbcopy pbpaste osascript; do
   command -v "$command_name" >/dev/null 2>&1 || { echo "ERROR: $command_name is required" >&2; exit 1; }
 done
 case "$(uname -m)" in arm64|aarch64) host_arch=arm64 ;; x86_64|amd64) host_arch=amd64 ;; *) host_arch=unsupported ;; esac
@@ -115,7 +118,7 @@ timeout 30 xcrun simctl spawn "$existing_udid" launchctl print system >/dev/null
 echo ">>> code-signing identities"
 signing_identities="$(security find-identity -v -p codesigning)"
 printf '%s\n' "$signing_identities"
-if ! grep -Eq '"(Apple Development|iPhone Developer): .+ \('"$development_team"'\)"$' <<<"$signing_identities"; then
+if ! apple_has_development_identity_for_team "$development_team"; then
   echo "ERROR: no Apple development identity for team $development_team is available; the macOS tunnel acceptance test must use that exact team." >&2
   exit 1
 fi
