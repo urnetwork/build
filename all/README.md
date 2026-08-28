@@ -43,7 +43,7 @@ brew install gnu-sed         # run.sh uses BUILD_SED=gsed (GNU sed)
   Usually already installed; otherwise `brew install --cask docker`. Run
   `linux/setup.sh` once to build + smoke-test the Linux builder container.
 
-The language toolchains (`go 1.26.4`, `java 21`, `node`/`npm`, the Android SDK,
+The language toolchains (`go 1.26.7`, `java 21`, `node`/`npm`, the Android SDK,
 `warpctl`) are validated by `run.sh` at startup — install those per the main build
 docs.
 

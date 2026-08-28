@@ -46,6 +46,101 @@
 #       docker system prune
 
 
+# Check the complete host toolchain before this script pulls repositories,
+# creates a signing keychain, installs an NDK, or performs any other mutation.
+# Keep this list in sync with the host-side commands used here and by the
+# build scripts this runner invokes. Tools installed by this runner itself
+# (currently osv-scanner and warpctl) do not belong in this list. Flatpak is
+# intentionally optional; its build warns and continues below.
+required_build_tools=(
+    bash
+    codesign
+    curl
+    docker
+    ffprobe
+    git
+    go
+    gsed
+    hdiutil
+    java
+    jq
+    make
+    nc
+    node
+    npm
+    npx
+    openssl
+    pandoc
+    pip
+    productbuild
+    productsign
+    python
+    python3
+    qemu-img
+    qemu-system-aarch64
+    realpath
+    rsync
+    scp
+    sdkmanager
+    security
+    shasum
+    ssh
+    ssh-keygen
+    tar
+    timeout
+    unzip
+    xcodebuild
+    xcrun
+    zip
+    zig
+)
+if [ "$BUILD_TEST" ]; then
+    # Only the optional acceptance-test phase uses these host tools.
+    required_build_tools+=(lsof pkill sudo)
+fi
+
+missing_build_tools=()
+for build_tool in "${required_build_tools[@]}"; do
+    if ! command -v "$build_tool" >/dev/null 2>&1; then
+        missing_build_tools+=("$build_tool")
+    fi
+done
+if [ -z "$NVM_DIR" ] || [ ! -r "$NVM_DIR/nvm.sh" ]; then
+    missing_build_tools+=("nvm (set NVM_DIR to a readable nvm installation)")
+fi
+if (( ${#missing_build_tools[@]} )); then
+    echo "Missing required build tool(s):" >&2
+    printf '  - %s\n' "${missing_build_tools[@]}" >&2
+    echo "Install every missing tool before running build/all/run.sh." >&2
+    exit 1
+fi
+
+if [[ ! `go version` =~ 'go version go1.26.7' ]]; then
+    echo 'go 1.26.7 required' >&2
+    exit 1
+fi
+if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
+    echo 'java 21.0.x required' >&2
+    exit 1
+fi
+if [[ ! `node --version 2>&1` =~ 'v24.14.1' ]]; then
+    echo 'node 24.14.1 required' >&2
+    exit 1
+fi
+if [[ ! `npm --version 2>&1` =~ '11.11.0' ]]; then
+    echo 'npm 11.11.0 required' >&2
+    exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+    echo 'Docker is required and its daemon must be running.' >&2
+    exit 1
+fi
+if ! xcodebuild -version >/dev/null 2>&1; then
+    echo 'A working Xcode command-line toolchain is required.' >&2
+    exit 1
+fi
+
+
 builder_message () {
     echo -n "$1\n"
     if [ "$SLACK_WEBHOOK" ]; then
@@ -210,22 +305,6 @@ ANDROID_NDK_VERSION=29.0.14206865
 sdkmanager "ndk;$ANDROID_NDK_VERSION"
 error_trap 'android ndk'
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
-if [[ ! `go version` =~ 'go version go1.26.7' ]]; then
-    builder_message 'go 1.26.7 required'
-    exit 1
-fi
-if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
-    builder_message 'java 21.0.x required'
-    exit 1
-fi
-if [[ ! `node --version 2>&1` =~ 'v24.14.1' ]]; then
-    builder_message 'node 24.14.1 required'
-    exit 1
-fi
-if [[ ! `npm --version 2>&1` =~ '11.11.0' ]]; then
-    builder_message 'npm 11.11.0 required'
-    exit 1
-fi
 
 
 (cd $BUILD_HOME/connect && git_main)
