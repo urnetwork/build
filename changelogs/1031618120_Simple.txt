@@ -1,0 +1,4 @@
+- Web: redirect legacy domains to ur.io
+- Recover late IPv6 policy routing
+- Harden proxy dial retries and signals
+- Retry transient HTTP proxy dials promptly
