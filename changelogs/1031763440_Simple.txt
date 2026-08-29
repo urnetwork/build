@@ -1,0 +1,2 @@
+- 2026.8.28-1031618120 restore android pin
+- Route sim-testnet through public testnet RPCs
