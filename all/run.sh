@@ -50,8 +50,8 @@
 # creates a signing keychain, installs an NDK, or performs any other mutation.
 # Keep this list in sync with the host-side commands used here and by the
 # build scripts this runner invokes. Tools installed by this runner itself
-# (currently osv-scanner and warpctl) do not belong in this list. Flatpak is
-# intentionally optional; its build warns and continues below.
+# (currently osv-scanner and warpctl), or inside a purpose-built container
+# (including flatpak/flatpak-builder), do not belong in this list.
 required_build_tools=(
     bash
     codesign
@@ -1743,46 +1743,42 @@ for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
 done
 builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
-builder_message "building linux app (cgo sdk + deb/install-tarball/rpm/arch on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container; then the flatpak on this host)"
+builder_message "building linux app (cgo sdk + deb/install-tarball/rpm/arch on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container; then Flatpak in its dependency-complete Linux container)"
 OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
 error_trap 'linux build'
 github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
 
-# THE FLATPAK, built on this host rather than in the desktop container.
-# flatpak-builder needs bubblewrap, bubblewrap needs unprivileged user
-# namespaces, and all/linux/build.sh runs docker without --privileged; see the
-# header of build-flatpak.sh for why granting that container CAP_SYS_ADMIN is
-# the worse trade. It runs AFTER build-linux.sh because the manifest vendors
-# the cgo SDK that build-linux.sh stages into the tree.
+# THE FLATPAK, built in its own Linux container. The release host is macOS, so
+# flatpak cannot be a host prerequisite. Dockerfile.flatpak installs flatpak,
+# native flatpak-builder, elfutils and their source helpers; the first run also
+# installs the GNOME runtime into a persistent Docker volume. The container is
+# separate from the daemon/AppImage images because bubblewrap needs nested
+# namespaces: only this one receives CAP_SYS_ADMIN/CAP_NET_ADMIN and the
+# matching Docker security-policy relaxations. Its source bind mount remains
+# read-only.
 #
-# ONE ARCH. flatpak-builder has no cross-compile mode, so this produces a
-# bundle for whatever this build machine is. arm64 users get the AppImage and
-# the native packages, as they do today.
+# It runs AFTER build-linux.sh because the manifest vendors the cgo SDK that
+# build-linux.sh stages into the tree.
 #
-# NOT A RELEASE GATE, deliberately, and unlike the windows and linux builds
-# above. Those are gates because their toolchains are part of this pipeline; the
-# Flatpak needs `flatpak` installed on the build HOST, which no container here
-# provides and which the release host may not have yet. Making it a gate would
-# mean a host missing one package cannot cut a release at all. Once the build
-# host reliably has flatpak this should become an error_trap like its
-# neighbours -- an artifact is only as trustworthy as the thing enforcing it.
-if VERSION="${EXTERNAL_WARP_VERSION}" \
-   LINUX_DIR="$BUILD_HOME/linux" \
-   OUT_DIR="$DESKTOP_OUT/linux" \
-   bash "$BUILD_HOME/all/linux/build-flatpak.sh"; then
-    :
-else
-    builder_message "warning: the flatpak build did not finish — the release continues without a .flatpak. Install \`flatpak\` on the build host to restore it."
-fi
+# ONE ARCH. flatpak-builder has no cross-compile mode, so this produces a bundle
+# for this build machine's architecture (inside the matching Docker platform).
+# The other architecture still gets the AppImage and native packages.
+#
+# This is a release gate now that its toolchain is managed by the build. A real
+# Flatpak failure must stop before the uploader silently ships no bundle.
+VERSION="${EXTERNAL_WARP_VERSION}" \
+LINUX_DIR="$BUILD_HOME/linux" \
+OUT_DIR="$DESKTOP_OUT/linux" \
+    bash "$BUILD_HOME/all/linux/build-flatpak.sh"
+error_trap 'flatpak build'
 
 # Six artifact types per arch (names normative — linux/MIGRATION.md):
 # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
 # urnetwork-daemon-<v>.<rpmarch>.rpm, urnetwork-daemon-<v>-<pkgarch>.pkg.tar.zst,
 # URnetwork-<v>-<arch>.AppImage + .AppImage.zsync, and URnetwork-<v>-<arch>.flatpak
-# (amd64 only). (N) nullglobs each pattern so a missing type uploads nothing
-# rather than a literal '*' — which is also what makes the .rpm's
-# warn-and-continue behaviour in build-linux.sh, and the flatpak's above, work
-# at this level: a release without one simply uploads the others.
+# (one native architecture). (N) nullglobs each pattern so a missing optional
+# type uploads nothing rather than a literal '*' — which is what makes the
+# .rpm's warn-and-continue behaviour in build-linux.sh work at this level.
 #
 # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
 # appear here. The .sha256/.asc sidecars the packaging scripts write are

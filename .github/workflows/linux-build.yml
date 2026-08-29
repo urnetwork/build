@@ -867,12 +867,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -o Acquire::Retries=3
-          # flatpak only. make-flatpak.sh installs org.flatpak.Builder and the
-          # GNOME runtime itself, and prefers a native flatpak-builder when one
-          # exists -- installing the distro's would pick a different builder
-          # version than the release host uses.
-          # flatpak-builder NATIVELY, which matters. make-flatpak.sh prefers a
-          # native builder and otherwise falls back to `flatpak run
+          # Keep this CI job native instead of nesting Docker/bubblewrap. These
+          # are the same Ubuntu 24.04 packages Dockerfile.flatpak installs for
+          # the release path. A native flatpak-builder matters: make-flatpak.sh
+          # otherwise falls back to `flatpak run
           # org.flatpak.Builder` -- the only option on an immutable host like
           # Bazzite, and the path this job first took. That sandboxed builder
           # could not see the user-installed runtime and died with "Failed to
@@ -946,6 +944,7 @@ jobs:
             if VERSION="${EXTERNAL_WARP_VERSION}" \
                LINUX_DIR="$PWD/linux" \
                OUT_DIR="$PWD/out/linux" \
+               UR_FLATPAK_NATIVE=1 \
                  bash all/linux/build-flatpak.sh; then
               exit 0
             fi

@@ -1,0 +1,45 @@
+# URnetwork Flatpak build container — Ubuntu 24.04.
+#
+# Flatpak is a Linux tool, while the release runner is macOS. Keep the complete
+# host-side Flatpak toolchain here instead of requiring an impossible `flatpak`
+# install on the release host. The GNOME runtime itself lives in a named Docker
+# volume and is installed by build-flatpak-container.sh on the first build, so
+# subsequent releases reuse it without baking a multi-gigabyte runtime into the
+# image.
+#
+# Bubblewrap creates nested namespaces and configures their loopback devices
+# while building. build-flatpak.sh grants the narrowly-scoped runtime
+# permissions to this image only; the daemon and AppImage containers keep their
+# normal Docker confinement.
+#
+# SPDX-License-Identifier: MPL-2.0
+FROM ubuntu:24.04
+
+ENV LANG=C.UTF-8
+
+# Native flatpak-builder is intentional. Running org.flatpak.Builder as a
+# Flatpak cannot see the system runtime installed in this container. elfutils
+# is also required: the native builder invokes eu-strip/eu-elfcompress while
+# committing each module. The remaining packages are flatpak-builder's common
+# host-side source/archive helpers; they are Recommends rather than Depends in
+# Ubuntu, so list them explicitly while using --no-install-recommends.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends \
+        binutils \
+        ca-certificates \
+        elfutils \
+        flatpak \
+        flatpak-builder \
+        git \
+        patch \
+        unzip \
+        xz-utils \
+        zstd \
+    && flatpak remote-add --if-not-exists --system \
+        flathub https://flathub.org/repo/flathub.flatpakrepo \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY build-flatpak-container.sh /usr/local/bin/build-urnetwork-flatpak
+RUN chmod 0755 /usr/local/bin/build-urnetwork-flatpak
+
+ENTRYPOINT ["/usr/local/bin/build-urnetwork-flatpak"]

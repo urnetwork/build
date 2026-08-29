@@ -2,14 +2,16 @@
 
 Builds the URnetwork Linux app (`linux/`, C++/GTK4 GUI + headless daemon) into
 the release artifacts for **amd64 + arm64**, entirely in Docker on the macOS
-build host — no snapd, no LXD, no VM. Per arch (names are **normative** —
-`linux/MIGRATION.md` "Artifact filenames"):
+build host — no snapd, no LXD, no VM. The Flatpak is built for the build
+machine's architecture; the other names are produced for both architectures.
+Names are **normative** (`linux/MIGRATION.md` "Artifact filenames"):
 
 ```
 urnetwork-daemon_<version>_<arch>.deb              # daemon, apt path
 urnetwork-daemon-<version>-<arch>.install.tar.gz   # daemon, install.sh path
 urnetwork-daemon-<version>.<rpmarch>.rpm           # daemon, dnf/zypper path
 URnetwork-<version>-<arch>.AppImage                # GUI (+ .AppImage.zsync update feed)
+URnetwork-<version>-<arch>.flatpak                 # GUI (one build-machine arch)
 ```
 
 The `.rpm` is the only name that does not carry `<arch>` verbatim: rpm has its
@@ -21,7 +23,7 @@ stays Debian-spelled everywhere else.
 
 ## How it works
 
-- **Two base images per arch**, because the halves cannot share one:
+- **Two app base images per arch**, because the halves cannot share one:
   - `Dockerfile.daemon` — **Ubuntu 22.04**, whose glibc **2.35 IS the floor**
     `linux/packaging/deb/nfpm.yaml` declares (`Depends: libc6 (>= 2.35)`).
     nfpm does not run `dpkg-shlibdeps`, so the build image is the only thing
@@ -44,6 +46,14 @@ stays Debian-spelled everywhere else.
   build on different images. The container's arch *is* the target arch:
   - `arm64` → native on Apple Silicon (fast)
   - `amd64` → Docker qemu emulation (slower, but no second machine needed)
+- **A separate Flatpak image** (`Dockerfile.flatpak`) carries `flatpak`, native
+  `flatpak-builder`, `elfutils`, and the builder's source helpers. It exists
+  because the release runner is macOS, where Flatpak cannot be installed. The
+  first build installs the GNOME runtime/SDK into a named Docker volume and
+  later releases reuse it. Bubblewrap needs nested namespaces, so only this
+  purpose-built container gets `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`, and relaxed
+  seccomp/system-path policies; `/src` remains read-only and `/out` is its only
+  writable host bind.
 - **Bind mounts**: `build.sh` mounts the linux repo root **read-only** at
   `/src`, `OUT_DIR` writable at `/out`, and `build-arch.sh` at
   `/build-arch.sh`. In-container, `/src` is copied to a local `/work` before
@@ -108,11 +118,14 @@ that looks like a pass is worse than no test.
 |---|---|
 | `Dockerfile.daemon` | `ubuntu:22.04` (the declared glibc floor) + C++ toolchain, **no GTK** + nfpm/dpkg/systemd + rpm/checkpolicy/semodule-utils |
 | `Dockerfile.gui` | `ubuntu:24.04` + C++/GTK4 toolchain + appimagetool/linuxdeploy/zsyncmake + xvfb |
+| `Dockerfile.flatpak` | `ubuntu:24.04` + flatpak/native flatpak-builder/elfutils and source helpers |
 | `setup.sh` | **one-time smoke test** — build both containers per arch + verify each toolchain (the Linux analog of `windows/setup.sh`). Run this first. |
 | `smoke-test.sh` | run inside a container by `setup.sh`; role-aware (`ROLE=daemon` checks nfpm/dpkg/systemd and asserts GTK is *absent*; `ROLE=gui` checks the GTK4 stack, the AppImage tools, and asserts webkitgtk is *absent*) |
 | `build.sh` | host orchestration: stage SDK, `docker build`+`docker run` per arch **per role**, verify the artifact names |
 | `build-arch.sh` | in-container per-arch/per-role step: meson build → `meson test` (incl. the glibc-floor gate) → staging tree → the linux repo's packaging scripts → artifact-name asserts → `verify.sh` |
 | `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag. Independently runnable. |
+| `build-flatpak.sh` | host orchestration for the dedicated Flatpak image; `UR_FLATPAK_NATIVE=1` is the explicit CI-only native path |
+| `build-flatpak-container.sh` | installs/caches the GNOME runtime, copies read-only `/src` to ephemeral `/work`, and builds the bundle |
 
 ## Smoke-test the build env first
 
@@ -139,6 +152,12 @@ VERSION=0.0.1 \
 # ARCHES="arm64" ./build.sh       # single arch
 # ROLES="daemon" ./build.sh       # single half (see below)
 # UR_SKIP_VERIFY=1 ./build.sh     # build + package only, skip verification
+
+# After build.sh has staged the SDK, build the one-architecture Flatpak:
+VERSION=0.0.1 \
+LINUX_DIR=$(cd ../../../linux && pwd) \
+OUT_DIR=/tmp/urnetwork-linux-out \
+  ./build-flatpak.sh
 ```
 
 Env knobs: `UR_GLIBC_FLOOR` (daemon floor, default `2.35` — must match
@@ -182,8 +201,9 @@ Releases can't serve the multi-range requests zsync needs —
 
 - Needs Docker with buildx + qemu (Docker Desktop for Mac has both). The
   emulated amd64 pass is the slow part; the baked-in deps keep it from
-  re-downloading the toolchain each run. Two images per arch means four image
-  builds for a full release, all layer-cached after the first.
+  re-downloading the toolchain each run. Two app images per arch means four
+  image builds for a full release, plus the one-architecture Flatpak image; all
+  are layer-cached after the first.
 - `libwebkitgtk-6.0-dev` is deliberately **not** installed in the GUI image.
   meson links webkitgtk-6.0 whenever it is present (`required : false`, with no
   opt-out option), and `make-appimage.sh` then refuses to package — WebKitGTK
