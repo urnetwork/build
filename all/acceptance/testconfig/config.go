@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -55,10 +56,11 @@ type DataPlaneAccount struct {
 }
 
 type Signup struct {
-	NetworkNamePrefix string      `yaml:"network_name_prefix" json:"network_name_prefix"`
-	Password          string      `yaml:"password" json:"password" secret:"true"`
-	Email             SignupEmail `yaml:"email" json:"email"`
-	Phone             SignupPhone `yaml:"phone" json:"phone"`
+	NetworkNamePrefix            string      `yaml:"network_name_prefix" json:"network_name_prefix"`
+	Password                     string      `yaml:"password" json:"password" secret:"true"`
+	SeedphraseRateLimitBypassIPs []string    `yaml:"seedphrase_rate_limit_bypass_ips" json:"seedphrase_rate_limit_bypass_ips"`
+	Email                        SignupEmail `yaml:"email" json:"email"`
+	Phone                        SignupPhone `yaml:"phone" json:"phone"`
 }
 
 type SignupEmail struct {
@@ -199,6 +201,21 @@ func (c *Config) Validate(ready bool) error {
 	}
 	if isConfiguredString(c.Signup.Phone.Number) && !phonePattern.MatchString(c.Signup.Phone.Number) {
 		problems = append(problems, "signup.phone.number must be an E.164 number")
+	}
+	seenSeedphraseBypassIPs := map[netip.Addr]bool{}
+	if ready && len(c.Signup.SeedphraseRateLimitBypassIPs) == 0 {
+		problems = append(problems, "signup.seedphrase_rate_limit_bypass_ips must not be empty")
+	}
+	for _, ip := range c.Signup.SeedphraseRateLimitBypassIPs {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil || addr.Is4In6() || addr.String() != ip {
+			problems = append(problems, "signup.seedphrase_rate_limit_bypass_ips contains an invalid canonical IP address")
+			continue
+		}
+		if seenSeedphraseBypassIPs[addr] {
+			problems = append(problems, "signup.seedphrase_rate_limit_bypass_ips contains a duplicate")
+		}
+		seenSeedphraseBypassIPs[addr] = true
 	}
 	if c.Wallets.Bittensor.SS58Prefix < 0 || c.Wallets.Bittensor.SS58Prefix > 16383 {
 		problems = append(problems, "wallets.bittensor.ss58_prefix must be between 0 and 16383")

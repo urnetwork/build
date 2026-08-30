@@ -23,6 +23,7 @@ data_plane_account: {email: data@example.com, password: secret}
 signup:
   network_name_prefix: acceptance
   password: signup-secret-123
+  seedphrase_rate_limit_bypass_ips: [192.0.2.10, "2001:db8:1:2::10"]
   email: {domain: acceptance.invalid, local_part_prefix: urnetwork}
   phone: {number: "+15555550123"}
 providers:
@@ -122,6 +123,13 @@ func TestValidateReadyRejectsMalformedIdentityFixtures(t *testing.T) {
 	}{
 		{name: "short signup password", edit: func(config *Config) { config.Signup.Password = "too-short" }, want: "at least 12"},
 		{name: "phone", edit: func(config *Config) { config.Signup.Phone.Number = "555-0100" }, want: "E.164"},
+		{name: "seedphrase subnet", edit: func(config *Config) { config.Signup.SeedphraseRateLimitBypassIPs = []string{"192.0.2.0/24"} }, want: "canonical IP address"},
+		{name: "seedphrase mapped IPv4", edit: func(config *Config) {
+			config.Signup.SeedphraseRateLimitBypassIPs = []string{"::ffff:192.0.2.10"}
+		}, want: "canonical IP address"},
+		{name: "seedphrase duplicate", edit: func(config *Config) {
+			config.Signup.SeedphraseRateLimitBypassIPs = []string{"192.0.2.10", "192.0.2.10"}
+		}, want: "duplicate"},
 		{name: "google totp", edit: func(config *Config) { config.Providers.Google.TOTPSecret = "not-a-secret" }, want: "base32"},
 		{name: "provider email", edit: func(config *Config) { config.Providers.Apple.Email = "not-an-email" }, want: "exact DNS domain"},
 	}
