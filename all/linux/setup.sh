@@ -84,15 +84,31 @@ for arch in ${ARCHES}; do
       rc=1
     fi
     if [ "$role" = daemon ]; then
-      echo ">>> smoke-testing the acceptance tunnel privileges for ${arch}"
+      echo ">>> smoke-testing the acceptance tunnel and cgroup-BPF privileges for ${arch}"
       if timeout --signal=TERM --kill-after=30s 120 \
            docker run --rm --platform "linux/${arch}" \
+           --privileged --cgroupns=host \
            --cap-add NET_ADMIN --device /dev/net/tun \
            "${image_base}-${role}:${arch}" \
-           bash -euc 'test -c /dev/net/tun; ip tuntap add dev uraccept0 mode tun; ip link show dev uraccept0 >/dev/null; ip link delete uraccept0'; then
-        echo ">>> ${arch}/${role}: NET_ADMIN + /dev/net/tun PASSED"
+           bash -euc '
+             test -c /dev/net/tun
+             ip tuntap add dev uraccept0 mode tun
+             ip link show dev uraccept0 >/dev/null
+             ip link delete uraccept0
+             parent_cgroup="$(sed -n "s/^0::\///p" /proc/self/cgroup)"
+             test -n "$parent_cgroup"
+             child_cgroup="/sys/fs/cgroup/$parent_cgroup/urnetwork-setup-$$"
+             mkdir "$child_cgroup"
+             trap '\''rmdir "$child_cgroup"'\'' EXIT
+             (
+               printf "%s\n" "$BASHPID" >"$child_cgroup/cgroup.procs"
+               actual="$(sed -n "s/^0::\///p" /proc/self/cgroup)"
+               test "$actual" = "${child_cgroup#/sys/fs/cgroup/}"
+             )
+           '; then
+        echo ">>> ${arch}/${role}: privileged TUN + writable host cgroup PASSED"
       else
-        echo ">>> ${arch}/${role}: NET_ADMIN + /dev/net/tun FAILED" >&2
+        echo ">>> ${arch}/${role}: privileged TUN + writable host cgroup FAILED" >&2
         rc=1
       fi
     fi

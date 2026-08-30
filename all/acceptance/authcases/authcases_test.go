@@ -114,8 +114,7 @@ func (f *fakeAuthAPI) serve(response http.ResponseWriter, request *http.Request)
 	case "/auth/login-with-password":
 		user := body["user_auth"].(string)
 		if !f.passwordMade[user] {
-			response.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(response).Encode(map[string]any{"error": map[string]any{"message": "User does not exist."}})
+			_ = json.NewEncoder(response).Encode(map[string]any{"error": map[string]any{"message": "Invalid user or password."}})
 		} else if !f.verified[user] {
 			_ = json.NewEncoder(response).Encode(map[string]any{"verification_required": map[string]any{"user_auth": user}})
 		} else {
@@ -189,6 +188,67 @@ func TestPhoneLifecycleRecoversExistingFixture(t *testing.T) {
 	}
 	if fake.deletes != 2 {
 		t.Fatalf("account deletes = %d, want stale cleanup plus lifecycle cleanup", fake.deletes)
+	}
+}
+
+func TestPhoneLifecycleAcceptsLegacyMissingFixtureResponse(t *testing.T) {
+	config := lifecycleConfig(t)
+	phone := config.Signup.Phone.Number
+	fake := &fakeAuthAPI{
+		t: t, used: map[string]bool{}, walletCreated: map[string]bool{},
+		passwordMade: map[string]bool{}, verified: map[string]bool{},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/auth/login-with-password" && !fake.passwordMade[phone] {
+			http.Error(response, "User does not exist.", http.StatusInternalServerError)
+			return
+		}
+		fake.serve(response, request)
+	}))
+	defer server.Close()
+
+	results := (&Runner{APIURL: server.URL, Config: config, Client: server.Client()}).Run(
+		t.Context(), []string{"phone"},
+	)
+	if len(results) != 1 || results[0].Status != "PASS" {
+		t.Fatalf("legacy clean phone recovery = %#v", results)
+	}
+}
+
+func TestPhoneLifecycleRejectsUnrelatedPlainTextServerError(t *testing.T) {
+	config := lifecycleConfig(t)
+	fake := &fakeAuthAPI{
+		t: t, used: map[string]bool{}, walletCreated: map[string]bool{},
+		passwordMade: map[string]bool{}, verified: map[string]bool{},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/auth/login-with-password" {
+			http.Error(response, "database unavailable", http.StatusInternalServerError)
+			return
+		}
+		fake.serve(response, request)
+	}))
+	defer server.Close()
+
+	results := (&Runner{APIURL: server.URL, Config: config, Client: server.Client()}).Run(
+		t.Context(), []string{"phone"},
+	)
+	if len(results) != 1 || results[0].Status != "FAIL" ||
+		!strings.Contains(results[0].Detail, "database unavailable") {
+		t.Fatalf("unrelated phone server error = %#v", results)
+	}
+	if len(fake.passwordMade) != 0 {
+		t.Fatalf("phone lifecycle continued after an unrelated server error: %#v", fake.passwordMade)
+	}
+}
+
+func TestNetworkNameSuffixUsesServerAcceptedAlphabet(t *testing.T) {
+	// Raw URL-safe base64 encoded this input as underscores, which the server
+	// correctly rejects in network names. Hex is lowercase and stays inside the
+	// public network-name contract for every possible random byte.
+	got := encodeNetworkNameSuffix([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+	if got != "ffffffffffff" {
+		t.Fatalf("network-name suffix = %q, want lowercase hexadecimal", got)
 	}
 }
 

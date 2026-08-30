@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +134,16 @@ func (r *Runner) post(ctx context.Context, path string, body any, jwt string, ou
 		if result.Error != nil && result.Error.Message != "" {
 			return fmt.Errorf("%s returned HTTP %d: %s", path, response.StatusCode, result.Error.Message)
 		}
+		// The pre-fix password-login handler wrote its implementation error as a
+		// short text/plain response. Preserve that detail so the phone lifecycle
+		// can recognize only the known rolling-deploy compatibility case; every
+		// other HTTP 500 must still fail the acceptance run.
+		if strings.HasPrefix(response.Header.Get("Content-Type"), "text/plain") {
+			message := strings.TrimSpace(string(data))
+			if message != "" && len(message) <= 1024 {
+				return fmt.Errorf("%s returned HTTP %d: %s", path, response.StatusCode, message)
+			}
+		}
 		return fmt.Errorf("%s returned HTTP %d", path, response.StatusCode)
 	}
 	if err := json.Unmarshal(data, output); err != nil {
@@ -214,10 +225,12 @@ func (r *Runner) runPhone(ctx context.Context) (returnErr error) {
 	userAuth := r.Config.Signup.Phone.Number
 	// The exact phone fixture in tests.yml is verified by server policy. Recover
 	// an account left by an interrupted campaign before creating it again.
-	// "User does not exist" is the expected clean starting state.
+	// A generic invalid-credentials response is the expected clean starting
+	// state. Legacy servers used the account-enumerating "User does not exist"
+	// response, so accept it during a rolling upgrade as well.
 	stale, err := r.loginPassword(ctx, userAuth)
 	if err != nil {
-		if !strings.Contains(err.Error(), "User does not exist") {
+		if !isMissingPasswordFixture(err) {
 			return fmt.Errorf("inspect stale phone fixture: %w", err)
 		}
 	} else if stale.Network != nil && stale.Network.ByJWT != "" {
@@ -249,6 +262,13 @@ func (r *Runner) runPhone(ctx context.Context) (returnErr error) {
 		return errors.New("phone password login returned no network JWT")
 	}
 	return sameNetwork(jwt, loggedIn.Network.ByJWT)
+}
+
+func isMissingPasswordFixture(err error) bool {
+	message := err.Error()
+	return message == "Invalid user or password." ||
+		message == "User does not exist." ||
+		strings.HasSuffix(message, ": User does not exist.")
 }
 
 func (r *Runner) solanaSigner() (walletfixture.Signer, error) {
@@ -373,7 +393,11 @@ func suffix() string {
 	if _, err := rand.Read(value); err != nil {
 		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
-	return strings.ToLower(base64.RawURLEncoding.EncodeToString(value))
+	return encodeNetworkNameSuffix(value)
+}
+
+func encodeNetworkNameSuffix(value []byte) string {
+	return hex.EncodeToString(value)
 }
 
 func sameNetwork(firstJWT, secondJWT string) error {

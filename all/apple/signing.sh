@@ -10,6 +10,10 @@ apple_openssl() {
   command openssl "$@"
 }
 
+apple_timeout() {
+  command timeout "$@"
+}
+
 apple_certificate_subject_field() {
   local subject="$1"
   local field="$2"
@@ -20,8 +24,9 @@ apple_certificate_subject_field() {
     sed -n '1p'
 }
 
-# Matches a usable development identity by the certificate's team OU.
-apple_has_development_identity_for_team() (
+# Returns a usable development identity fingerprint matched by certificate
+# team OU. The developer ID embedded in the common name is not the team ID.
+apple_development_identity_for_team() (
   local team="$1"
   local temp_root="${TMPDIR:-/tmp}"
   local temp_dir
@@ -30,9 +35,11 @@ apple_has_development_identity_for_team() (
   local subject
   local common_name
   local certificate_team
+  local quoted_temp_dir
 
   temp_dir="$(mktemp -d "${temp_root%/}/urnetwork-apple-signing.XXXXXX")"
-  trap 'rm -R -- "$temp_dir"' EXIT
+  printf -v quoted_temp_dir '%q' "$temp_dir"
+  trap "rm -R -- $quoted_temp_dir" EXIT
 
   apple_security find-identity -v -p codesigning |
     awk '
@@ -73,8 +80,36 @@ apple_has_development_identity_for_team() (
       'Apple Development:'*|'iPhone Developer:'*) ;;
       *) continue ;;
     esac
-    [ "$certificate_team" = "$team" ] && exit 0
+    if [ "$certificate_team" = "$team" ]; then
+      printf '%s\n' "$fingerprint"
+      exit 0
+    fi
   done
 
   exit 1
+)
+
+apple_has_development_identity_for_team() {
+  apple_development_identity_for_team "$1" >/dev/null
+}
+
+# Proves that the private key is authorized for non-interactive codesign use.
+# Merely listing an identity does not exercise its keychain ACL and can leave a
+# later Xcode build waiting indefinitely behind a hidden SecurityAgent prompt.
+apple_verify_signing_identity_access() (
+  local identity="$1"
+  local temp_root="${TMPDIR:-/tmp}"
+  local temp_dir
+  local quoted_temp_dir
+
+  temp_dir="$(mktemp -d "${temp_root%/}/urnetwork-apple-signing-probe.XXXXXX")"
+  printf -v quoted_temp_dir '%q' "$temp_dir"
+  trap "rm -R -- $quoted_temp_dir" EXIT
+  cp /usr/bin/true "$temp_dir/signing-probe"
+  if apple_timeout 15 codesign --force --sign "$identity" --timestamp=none \
+    "$temp_dir/signing-probe" >/dev/null 2>&1; then
+    exit 0
+  else
+    exit $?
+  fi
 )

@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -31,15 +33,23 @@ const (
 
 // Holds validated command-line inputs for one platform campaign.
 type options struct {
-	Credentials    string
-	Tests          string
-	Fixture        string
-	ActiveClient   string
-	StateDir       string
-	SdkVersion     string
-	AppVersion     string
-	ServiceVersion string
-	Repeat         int
+	Credentials        string
+	Tests              string
+	Fixture            string
+	ActiveClient       string
+	PeerProviderClient string
+	StateDir           string
+	SdkVersion         string
+	AppVersion         string
+	ServiceVersion     string
+	Repeat             int
+
+	ProviderMode            bool
+	ProviderReady           string
+	ProviderStop            string
+	ProviderResult          string
+	ProviderEgressInterface string
+	ProviderEgressIndex     uint
 }
 
 // Records the changed-egress proof from every requested repetition.
@@ -49,6 +59,7 @@ type acceptanceResult struct {
 	Repetitions int                `json:"repetitions"`
 	BeforeIps   []string           `json:"before_ips"`
 	AfterIps    []string           `json:"after_ips"`
+	PeerToPeer  []peerToPeerResult `json:"peer_to_peer"`
 	AuthCases   []authcases.Result `json:"auth_cases"`
 }
 
@@ -64,12 +75,26 @@ func main() {
 	flag.StringVar(&opts.Tests, "tests", "", "resolved private signup tests JSON")
 	flag.StringVar(&opts.Fixture, "fixture", "", "persistent instant-account secret-key file")
 	flag.StringVar(&opts.ActiveClient, "active-client", "", "private retained client-id file")
+	flag.StringVar(&opts.PeerProviderClient, "peer-provider-client", "", "private controlled peer provider client-id file")
 	flag.StringVar(&opts.StateDir, "state-dir", "", "private SDK state directory")
 	flag.StringVar(&opts.SdkVersion, "sdk-version", "", "SDK build version expected by the daemon")
 	flag.StringVar(&opts.AppVersion, "app-version", "", "locally built app/service version")
 	flag.StringVar(&opts.ServiceVersion, "service-version", "", "version expected from the running service")
 	flag.IntVar(&opts.Repeat, "repeat", 1, "number of complete repetitions")
+	flag.BoolVar(&opts.ProviderMode, "peer-provider", false, "run as the controlled same-platform peer provider")
+	flag.StringVar(&opts.ProviderReady, "peer-provider-ready", "", "private file that receives the provider client id")
+	flag.StringVar(&opts.ProviderStop, "peer-provider-stop", "", "private stop marker watched by the provider")
+	flag.StringVar(&opts.ProviderResult, "peer-provider-result", "", "private provider traffic result JSON")
+	flag.StringVar(&opts.ProviderEgressInterface, "peer-provider-egress-interface", "", "physical interface name used to keep provider sockets outside the client tunnel")
+	flag.UintVar(&opts.ProviderEgressIndex, "peer-provider-egress-index", 0, "physical interface index used to keep provider sockets outside the client tunnel")
 	flag.Parse()
+	if opts.ProviderMode {
+		if err := runPeerProvider(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "acceptance peer provider: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	result, err := run(opts)
 	if err != nil {
@@ -84,8 +109,8 @@ func main() {
 
 // Runs the guest lifecycle and data-plane case for every repetition.
 func run(opts options) (*acceptanceResult, error) {
-	if opts.Credentials == "" || opts.Tests == "" || opts.Fixture == "" || opts.ActiveClient == "" || opts.StateDir == "" || opts.SdkVersion == "" || opts.AppVersion == "" || opts.ServiceVersion == "" || opts.Repeat < 1 {
-		return nil, errors.New("credentials, tests, fixture, active-client, state-dir, sdk-version, app-version, service-version, and positive repeat are required")
+	if opts.Credentials == "" || opts.Tests == "" || opts.Fixture == "" || opts.ActiveClient == "" || opts.PeerProviderClient == "" || opts.StateDir == "" || opts.SdkVersion == "" || opts.AppVersion == "" || opts.ServiceVersion == "" || opts.Repeat < 1 {
+		return nil, errors.New("credentials, tests, fixture, active-client, peer-provider-client, state-dir, sdk-version, app-version, service-version, and positive repeat are required")
 	}
 	user, password, err := readCredentials(opts.Credentials)
 	if err != nil {
@@ -100,6 +125,10 @@ func run(opts options) (*acceptanceResult, error) {
 	testsConfig, err := testconfig.LoadJSON(opts.Tests)
 	if err != nil {
 		return nil, fmt.Errorf("signup fixture: %w", err)
+	}
+	peerProviderClientId, err := readRetainedClient(opts.PeerProviderClient)
+	if err != nil {
+		return nil, fmt.Errorf("controlled peer provider: %w", err)
 	}
 
 	sdk.Version = opts.SdkVersion
@@ -119,12 +148,14 @@ func run(opts options) (*acceptanceResult, error) {
 		if err := guestCredentialLifecycle(opts.Fixture, filepath.Join(opts.StateDir, "guest")); err != nil {
 			return nil, fmt.Errorf("guest credential lifecycle: %w", err)
 		}
-		before, after, err := runTunnelIteration(opts, user, password, i)
+		var peerResult peerToPeerResult
+		before, after, err := runTunnelIteration(opts, user, password, peerProviderClientId, i, &peerResult)
 		if err != nil {
 			return nil, fmt.Errorf("repetition %d: %w", i, err)
 		}
 		result.BeforeIps = append(result.BeforeIps, before)
 		result.AfterIps = append(result.AfterIps, after)
+		result.PeerToPeer = append(result.PeerToPeer, peerResult)
 	}
 	result.Ok = true
 	return result, nil
@@ -132,7 +163,7 @@ func run(opts options) (*acceptanceResult, error) {
 
 // Runs one password login, provider connection, changed-egress check, and
 // unconditional client cleanup through the installed platform service.
-func runTunnelIteration(opts options, user, password string, iteration int) (beforeIp, afterIp string, returnErr error) {
+func runTunnelIteration(opts options, user, password, peerProviderClientId string, iteration int, peerResult *peerToPeerResult) (beforeIp, afterIp string, returnErr error) {
 	iterationState := filepath.Join(opts.StateDir, fmt.Sprintf("iteration-%d", iteration))
 	if err := os.MkdirAll(iterationState, 0o700); err != nil {
 		return "", "", err
@@ -252,8 +283,8 @@ func runTunnelIteration(opts options, user, password string, iteration int) (bef
 	if err != nil {
 		return "", "", fmt.Errorf("control hello: %w", err)
 	}
-	if hello.ProtocolVersion != 1 {
-		return "", "", fmt.Errorf("unexpected control protocol %d", hello.ProtocolVersion)
+	if err := validateControlProtocol(runtime.GOOS, hello.ProtocolVersion); err != nil {
+		return "", "", err
 	}
 	if runtime.GOOS == "linux" && hello.SdkVersion != opts.SdkVersion {
 		return "", "", fmt.Errorf("SDK version skew: agent %q daemon %q", opts.SdkVersion, hello.SdkVersion)
@@ -283,16 +314,17 @@ func runTunnelIteration(opts options, user, password string, iteration int) (bef
 		DeviceSpec:        runtime.GOOS + "/" + runtime.GOARCH,
 		AppVersion:        opts.AppVersion,
 	}
-	var rpcMaterial *sdk.DeviceRpcKeyMaterial
-	if runtime.GOOS == "windows" {
-		rpcMaterial, err = sdk.GenerateDeviceRpcKeyMaterial()
-		if err != nil {
-			return "", "", err
-		}
-		config.RpcServerPem = rpcMaterial.GetServerPem()
-		config.RpcClientCertPem = rpcMaterial.GetClientCertPem()
-		config.RpcListenHostPort = "127.0.0.1:12042"
+	rpcMaterial, err := sdk.GenerateDeviceRpcKeyMaterial()
+	if err != nil {
+		return "", "", err
 	}
+	config.RpcSessionId, err = mintRpcSessionId(rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	config.RpcServerPem = rpcMaterial.GetServerPem()
+	config.RpcClientCertPem = rpcMaterial.GetClientCertPem()
+	config.RpcListenHostPort = "127.0.0.1:12042"
 
 	callCtx, callCancel = context.WithTimeout(context.Background(), 90*time.Second)
 	started, err := control.Start(callCtx, config)
@@ -312,14 +344,12 @@ func runTunnelIteration(opts options, user, password string, iteration int) (bef
 		return "", "", fmt.Errorf("create device remote: %w", err)
 	}
 	defer device.Close()
-	if runtime.GOOS == "windows" {
-		if err := device.SetRpcServer(
-			rpcMaterial.GetClientPem(),
-			rpcMaterial.GetServerCertPem(),
-			config.RpcListenHostPort,
-		); err != nil {
-			return "", "", fmt.Errorf("configure device RPC: %w", err)
-		}
+	if err := device.SetRpcServer(
+		rpcMaterial.GetClientPem(),
+		rpcMaterial.GetServerCertPem(),
+		config.RpcListenHostPort,
+	); err != nil {
+		return "", "", fmt.Errorf("configure device RPC: %w", err)
 	}
 	if err := waitUntil(60*time.Second, func() bool { return device.GetRemoteConnected() }); err != nil {
 		return "", "", errors.New("device RPC did not connect")
@@ -349,6 +379,13 @@ func runTunnelIteration(opts options, user, password string, iteration int) (bef
 	}); err != nil {
 		return "", "", errors.New("provider did not disconnect")
 	}
+	if peerResult == nil {
+		return "", "", errors.New("peer-to-peer result destination is nil")
+	}
+	*peerResult, err = runPeerToPeerClient(device, controller, peerProviderClientId)
+	if err != nil {
+		return "", "", fmt.Errorf("peer-to-peer connection: %w", err)
+	}
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = control.Stop(stopCtx)
 	stopCancel()
@@ -361,6 +398,15 @@ func runTunnelIteration(opts options, user, password string, iteration int) (bef
 		return "", "", fmt.Errorf("tunnel did not stop: state=%s error=%s: %w", stopped.State, stopped.Error, err)
 	}
 	return beforeIp, afterIp, nil
+}
+
+// Mints the opaque name that binds one RPC key pair to one service session.
+func mintRpcSessionId(random io.Reader) (string, error) {
+	value := make([]byte, 16)
+	if _, err := io.ReadFull(random, value); err != nil {
+		return "", fmt.Errorf("mint device RPC session ID: %w", err)
+	}
+	return hex.EncodeToString(value), nil
 }
 
 // Creates or restores one recoverable account, clears the SDK session, and

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -10,6 +11,97 @@ import (
 	"strings"
 	"testing"
 )
+
+// Keeps the acceptance runner aligned with the two independent desktop
+// service protocols. Windows is intentionally newer than Linux; treating the
+// Linux version as a universal constant rejects a correctly packaged MSI.
+func TestValidateControlProtocolUsesPlatformContract(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		platform string
+		version  int
+	}{
+		{name: "linux", platform: "linux", version: 1},
+		{name: "windows", platform: "windows", version: 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateControlProtocol(test.platform, test.version); err != nil {
+				t.Fatalf("valid %s protocol rejected: %v", test.platform, err)
+			}
+		})
+	}
+
+	if err := validateControlProtocol("windows", 1); err == nil {
+		t.Fatal("Windows accepted the Linux control protocol")
+	}
+	if err := validateControlProtocol("darwin", 1); err == nil {
+		t.Fatal("unsupported platform accepted a control protocol")
+	}
+}
+
+// Requires every service start to carry one complete, named mTLS generation.
+func TestPinnedStartTunnelPayloadCarriesCompleteDeviceRpcGeneration(t *testing.T) {
+	config := tunnelConfig{
+		ByJwt:             "client-jwt",
+		NetworkSpaceJson:  "space-json",
+		InstanceId:        "instance-id",
+		AppVersion:        "app-version",
+		RpcServerPem:      "server-pem",
+		RpcClientCertPem:  "client-cert-pem",
+		RpcListenHostPort: "127.0.0.1:12042",
+		RpcSessionId:      "rpc-session-id",
+	}
+	want := map[string]any{
+		"by_jwt":              config.ByJwt,
+		"network_space_json":  config.NetworkSpaceJson,
+		"instance_id":         config.InstanceId,
+		"app_version":         config.AppVersion,
+		"rpc_server_pem":      config.RpcServerPem,
+		"rpc_client_cert_pem": config.RpcClientCertPem,
+		"rpc_listen_hostport": config.RpcListenHostPort,
+		"rpc_session_id":      config.RpcSessionId,
+	}
+	if got := pinnedStartTunnelPayload(config); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pinned start payload = %#v, want %#v", got, want)
+	}
+}
+
+// Prevents the Docker acceptance agent from inheriting the daemon's cgroup-BPF
+// socket mark and bypassing the tunnel it is supposed to measure.
+func TestLinuxRunnerIsolatesDaemonCgroupBeforeExec(t *testing.T) {
+	scriptBytes, err := os.ReadFile("run-linux.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+	move := strings.Index(script, `printf '%s\n' "$BASHPID" >"$daemon_cgroup/cgroup.procs"`)
+	exec := strings.Index(script, `exec "$daemon" --foreground`)
+	agent := strings.Index(script, `URNETWORK_CONTROL_SOCKET="$socket" "$agent"`)
+	if move < 0 || exec < 0 || agent < 0 {
+		t.Fatalf("Linux runner is missing the daemon cgroup move, exec, or agent boundary")
+	}
+	if !(move < exec && exec < agent) {
+		t.Fatalf("Linux runner ordering is move=%d exec=%d agent=%d, want move < exec < agent", move, exec, agent)
+	}
+	if !strings.Contains(script, `daemon_cgroup_path="$(sed -n 's/^0::\///p' "/proc/$daemon_pid/cgroup")"`) {
+		t.Fatal("Linux runner does not verify the daemon's live cgroup after launch")
+	}
+}
+
+// Uses fixed entropy to prove the session name is opaque and deterministic at
+// the boundary, while production supplies crypto/rand.Reader.
+func TestMintRpcSessionId(t *testing.T) {
+	got, err := mintRpcSessionId(bytes.NewReader(bytes.Repeat([]byte{0xff}, 16)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != strings.Repeat("ff", 16) {
+		t.Fatalf("RPC session ID = %q, want 128 bits of hexadecimal entropy", got)
+	}
+	if _, err := mintRpcSessionId(bytes.NewReader(nil)); err == nil {
+		t.Fatal("RPC session ID accepted insufficient entropy")
+	}
+}
 
 // Records every SDK session transition made by the guest lifecycle verifier.
 type recordingGuestSession struct {

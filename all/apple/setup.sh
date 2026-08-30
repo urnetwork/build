@@ -118,8 +118,14 @@ timeout 30 xcrun simctl spawn "$existing_udid" launchctl print system >/dev/null
 echo ">>> code-signing identities"
 signing_identities="$(security find-identity -v -p codesigning)"
 printf '%s\n' "$signing_identities"
-if ! apple_has_development_identity_for_team "$development_team"; then
+if ! development_identity="$(apple_development_identity_for_team "$development_team")"; then
   echo "ERROR: no Apple development identity for team $development_team is available; the macOS tunnel acceptance test must use that exact team." >&2
+  exit 1
+fi
+echo ">>> private-key signing authorization"
+if ! apple_verify_signing_identity_access "$development_identity"; then
+  echo "ERROR: the Apple development private key for team $development_team is not authorized for unattended codesign use." >&2
+  echo "       Run this setup interactively, enter the login-keychain password in the SecurityAgent prompt, and choose Always Allow." >&2
   exit 1
 fi
 

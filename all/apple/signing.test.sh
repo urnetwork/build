@@ -9,6 +9,7 @@ identity_hash="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 certificate_without_key_hash="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 identity_team="6BGU69Q742"
 certificate_without_key_team="6BGU69Q742"
+codesign_probe_status=0
 
 apple_security() {
   case "$*" in
@@ -71,6 +72,24 @@ apple_openssl() {
   esac
 }
 
+apple_timeout() {
+  [ "$1" = 15 ] || return 2
+  shift
+  [ "$1" = codesign ] || return 2
+  shift
+  case " $* " in
+    " --force --sign $identity_hash --timestamp=none "*) ;;
+    *) return 2 ;;
+  esac
+  return "$codesign_probe_status"
+}
+
+resolved_identity="$(apple_development_identity_for_team 6BGU69Q742)"
+if [ "$resolved_identity" != "$identity_hash" ]; then
+  echo "team OU resolved the wrong signing identity" >&2
+  exit 1
+fi
+
 if ! apple_has_development_identity_for_team 6BGU69Q742; then
   echo "team OU was not recognized when the certificate name ended in a different developer ID" >&2
   exit 1
@@ -84,6 +103,17 @@ fi
 identity_team="DWD39RZH9Z"
 if apple_has_development_identity_for_team 6BGU69Q742; then
   echo "a certificate without its private key was accepted as a signing identity" >&2
+  exit 1
+fi
+
+identity_team="6BGU69Q742"
+if ! apple_verify_signing_identity_access "$identity_hash"; then
+  echo "an authorized signing identity was rejected" >&2
+  exit 1
+fi
+codesign_probe_status=124
+if apple_verify_signing_identity_access "$identity_hash"; then
+  echo "a timed-out private-key authorization probe was accepted" >&2
   exit 1
 fi
 

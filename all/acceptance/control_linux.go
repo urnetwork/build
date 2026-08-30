@@ -114,11 +114,7 @@ func (self *linuxControl) Status(ctx context.Context) (tunnelStatus, error) {
 
 // Starts the local daemon with the registered client session.
 func (self *linuxControl) Start(ctx context.Context, config tunnelConfig) (tunnelStatus, error) {
-	reply, err := self.call(ctx, "start_tunnel", map[string]any{
-		"by_jwt":      config.ByJwt,
-		"instance_id": config.InstanceId,
-		"app_version": config.AppVersion,
-	})
+	reply, err := self.call(ctx, "start_tunnel", pinnedStartTunnelPayload(config))
 	if err != nil {
 		return tunnelStatus{}, err
 	}
