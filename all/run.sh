@@ -901,7 +901,7 @@ go_edit_require_subpackages () {
     find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "/\/v[0-9]\+/! s|\"$1\([^\"]*\)\"|\"$1${GO_MOD_SUFFIX}\1\"|g" {} \;
 }
 
-go_mod_fork () {
+go_mod_fork_prepare () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         temp=`mktemp -d` &&
         for f in *; do
@@ -918,10 +918,20 @@ go_mod_fork () {
             fi
         done &&
         $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
-        mv "$temp" v${GO_MOD_VERSION} &&
+        mv "$temp" v${GO_MOD_VERSION}
+    fi
+}
+
+go_mod_fork_tidy () {
+    if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         # the go go.sum needs to be updated
         (cd v${GO_MOD_VERSION} && go mod tidy && go get -t ./...)
     fi
+}
+
+go_mod_fork () {
+    go_mod_fork_prepare "$@" &&
+    go_mod_fork_tidy
 }
 
 go_mod_fork_update () {
@@ -1149,18 +1159,27 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    go_mod_edit_require github.com/urnetwork/server &&
+    go_mod_edit_require github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urfoundation/sn &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
-    go_mod_fork)
+    go_edit_require_subpackages github.com/urnetwork/server &&
+    go_edit_require_subpackages github.com/urnetwork/proxy &&
+    go_edit_require_subpackages github.com/urnetwork/userwireguard &&
+    # sim-testnet now imports server, while server imports sn. Publish a
+    # bootstrap sn tag before tidying so server can resolve this same-version
+    # module cycle; sn is tidied and re-tagged after server is available below.
+    go_mod_fork_prepare)
 error_trap 'sn edit'
 
 (cd $BUILD_HOME/sn &&
     git_commit &&
     git_tag)
-error_trap 'sn push branch'
+error_trap 'sn bootstrap push branch'
 
 
 (cd $BUILD_HOME/server &&
@@ -1187,6 +1206,17 @@ error_trap 'server edit'
     git_commit &&
     git_tag)
 error_trap 'server push branch'
+
+
+# Complete the half of the sn/server module cycle deferred above. Moving the sn
+# tag is intentional and mirrors the sdk's post-generation re-tag: server now
+# exists at this version, so tidy can resolve the full sim-testnet dependency
+# graph and the final tag contains the regenerated go.mod/go.sum.
+(cd $BUILD_HOME/sn &&
+    go_mod_fork_tidy &&
+    git_commit &&
+    git_tag recreate)
+error_trap 'sn finalize branch'
 
 
 (cd $BUILD_HOME/android && 
