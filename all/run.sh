@@ -907,7 +907,8 @@ go_edit_require_subpackages () {
 
 go_mod_fork_prepare () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
-        temp=`mktemp -d` &&
+        local temp
+        temp=`mktemp -d` || return $?
         for f in *; do
             if [ ! -e "$f/go.mod" ] && [ ! -e "$f/v${GO_MOD_VERSION}/go.mod" ]; then
                 fork_dir=1
@@ -917,12 +918,23 @@ go_mod_fork_prepare () {
                     fi
                 done
                 if [[ "$fork_dir" ]]; then
-                    mv "$f" "$temp"
+                    mv "$f" "$temp" || return $?
                 fi
             fi
-        done &&
-        $BUILD_SED -i '/^retract/d' "$temp/go.mod" &&
-        mv "$temp" v${GO_MOD_VERSION}
+        done
+        $BUILD_SED -i '/^retract/d' "$temp/go.mod" || return $?
+        mv "$temp" v${GO_MOD_VERSION} || return $?
+        # Arguments naming a top-level tree leave that tree beside the versioned
+        # module (the original behavior above). Arguments containing a slash are
+        # paths within a moved tree; carve those back out after the fork. This is
+        # for repository data that belongs in the release tag but not in the Go
+        # module zip.
+        for t in "$@"; do
+            if [[ "$t" == */* ]] && [ -e "v${GO_MOD_VERSION}/$t" ]; then
+                mkdir -p "${t%/*}" || return $?
+                mv "v${GO_MOD_VERSION}/$t" "$t" || return $?
+            fi
+        done
     fi
 }
 
@@ -1203,7 +1215,13 @@ error_trap 'sn bootstrap push branch'
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urfoundation/sn &&
-    go_mod_fork)
+    # The committed sim-latency baseline is an immutable 500+ MiB evidence
+    # dataset, not a server package or runtime asset. Keep it beside the
+    # versioned module on the release branch so it remains in the Git tag for
+    # audit/reproduction without entering the Go module's source archive.
+    # Otherwise server/v20xx exceeds Go's 500 MiB module-zip limit and cannot be
+    # resolved by sn (or any other module consumer).
+    go_mod_fork 'connect/sim-latency/baseline')
 error_trap 'server edit'
 
 (cd $BUILD_HOME/server &&
