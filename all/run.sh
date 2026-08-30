@@ -361,13 +361,17 @@ fi
 # Refresh the committed ur.io changelog sources while mmm is still on main.
 # This is release synchronization, not site compilation: doing it here makes
 # the generated source part of repository history before the web build consumes
-# it. GITHUB_API_KEY raises the GitHub API limit for the release walk.
+# it. GITHUB_API_KEY raises the GitHub API limit for the release walk. Keep the
+# generator strict so this runner can report a failed refresh, but do not lose a
+# release over GitHub's API limit: the generator writes only after completing
+# the walk, so its committed changelog.js + changelog-version.js remain a valid
+# stand-in on failure and the later web build can safely consume them.
 builder_message "updating the generated ur.io changelog"
 (cd $WARP_HOME/mmm/ur.io &&
     CHANGELOG_STRICT=1 \
     GITHUB_TOKEN="$GITHUB_API_KEY" \
     node react/scripts/generate-changelog.mjs)
-error_trap 'ur.io changelog update'
+warn_trap 'ur.io changelog update failed; using the committed changelog as a stand-in'
 
 # regenerate every app's strings from the shared localization store:
 # localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
