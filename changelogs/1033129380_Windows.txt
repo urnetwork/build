@@ -1,4 +1,5 @@
 - Referral updates
-- Expand Android main acceptance coverage
+- Include UI settings WinRT projection
 
+Under the hood
 - Flush finite TUN inbound handoffs

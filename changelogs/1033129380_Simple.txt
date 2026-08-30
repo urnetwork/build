@@ -1,0 +1,12 @@
+- Referral updates
+- Expand Android main acceptance coverage
+- Add deterministic Apple acceptance controls
+- Include UI settings WinRT projection
+- Add peer-to-peer app acceptance coverage
+- Validate acceptance seedphrase source addresses
+- 2026.8.28-1031763440 restore android pin
+- Flush finite TUN inbound handoffs
+- Keep LB cutovers on live targets
+- Add sim-latency competition alert routing
+- Recover finalized fleet mirror revisions
+- Lock finalized operator server sources
