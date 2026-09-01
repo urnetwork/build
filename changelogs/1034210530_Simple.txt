@@ -1,0 +1,10 @@
+- Preserve Chrome bridge sessions across hostname normalization
+- Web: negotiate JSON response for /ip
+- Preserve transactional email assets
+- Ur.xyz: improve mobile layouts and fix responsive interactions
+- 2026.8.30-1033129380 restore android pin
+- Join generated client retirement on generator close
+- Retain provider TCP returns until acknowledged
+- Join user NAT packet ownership on teardown
+- Alert on stale planetoid backups
+- Make Loki tail close idempotent

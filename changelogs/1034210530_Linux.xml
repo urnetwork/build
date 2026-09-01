@@ -1,0 +1,5 @@
+        <ul>
+          <li>Join generated client retirement on generator close</li>
+          <li>Retain provider TCP returns until acknowledged</li>
+          <li>Join user NAT packet ownership on teardown</li>
+        </ul>
