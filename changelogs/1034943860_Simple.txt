@@ -1,0 +1,10 @@
+- Restore Android diagnostics strings
+- Monitor: page legacy database rebuilds
+- Monitor: attribute task canary gaps by layer
+- Monitor: detect retained pgbouncer pools
+- Monitor: isolate subtensor lightnode repair
+- Monitor: expose active reindex progress
+- Monitor: refresh rewritten fix ancestry
+- Monitor: pin proxy memory fix provenance
+- Monitor: track rebased maintenance fixes
+- Add Android diagnostics localization keys
