@@ -105,6 +105,58 @@ func TestPacketStatsDeltaRequiresMonotonicBidirectionalTraffic(t *testing.T) {
 	}
 }
 
+// Peer discovery must begin while the existing provider keeps the installed
+// tunnel and device RPC alive. This is the deterministic form of the Windows
+// watchdog failure that appeared only after an explicit pre-discovery
+// disconnect.
+func TestRequirePeerDiscoveryConnection(t *testing.T) {
+	if err := requirePeerDiscoveryConnection(sdk.Connected); err != nil {
+		t.Fatalf("connected tunnel rejected: %v", err)
+	}
+	for _, status := range []sdk.ConnectionStatus{
+		sdk.Disconnected,
+		sdk.Connecting,
+		sdk.DestinationSet,
+		sdk.ConnectFailed,
+	} {
+		if err := requirePeerDiscoveryConnection(status); err == nil {
+			t.Errorf("status %q accepted without an active connection", status)
+		}
+	}
+}
+
+// A stale Connected status from the public provider is not proof that the
+// asynchronous switch reached the controlled peer.
+func TestControlledNetworkPeerConnectedRequiresExactPeerLocation(t *testing.T) {
+	providerId := sdk.NewId()
+	otherId := sdk.NewId()
+	exact := &sdk.ConnectLocation{
+		ConnectLocationId: &sdk.ConnectLocationId{ClientId: providerId},
+		NetworkPeer:       true,
+	}
+	tests := []struct {
+		name     string
+		status   sdk.ConnectionStatus
+		location *sdk.ConnectLocation
+		want     bool
+	}{
+		{name: "exact peer", status: sdk.Connected, location: exact, want: true},
+		{name: "stale public provider", status: sdk.Connected, location: &sdk.ConnectLocation{ConnectLocationId: &sdk.ConnectLocationId{BestAvailable: true}}},
+		{name: "wrong peer", status: sdk.Connected, location: &sdk.ConnectLocation{ConnectLocationId: &sdk.ConnectLocationId{ClientId: otherId}, NetworkPeer: true}},
+		{name: "device without network-peer trust", status: sdk.Connected, location: &sdk.ConnectLocation{ConnectLocationId: &sdk.ConnectLocationId{ClientId: providerId}}},
+		{name: "location switched but still connecting", status: sdk.Connecting, location: exact},
+		{name: "missing location", status: sdk.Connected},
+	}
+	for _, test := range tests {
+		if got := controlledNetworkPeerConnected(test.status, test.location, providerId); got != test.want {
+			t.Errorf("%s: connected = %t, want %t", test.name, got, test.want)
+		}
+	}
+	if controlledNetworkPeerConnected(sdk.Connected, exact, nil) {
+		t.Error("nil controlled provider ID was accepted")
+	}
+}
+
 // Provider results remain owner-readable only.
 func TestWritePrivateJSONIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "provider-result.json")

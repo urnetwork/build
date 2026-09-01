@@ -122,6 +122,34 @@ func (self packetStatsSnapshot) providerResult() peerProviderResult {
 	}
 }
 
+// requirePeerDiscoveryConnection protects the OS tunnel while the controlled
+// peer is discovered. On Windows, disconnecting the public provider first
+// leaves the tunnel idle long enough for the service watchdog to close the
+// device RPC, making an otherwise healthy peer intermittently undiscoverable.
+func requirePeerDiscoveryConnection(status sdk.ConnectionStatus) error {
+	if status != sdk.Connected {
+		return fmt.Errorf("peer discovery requires an active tunnel connection: status %s", status)
+	}
+	return nil
+}
+
+// isControlledNetworkPeer rejects a stale Connected status left over from the
+// public provider. A peer switch is complete only when the selected location
+// names the exact runner-created same-network client.
+func isControlledNetworkPeer(location *sdk.ConnectLocation, providerId *sdk.Id) bool {
+	return location != nil && location.NetworkPeer && providerId != nil &&
+		location.ConnectLocationId != nil && location.ConnectLocationId.ClientId != nil &&
+		location.ConnectLocationId.ClientId.Cmp(providerId) == 0
+}
+
+func controlledNetworkPeerConnected(
+	status sdk.ConnectionStatus,
+	location *sdk.ConnectLocation,
+	providerId *sdk.Id,
+) bool {
+	return status == sdk.Connected && isControlledNetworkPeer(location, providerId)
+}
+
 // runPeerToPeerClient selects only the runner-created same-network peer and
 // proves request and response bytes on the installed app's tunnel.
 func runPeerToPeerClient(
@@ -132,6 +160,9 @@ func runPeerToPeerClient(
 	providerId, err := sdk.ParseId(providerClientId)
 	if err != nil {
 		return peerToPeerResult{}, fmt.Errorf("parse provider client ID: %w", err)
+	}
+	if err := requirePeerDiscoveryConnection(controller.GetConnectionStatus()); err != nil {
+		return peerToPeerResult{}, err
 	}
 	peerController := device.OpenPeerViewController()
 	peerController.Start()
@@ -163,14 +194,17 @@ func runPeerToPeerClient(
 	})
 	defer controller.Disconnect()
 	if err := waitUntil(120*time.Second, func() bool {
-		return controller.GetConnectionStatus() == sdk.Connected
+		return controlledNetworkPeerConnected(
+			controller.GetConnectionStatus(),
+			device.GetConnectLocation(),
+			providerId,
+		)
 	}); err != nil {
-		return peerToPeerResult{}, fmt.Errorf("controlled provider did not connect: last status %s", controller.GetConnectionStatus())
-	}
-	location := device.GetConnectLocation()
-	if location == nil || !location.NetworkPeer || location.ConnectLocationId == nil ||
-		location.ConnectLocationId.ClientId == nil || location.ConnectLocationId.ClientId.Cmp(providerId) != 0 {
-		return peerToPeerResult{}, errors.New("connected location is not the controlled same-network provider")
+		return peerToPeerResult{}, fmt.Errorf(
+			"controlled provider did not connect: last status %s, exact peer selected %t",
+			controller.GetConnectionStatus(),
+			isControlledNetworkPeer(device.GetConnectLocation(), providerId),
+		)
 	}
 
 	if _, err := publicIp(); err != nil {

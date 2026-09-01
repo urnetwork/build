@@ -373,12 +373,6 @@ func runTunnelIteration(opts options, user, password, peerProviderClientId strin
 		return "", "", errors.New("public IP did not change after provider connection")
 	}
 
-	controller.Disconnect()
-	if err := waitUntil(60*time.Second, func() bool {
-		return controller.GetConnectionStatus() == sdk.Disconnected
-	}); err != nil {
-		return "", "", errors.New("provider did not disconnect")
-	}
 	if peerResult == nil {
 		return "", "", errors.New("peer-to-peer result destination is nil")
 	}
