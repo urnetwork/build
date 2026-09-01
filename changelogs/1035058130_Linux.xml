@@ -1,0 +1,6 @@
+        <ul>
+          <li>Join SDK-owned background lifetimes</li>
+          <li>Join client cancellation and address generator lifetimes</li>
+          <li>Join canceled strategy evaluation workers</li>
+          <li>Close client strategies with their owners</li>
+        </ul>

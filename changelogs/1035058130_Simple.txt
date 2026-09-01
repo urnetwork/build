@@ -1,0 +1,10 @@
+- Acceptance: preserve Windows peer discovery session
+- Join SDK-owned background lifetimes
+- Join client cancellation and address generator lifetimes
+- Join canceled strategy evaluation workers
+- Close client strategies with their owners
+- Grafana: bound self-telemetry log volume
+- Grafana: bind ingestion on VPN routes
+- Monitor: identify remaining provenance rollouts
+- Monitor: gate historical Mimir gaps on live config
+- Monitor: correct Loki self-telemetry diagnosis
