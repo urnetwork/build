@@ -1,0 +1,28 @@
+- Fix tunnel recovery after sleep and wake
+- Choose how much the sdk logs, from the diagnostics section
+- Export a diagnostic bundle from the iOS developer menu
+- Share one app group log root between the app and the extension
+- Bind the persisted active network space, not the bundled key
+
+Under the hood
+- Add extension-backed DeviceRemote transport
+- Regenerate the C ABI for the diagnostic export surface
+- Bridge DiagnosticManifestJson and FlushGlog over the device rpc
+- Export a diagnostic bundle of every process's logs
+- Add a redaction filter for exported logs
+- Regenerate the C ABI for the log verbosity surface
+- Make the glog verbosity settable at runtime, and carry it to the device process
+- Give each process its own log directory under a shared root
+- Return the log directory glog is actually writing to from GetLogDir
+- Keep the rpc session alive when a peer lacks an optional method
+- Regenerate the checked-in c abi from the current sdk surface
+- Connect: honor concurrent flow commitments
+- Connect: preserve handshake races across packet loss
+- Security: admit sanctioned realtime traffic
+- Connect: replay request bodies across route attempts
+- Connect: prevent stale dialer deadline starvation
+- Transport: admit 8 KiB handshake carriers
+- Optimize finite TCP inbound handoffs
+- Make Id JSON encoding addressability independent
+- Validate private transport roots strictly
+- Support private Connect transport roots

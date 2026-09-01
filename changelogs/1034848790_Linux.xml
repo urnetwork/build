@@ -1,0 +1,23 @@
+        <ul>
+          <li>Add extension-backed DeviceRemote transport</li>
+          <li>Regenerate the C ABI for the diagnostic export surface</li>
+          <li>Bridge DiagnosticManifestJson and FlushGlog over the device rpc</li>
+          <li>Export a diagnostic bundle of every process's logs</li>
+          <li>Add a redaction filter for exported logs</li>
+          <li>Regenerate the C ABI for the log verbosity surface</li>
+          <li>Make the glog verbosity settable at runtime, and carry it to the device process</li>
+          <li>Give each process its own log directory under a shared root</li>
+          <li>Return the log directory glog is actually writing to from GetLogDir</li>
+          <li>Keep the rpc session alive when a peer lacks an optional method</li>
+          <li>Regenerate the checked-in c abi from the current sdk surface</li>
+          <li>Connect: honor concurrent flow commitments</li>
+          <li>Connect: preserve handshake races across packet loss</li>
+          <li>Security: admit sanctioned realtime traffic</li>
+          <li>Connect: replay request bodies across route attempts</li>
+          <li>Connect: prevent stale dialer deadline starvation</li>
+          <li>Transport: admit 8 KiB handshake carriers</li>
+          <li>Optimize finite TCP inbound handoffs</li>
+          <li>Make Id JSON encoding addressability independent</li>
+          <li>Validate private transport roots strictly</li>
+          <li>Support private Connect transport roots</li>
+        </ul>
