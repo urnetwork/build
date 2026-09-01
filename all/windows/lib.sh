@@ -52,6 +52,19 @@ win_init() {
   WIN_MON_SOCK=""
 }
 
+# Keep ignored/private acceptance artifacts outside the Windows VM build root.
+# Callers use --delete-excluded as well, so an artifact copied by an older
+# filter cannot survive forever and later be mistaken for source or compiled.
+win_source_rsync_excludes() {
+  WIN_SOURCE_RSYNC_EXCLUDES=(
+    --exclude=.git/
+    --exclude=node_modules/
+    --exclude=tests/__acceptance__/
+    --exclude='*.test'
+    --exclude=.DS_Store
+  )
+}
+
 # Mirror the build server's whole build home into the VM verbatim — the VM builds
 # the exact local state run.sh set up (all repos, on their correct branches),
 # exactly like the Linux container's bind mount. A pinned cwRsync + a cmd ssh shell
@@ -59,6 +72,7 @@ win_init() {
 win_sync_source() {
   local src="$1"
   [ -d "$src" ] || win_die "build dir not found: $src"
+  win_source_rsync_excludes
   # Allowlist: the VM build needs only five repos — the app (windows/) and the
   # cgo SDK with its local module deps (sdk/ + connect/ + glog/ + goidenticons/,
   # wired by sdk/cgo's replace directives; goidenticons backs the SDK's
@@ -70,9 +84,8 @@ win_sync_source() {
   # (build-sdk.ps1 passes -buildvcs=false, so Go doesn't need it) + node_modules.
   # --delete only ever touches the VM, never $src; --progress shows per-file
   # activity so the sync isn't a silent wait. To add a repo, list it here.
-  rsync -a --delete --progress \
-    --exclude=.git \
-    --exclude=node_modules \
+  rsync -a --delete --delete-excluded --progress \
+    "${WIN_SOURCE_RSYNC_EXCLUDES[@]}" \
     -e "ssh -i $SSH_KEY -p $SSH_PORT ${WIN_SSH_OPTS[*]}" \
     "$src/windows" "$src/sdk" "$src/connect" "$src/glog" "$src/goidenticons" \
     "builder@127.0.0.1:$WIN_DIR_UNIX/"

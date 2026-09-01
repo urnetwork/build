@@ -55,13 +55,14 @@ stage_local_repos() {
     # local .git / build artifacts) and the --delete (preserve the dest's build
     # outputs and .git so version auto-detection still works).
     rsync -a --delete \
+      --filter='H tests/__acceptance__/' \
+      --filter='H .DS_Store' \
+      --filter='H *.test' \
       --exclude='.git/' \
       --exclude='build/' \
       --exclude='out/' \
       --exclude='node_modules/' \
       --exclude='third_party/urnetwork-sdk/' \
-      --exclude='.DS_Store' \
-      --exclude='*.test' \
       --exclude='*.o' \
       --exclude='*.a' \
       "$src/" "$dest/"

@@ -104,6 +104,9 @@ jobs:
           mapfile -t bash_files < "$RUNNER_TEMP/bash_files.txt"
           shellcheck --severity=error --shell=bash -x "${bash_files[@]}"
 
+      - name: Source-closure regression
+        run: bash all/source-closure.test.sh
+
       - name: shellcheck (style + info — advisory, never fails)
         if: always()
         run: |
