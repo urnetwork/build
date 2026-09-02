@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -655,35 +656,58 @@ func removeClient(networkJwt, clientId string) error {
 	return nil
 }
 
-// Reads the host's current public address with keep-alive disabled so the
-// connected request cannot reuse the physical connection.
+var publicIpUrls = []string{
+	"https://checkip.amazonaws.com/",
+	"https://api.ipify.org/",
+}
+
+// Reads the host's current public address through independent endpoints with
+// keep-alive disabled so a connected request cannot reuse a physical socket.
 func publicIp() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://checkip.amazonaws.com", nil)
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 20 * time.Second,
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 		},
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return "", err
+	return publicIpWithClient(ctx, client, publicIpUrls)
+}
+
+// Attempts every endpoint until one returns a syntactically valid address.
+func publicIpWithClient(ctx context.Context, client *http.Client, urls []string) (string, error) {
+	failures := []string{}
+	for _, url := range urls {
+		ip, err := func() (string, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				return "", err
+			}
+			res, err := client.Do(req)
+			if err != nil {
+				return "", err
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				return "", fmt.Errorf("HTTP %d", res.StatusCode)
+			}
+			value, err := io.ReadAll(io.LimitReader(res.Body, 256))
+			if err != nil {
+				return "", err
+			}
+			ip := strings.TrimSpace(string(value))
+			if net.ParseIP(ip) == nil {
+				return "", errors.New("invalid public IP response")
+			}
+			return ip, nil
+		}()
+		if err == nil {
+			return ip, nil
+		}
+		failures = append(failures, fmt.Sprintf("%s=%v", url, err))
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", res.StatusCode)
-	}
-	value, err := io.ReadAll(io.LimitReader(res.Body, 256))
-	if err != nil {
-		return "", err
-	}
-	ip := strings.TrimSpace(string(value))
-	if ip == "" {
-		return "", errors.New("empty public IP response")
-	}
-	return ip, nil
+	return "", fmt.Errorf("all public IP endpoints failed: %s", strings.Join(failures, "; "))
 }
 
 // Reads exactly one user line and one password line from the private mount.

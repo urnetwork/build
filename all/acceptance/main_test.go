@@ -4,13 +4,88 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+type publicIpRoundTripper func(request *http.Request) (*http.Response, error)
+
+// Implements the deterministic transport seam used by public-address tests.
+func (self publicIpRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return self(request)
+}
+
+// Forces the observed Android failure: the first hostname lookup fails while
+// an independent endpoint on the same network remains healthy.
+func TestPublicIpFallsBackAfterEndpointDnsFailure(t *testing.T) {
+	urls := []string{"https://first.invalid/", "https://second.invalid/"}
+	openedUrls := []string{}
+	client := &http.Client{Transport: publicIpRoundTripper(func(request *http.Request) (*http.Response, error) {
+		openedUrls = append(openedUrls, request.URL.String())
+		if request.URL.String() == urls[0] {
+			return nil, errors.New("deterministic DNS timeout")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("203.0.113.9\n")),
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})}
+
+	address, err := publicIpWithClient(context.Background(), client, urls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if address != "203.0.113.9" {
+		t.Fatalf("public address = %q, want 203.0.113.9", address)
+	}
+	if !reflect.DeepEqual(openedUrls, urls) {
+		t.Fatalf("opened urls = %q, want %q", openedUrls, urls)
+	}
+}
+
+// Requires every independent endpoint to fail before the probe fails.
+func TestPublicIpReportsEveryEndpointFailure(t *testing.T) {
+	urls := []string{"https://first.invalid/", "https://second.invalid/"}
+	client := &http.Client{Transport: publicIpRoundTripper(func(request *http.Request) (*http.Response, error) {
+		return nil, errors.New("deterministic DNS timeout")
+	})}
+
+	_, err := publicIpWithClient(context.Background(), client, urls)
+	if err == nil {
+		t.Fatal("all-endpoint DNS failure was accepted")
+	}
+	for _, url := range urls {
+		if !strings.Contains(err.Error(), url) {
+			t.Fatalf("failure omitted %q: %v", url, err)
+		}
+	}
+}
+
+// Prevents an HTTP success page from being mistaken for an address.
+func TestPublicIpRejectsInvalidEndpointBodies(t *testing.T) {
+	client := &http.Client{Transport: publicIpRoundTripper(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("not an address\n")),
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})}
+
+	if _, err := publicIpWithClient(context.Background(), client, []string{"https://invalid.test/"}); err == nil {
+		t.Fatal("invalid public IP response was accepted")
+	}
+}
 
 // Keeps the acceptance runner aligned with the two independent desktop
 // service protocols. Windows is intentionally newer than Linux; treating the
