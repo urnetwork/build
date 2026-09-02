@@ -14,7 +14,30 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/urnetwork/sdk"
 )
+
+type recordingNetworkClientRemover struct {
+	args   *sdk.RemoveNetworkClientArgs
+	byJwt  string
+	result *sdk.RemoveNetworkClientResult
+	err    error
+}
+
+// Records the SDK cleanup call without opening a network connection.
+func (self *recordingNetworkClientRemover) RemoveNetworkClientSyncWithContextAndJwt(
+	ctx context.Context,
+	args *sdk.RemoveNetworkClientArgs,
+	byJwt string,
+) (*sdk.RemoveNetworkClientResult, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		return nil, errors.New("cleanup context has no deadline")
+	}
+	self.args = args
+	self.byJwt = byJwt
+	return self.result, self.err
+}
 
 type publicIpRoundTripper func(request *http.Request) (*http.Response, error)
 
@@ -84,6 +107,34 @@ func TestPublicIpRejectsInvalidEndpointBodies(t *testing.T) {
 
 	if _, err := publicIpWithClient(context.Background(), client, []string{"https://invalid.test/"}); err == nil {
 		t.Fatal("invalid public IP response was accepted")
+	}
+}
+
+// Reproduces the Linux teardown failure at its ownership boundary: cleanup
+// must use the still-live SDK API instead of raw net/http, whose resolver can
+// retain the tunnel-only DNS server after /etc/resolv.conf is restored.
+func TestRemoveClientUsesSdkNetworkTransport(t *testing.T) {
+	clientId := "00000000-0000-0000-0000-000000000123"
+	remover := &recordingNetworkClientRemover{result: &sdk.RemoveNetworkClientResult{}}
+	const networkJwt = "network-owner-jwt"
+	if err := removeClient(remover, networkJwt, clientId); err != nil {
+		t.Fatal(err)
+	}
+	if remover.args == nil || remover.args.ClientId == nil || remover.args.ClientId.String() != clientId {
+		t.Fatalf("remove args = %+v, want client %s", remover.args, clientId)
+	}
+	if remover.byJwt != networkJwt {
+		t.Fatalf("cleanup jwt = %q, want explicit network-owner jwt", remover.byJwt)
+	}
+}
+
+// Keeps already-removed cleanup idempotent while changing the transport.
+func TestRemoveClientAcceptsAnAlreadyRemovedClient(t *testing.T) {
+	remover := &recordingNetworkClientRemover{result: &sdk.RemoveNetworkClientResult{
+		Error: &sdk.ApiError{Message: "Client does not exist."},
+	}}
+	if err := removeClient(remover, "network-owner-jwt", "00000000-0000-0000-0000-000000000123"); err != nil {
+		t.Fatalf("already removed client = %v", err)
 	}
 }
 

@@ -69,6 +69,12 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// The API surface required to release a client through the NetworkSpace's
+// platform-aware transport rather than a process-global HTTP transport.
+type networkClientRemover interface {
+	RemoveNetworkClientSyncWithContextAndJwt(context.Context, *sdk.RemoveNetworkClientArgs, string) (*sdk.RemoveNetworkClientResult, error)
+}
+
 // Parses the runner inputs and prints only the final result JSON to stdout.
 func main() {
 	var opts options
@@ -228,7 +234,7 @@ func runTunnelIteration(opts options, user, password, peerProviderClientId strin
 	// Retain the client ID before any tunnel work. A host-side cleanup process
 	// can then release it even if this process or its VM/container is killed.
 	defer func() {
-		clientCleanupErr := removeClient(networkJwt, clientId)
+		clientCleanupErr := removeClient(api, networkJwt, clientId)
 		if clientCleanupErr != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("release network client: %w", clientCleanupErr))
 		} else if err := removeActiveClient(opts.ActiveClient); err != nil {
@@ -640,12 +646,23 @@ func deleteNetwork(networkJwt string) error {
 }
 
 // Releases the registered production client using its network session.
-func removeClient(networkJwt, clientId string) error {
-	var result struct {
-		Error *apiError `json:"error"`
+func removeClient(remover networkClientRemover, networkJwt, clientId string) error {
+	parsedClientId, err := sdk.ParseId(clientId)
+	if err != nil {
+		return fmt.Errorf("parse client id: %w", err)
 	}
-	if err := postJson("/network/remove-client", map[string]any{"client_id": clientId}, networkJwt, &result); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := remover.RemoveNetworkClientSyncWithContextAndJwt(
+		ctx,
+		&sdk.RemoveNetworkClientArgs{ClientId: parsedClientId},
+		networkJwt,
+	)
+	if err != nil {
 		return err
+	}
+	if result == nil {
+		return errors.New("remove network client returned no result")
 	}
 	if result.Error != nil {
 		if result.Error.Message == "Client does not exist." {

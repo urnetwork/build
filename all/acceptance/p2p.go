@@ -367,7 +367,7 @@ func runPeerProvider(opts options) (returnErr error) {
 		return err
 	}
 	defer func() {
-		if err := removeClient(networkJWT, clientId); err != nil {
+		if err := removeClient(api, networkJWT, clientId); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("release provider client: %w", err))
 		} else if err := removeActiveClient(opts.ActiveClient); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("clear retained provider client: %w", err))
