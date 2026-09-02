@@ -1,0 +1,9 @@
+- Join device and RPC lifecycle ownership
+- Grafana: surface ingester tail loss
+- Monitor: verify backup heartbeat values
+- Monitor: detect stale backup progress
+- Monitor: attribute ingester tail loss
+- Join proxy manager and acceptance lifetimes
+- Canonicalize database timestamps to PostgreSQL precision
+- Release one-shot matchmaking strategies
+- Preserve Connect ingress settings through router
