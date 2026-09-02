@@ -20,6 +20,24 @@ work=/opt/urnetwork-acceptance/state
 socket=/opt/urnetwork-acceptance/control.sock
 daemon_pid=
 daemon_cgroup=
+agent_pid=
+teardown_watchdog_pid=
+
+watch_teardown_stall() {
+  while kill -0 "$agent_pid" 2>/dev/null; do
+    if grep -q '\[peerconn\]teardown stalled' "$UR_ACCEPT_ARTIFACTS/daemon.log" 2>/dev/null; then
+      echo "acceptance: WebRTC teardown stalled; capturing Go stacks and failing" >&2
+      : >"$UR_ACCEPT_ARTIFACTS/teardown-stall.detected"
+      for stalled_pid in "$daemon_pid" "$agent_pid"; do
+        if kill -0 "$stalled_pid" 2>/dev/null; then
+          kill -QUIT "$stalled_pid" 2>/dev/null || true
+        fi
+      done
+      return
+    fi
+    sleep 0.2
+  done
+}
 
 cleanup() {
   exit_status=$?
@@ -128,10 +146,23 @@ URNETWORK_CONTROL_SOCKET="$socket" "$agent" \
   -service-version "$UR_ACCEPT_VERSION" \
   -repeat "$UR_ACCEPT_REPEAT" \
   >"$UR_ACCEPT_ARTIFACTS/result.json" \
-  2> >(tee "$UR_ACCEPT_ARTIFACTS/agent.log" >&2)
+  2> >(tee "$UR_ACCEPT_ARTIFACTS/agent.log" >&2) &
+agent_pid=$!
+watch_teardown_stall &
+teardown_watchdog_pid=$!
+wait "$agent_pid"
 agent_status=$?
+if kill -0 "$teardown_watchdog_pid" 2>/dev/null; then
+  kill -TERM "$teardown_watchdog_pid" 2>/dev/null || true
+fi
+wait "$teardown_watchdog_pid" 2>/dev/null || true
 set -e
 
+if [ -f "$UR_ACCEPT_ARTIFACTS/teardown-stall.detected" ] ||
+   grep -q '\[peerconn\]teardown stalled' "$UR_ACCEPT_ARTIFACTS/daemon.log" 2>/dev/null; then
+  echo "acceptance daemon reported a WebRTC peer teardown stall" >&2
+  exit 1
+fi
 if [ "$agent_status" -ne 0 ]; then
   tail -120 "$UR_ACCEPT_ARTIFACTS/daemon.log" >&2 || true
   exit "$agent_status"

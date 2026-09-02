@@ -157,6 +157,33 @@ func TestControlledNetworkPeerConnectedRequiresExactPeerLocation(t *testing.T) {
 	}
 }
 
+// The new peer location can become visible before the outgoing provider's
+// Connected status is cleared. That hybrid snapshot must not start the traffic
+// proof until the new connection generation has published a transition.
+func TestControlledNetworkPeerConnectionRequiresObservedGenerationTransition(t *testing.T) {
+	providerId := sdk.NewId()
+	exact := &sdk.ConnectLocation{
+		ConnectLocationId: &sdk.ConnectLocationId{ClientId: providerId},
+		NetworkPeer:       true,
+	}
+	observer := &controlledPeerConnectionObserver{}
+
+	if observer.connected(sdk.Connected, exact, providerId) {
+		t.Fatal("outgoing Connected status and new peer location were accepted together")
+	}
+	observer.observeStatus(sdk.Connected)
+	if observer.connected(sdk.Connected, exact, providerId) {
+		t.Fatal("another terminal status armed the new connection generation")
+	}
+	observer.observeStatus(sdk.DestinationSet)
+	if observer.connected(sdk.Connecting, exact, providerId) {
+		t.Fatal("in-progress peer generation was accepted")
+	}
+	if !observer.connected(sdk.Connected, exact, providerId) {
+		t.Fatal("connected peer was rejected after its generation transition")
+	}
+}
+
 // Provider results remain owner-readable only.
 func TestWritePrivateJSONIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "provider-result.json")

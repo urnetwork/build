@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -150,6 +151,41 @@ func controlledNetworkPeerConnected(
 	return status == sdk.Connected && isControlledNetworkPeer(location, providerId)
 }
 
+// A peer switch is a new asynchronous connection generation. The selected
+// location may update before the outgoing Connected status does, so readiness
+// additionally requires an observed non-Connected status from the new
+// generation.
+type controlledPeerConnectionObserver struct {
+	controller *sdk.ConnectViewController
+
+	stateLock               sync.Mutex
+	observedGenerationStart bool
+}
+
+func (self *controlledPeerConnectionObserver) observeStatus(status sdk.ConnectionStatus) {
+	if status == sdk.Connected {
+		return
+	}
+	self.stateLock.Lock()
+	defer self.stateLock.Unlock()
+	self.observedGenerationStart = true
+}
+
+func (self *controlledPeerConnectionObserver) ConnectionStatusChanged() {
+	self.observeStatus(self.controller.GetConnectionStatus())
+}
+
+func (self *controlledPeerConnectionObserver) connected(
+	status sdk.ConnectionStatus,
+	location *sdk.ConnectLocation,
+	providerId *sdk.Id,
+) bool {
+	self.stateLock.Lock()
+	observedGenerationStart := self.observedGenerationStart
+	self.stateLock.Unlock()
+	return observedGenerationStart && controlledNetworkPeerConnected(status, location, providerId)
+}
+
 // runPeerToPeerClient selects only the runner-created same-network peer and
 // proves request and response bytes on the installed app's tunnel.
 func runPeerToPeerClient(
@@ -187,6 +223,9 @@ func runPeerToPeerClient(
 	}
 
 	before := snapshotPacketStats(device.GetPacketStats())
+	connectionObserver := &controlledPeerConnectionObserver{controller: controller}
+	connectionStatusSub := controller.AddConnectionStatusListener(connectionObserver)
+	defer connectionStatusSub.Close()
 	controller.Connect(&sdk.ConnectLocation{
 		ConnectLocationId: &sdk.ConnectLocationId{ClientId: providerId},
 		Name:              selectedName,
@@ -194,7 +233,7 @@ func runPeerToPeerClient(
 	})
 	defer controller.Disconnect()
 	if err := waitUntil(120*time.Second, func() bool {
-		return controlledNetworkPeerConnected(
+		return connectionObserver.connected(
 			controller.GetConnectionStatus(),
 			device.GetConnectLocation(),
 			providerId,

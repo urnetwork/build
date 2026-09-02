@@ -163,6 +163,43 @@ func TestLinuxRunnerIsolatesDaemonCgroupBeforeExec(t *testing.T) {
 	}
 }
 
+// A functional result cannot overrule evidence that the installed daemon left
+// a Pion ICE worker behind. The first main run remained silent for 18 minutes
+// after its assertions and was still recorded as PASS; keep the live detector,
+// stack capture, and terminal gate together and ordered around the agent.
+func TestLinuxRunnerFailsOnWebRtcTeardownStall(t *testing.T) {
+	scriptBytes, err := os.ReadFile("run-linux.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+	agentStart := strings.Index(script, `agent_pid=$!`)
+	watchdogStart := strings.Index(script, "watch_teardown_stall &")
+	agentWait := strings.Index(script, `wait "$agent_pid"`)
+	terminalGate := strings.LastIndex(script, `teardown-stall.detected`)
+	if agentStart < 0 || watchdogStart < 0 || agentWait < 0 || terminalGate < 0 {
+		t.Fatal("Linux runner is missing the agent owner, teardown watcher, wait, or terminal gate")
+	}
+	if !(agentStart < watchdogStart && watchdogStart < agentWait && agentWait < terminalGate) {
+		t.Fatalf(
+			"Linux teardown gate ordering is agent=%d watcher=%d wait=%d gate=%d",
+			agentStart,
+			watchdogStart,
+			agentWait,
+			terminalGate,
+		)
+	}
+	for _, required := range []string{
+		`\[peerconn\]teardown stalled`,
+		`kill -QUIT "$stalled_pid"`,
+		`"$UR_ACCEPT_ARTIFACTS/teardown-stall.detected"`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("Linux teardown gate is missing %q", required)
+		}
+	}
+}
+
 // Uses fixed entropy to prove the session name is opaque and deterministic at
 // the boundary, while production supplies crypto/rand.Reader.
 func TestMintRpcSessionId(t *testing.T) {
