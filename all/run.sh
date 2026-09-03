@@ -1210,6 +1210,7 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    go_mod_edit_require github.com/urnetwork/operator-proxy &&
     go_mod_edit_require github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
@@ -1218,6 +1219,7 @@ error_trap 'js-sdk publish'
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
+    go_edit_require_subpackages github.com/urnetwork/operator-proxy &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
