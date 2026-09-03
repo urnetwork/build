@@ -367,6 +367,38 @@
                 }
               },
               "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6354"
+              ],
+              "aliases": [
+                "CVE-2026-78662",
+                "GO-2026-6354"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6354": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6355"
+              ],
+              "aliases": [
+                "CVE-2026-56855",
+                "GO-2026-6355"
+              ],
+              "experimental_analysis": {
+                "GO-2026-6355": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": ""
             }
           ],
           "vulnerabilities": [
@@ -506,6 +538,160 @@
               ],
               "schema_version": "1.9.0",
               "summary": "Source-address critical option not enforced for non-public-key auth callbacks in golang.org/x/crypto/ssh"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6354.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/ssh",
+                        "symbols": [
+                          "Dial",
+                          "NewClientConn",
+                          "NewControlClientConn",
+                          "NewServerConn",
+                          "channel.Accept",
+                          "channel.handlePacket",
+                          "channel.responseMessageReceived"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.56.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-78662"
+              ],
+              "credits": [
+                {
+                  "name": "Will Mortensen"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6354"
+              },
+              "details": "Previously, a channel registered in the mux's chanList is not usable until it is established. A malicious peer was able flood the channel's incomingRequests, deadlocking the entire connection.\n\nNow, we add an atomic established state, set when a channel becomes usable. Until such a time, handlePacket drops every packet other than the open confirmation/failure, without blocking and without tearing down the connection.",
+              "id": "GO-2026-6354",
+              "modified": "2026-09-03T10:10:55.147673102Z",
+              "published": "2026-09-02T19:12:04Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/81316"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/826504"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/1y3fb2np35U"
+                }
+              ],
+              "related": [
+                "CGA-r4x5-7v6j-hmfg"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Prevent DoS on deadlocked undecided channel in golang.org/x/crypto/ssh"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6355.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/crypto/ssh",
+                        "symbols": [
+                          "Dial",
+                          "NewClientConn",
+                          "NewControlClientConn",
+                          "NewServerConn",
+                          "channel.handlePacket"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/crypto",
+                    "purl": "pkg:golang/golang.org/x/crypto"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.56.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-56855"
+              ],
+              "credits": [
+                {
+                  "name": "Will Mortensen"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6355"
+              },
+              "details": "Previously, after a channel has been established, a malicious peer could send crafted messages that would deadlock the entire connection.\n\nNow, we handle all RFC 4254 channel messages; global requests are handled explicitly. Then, treat all other messages as a protocol error and tear the connection down instead of buffering and blocking.",
+              "id": "GO-2026-6355",
+              "modified": "2026-09-03T10:10:55.101133330Z",
+              "published": "2026-09-02T19:12:04Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/81317"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/826524"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/1y3fb2np35U"
+                }
+              ],
+              "related": [
+                "CGA-rfw9-vqmf-556m"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Prevent DoS on deadlocked established channel in golang.org/x/crypto/ssh"
             }
           ]
         },
