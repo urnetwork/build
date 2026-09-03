@@ -54,6 +54,7 @@ require (
 	github.com/pion/turn/v5 v5.0.12 // indirect
 	github.com/pion/webrtc/v4 v4.2.18 // indirect
 	github.com/quic-go/quic-go v0.61.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/streamingfast/logging v0.0.0-20250404134358-92b15d2fbd2e // indirect
 	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/urnetwork/glog v0.0.0 // indirect
