@@ -90,7 +90,8 @@ explicitly, so they're unaffected.
 |---|---|
 | `setup.sh` | **one-time setup + smoke test** — verifies the ISO is 24H2/Pro (see "Windows ISO"), installs Windows unattended, provisions the toolchain, verifies it. Run this first. |
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
-| `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
+| `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), enforce the hermetic guest policy, **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
+| `disable-auto-servicing.ps1` | shared provisioning/runtime guard: blocks Windows Update sources and verifies `UsoSvc` + `wuauserv` are disabled and stopped before a build starts |
 | `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, WiX, git, **rsync + the `cmd` ssh shell** |
 | `packer/http/Autounattend.pkrtpl.xml` | unattended install; bakes the stable ssh key, sets locale, enables OpenSSH, installs NetKVM at first logon |
 | `packer/scripts/provision.ps1` | installs VS Build Tools (ARM64+x64) + WDK + WiX + git + a pinned cwRsync; sets the `cmd` ssh shell |

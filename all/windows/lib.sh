@@ -117,6 +117,21 @@ win_ssh() {
 win_scp_to()   { scp -i "$SSH_KEY" -P "$SSH_PORT" "${WIN_SSH_OPTS[@]}" "$1" "builder@127.0.0.1:$2"; }
 win_scp_from() { scp -i "$SSH_KEY" -P "$SSH_PORT" "${WIN_SSH_OPTS[@]}" "builder@127.0.0.1:$1" "$2"; }
 
+# Enforce the hermetic-guest policy on EVERY throwaway overlay, not only when
+# its base image happened to be provisioned. The production build host exposed
+# an older-but-otherwise-valid image whose wuauserv/UsoSvc policy was absent;
+# TrustedInstaller rebooted that guest in the middle of whole-program linking.
+# Copy the current script before source sync so stale images cannot carry a
+# stale policy implementation either. Any copy, policy, stop, or verification
+# failure is fatal to the caller.
+win_prepare_hermetic_guest() {
+  local source="$WIN_HERE/disable-auto-servicing.ps1"
+  local remote="C:/Windows/Temp/urnetwork-disable-auto-servicing.ps1"
+  [ -f "$source" ] || { echo "missing hermetic guest policy: $source" >&2; return 1; }
+  win_scp_to "$source" "$remote" || return
+  win_ssh "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $remote"
+}
+
 # Build a small CD image carrying autounattend.xml (rendered with the ssh key).
 # Windows scans removable media for autounattend.xml at the root.
 win_make_autounattend_iso() {  # -> echoes the iso path

@@ -30,6 +30,10 @@ source "$here/lib.sh"
 : "${OUT_DIR:?set OUT_DIR}"
 : "${VERSION:?set VERSION}"           # EXTERNAL_WARP_VERSION, for the app/MSI
 : "${SDK_VERSION:?set SDK_VERSION}"   # WARP_VERSION, baked into the SDK DLL
+
+echo ">>> validating Windows build boundary contracts"
+(cd "$here" && go test ./...)
+
 win_init
 
 [ -e "$UEFI_CODE" ] || win_die "missing $UEFI_CODE"
@@ -53,6 +57,10 @@ if ! win_wait_ssh; then
   win_mon "$WIN_MON_SOCK" "screendump $here/output/build-fail.ppm"
   win_die "VM ssh did not come up — last screen saved to $here/output/build-fail.ppm"
 fi
+
+echo ">>> enforcing + verifying hermetic Windows guest policy"
+win_prepare_hermetic_guest \
+  || win_die "could not disable Windows auto-servicing; refusing to start an interruptible release build"
 
 echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # rsync the build server's whole local tree (all repos, already on the correct

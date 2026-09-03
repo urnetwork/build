@@ -29,26 +29,15 @@ function Log($m) { Write-Host "[provision] $m" }
 # servicing stack up front, then install into a quiet machine. OS updates are
 # taken deliberately, by rebuilding the image (setup.sh) or re-provisioning it
 # (setup.sh --reprovision).
-Log "disabling Windows Update auto-servicing + auto-reboot (hermetic build VM)"
-$au = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
-New-Item -Path $au -Force | Out-Null
-New-ItemProperty -Path $au -Name NoAutoUpdate -Value 1 -PropertyType DWord -Force | Out-Null
-New-ItemProperty -Path $au -Name NoAutoRebootWithLoggedOnUsers -Value 1 -PropertyType DWord -Force | Out-Null
-# Disable then stop the update services. Order matters (disable first, so a
-# stopped service can't be demand-restarted), and both use sc.exe rather than
-# Set-Service/Stop-Service: Stop-Service BLOCKS while a busy wuauserv finishes
-# what it's doing ("WARNING: Waiting for service 'Windows Update' to stop...")
-# and hung provisioning here, while sc.exe stop is asynchronous and returns at
-# once. A service that refuses to stop is fine — disabled means it stays down
-# from the next boot, and this image is finalized by a reboot-free shutdown.
-# WaaSMedicSvc (the "medic" that re-enables the others) is access-protected on
-# some builds, so failures are ignored: the policy keys above are the primary
-# control, these are belt + braces. Native exit codes don't throw in Windows
-# PowerShell, so no -ErrorAction is needed.
-foreach ($s in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
-  & sc.exe config $s start= disabled 2>&1 | Out-Null
-  & sc.exe stop   $s              2>&1 | Out-Null
+Log "enforcing the shared hermetic build-guest policy"
+$guestPolicy = Join-Path $PSScriptRoot "disable-auto-servicing.ps1"
+if (-not (Test-Path $guestPolicy)) {
+  # The vestigial Packer template uploads its PowerShell provisioner to a
+  # generated path, while setup.sh places both scripts side by side.
+  $guestPolicy = "C:\Windows\Temp\disable-auto-servicing.ps1"
 }
+if (-not (Test-Path $guestPolicy)) { throw "missing shared guest policy: $guestPolicy" }
+& $guestPolicy
 
 # Defender real-time scanning churns CPU over the rsync'd build tree, the go
 # module cache, and the toolchains (it can't be fully disabled headless -

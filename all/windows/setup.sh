@@ -135,6 +135,11 @@ done
 
 win_init
 
+stage_provision_scripts() {
+  win_scp_to "$here/disable-auto-servicing.ps1" "C:/Windows/Temp/disable-auto-servicing.ps1"
+  win_scp_to "$here/packer/scripts/provision.ps1" "C:/Windows/Temp/provision.ps1"
+}
+
 # --- preflight ---------------------------------------------------------------
 echo ">>> preflight: checking tools + firmware"
 win_require_tools qemu-system-aarch64 qemu-img ssh scp ssh-keygen nc hdiutil \
@@ -160,7 +165,7 @@ if [ -n "$REPROVISION" ]; then
   # session staged one). That boot is slow but legitimate, and timing out on it
   # hard-kills the guest mid-servicing and damages the base image.
   win_wait_ssh 1080 || win_die "VM ssh did not come up (watch on VNC 5901)"
-  win_scp_to "$here/packer/scripts/provision.ps1" "C:/Windows/Temp/provision.ps1"
+  stage_provision_scripts
   win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/provision.ps1" \
     || win_die "provisioning failed — see output above"
   win_shutdown_vm
@@ -185,7 +190,7 @@ else
   # 2. provision the MSI toolchain into the image over ssh (needs the VM's network,
   #    which is up since ssh connected — NetKVM installed at first logon).
   echo ">>> provisioning the toolchain (VS Build Tools + WDK + WiX + git + rsync; slow)"
-  win_scp_to "$here/packer/scripts/provision.ps1" "C:/Windows/Temp/provision.ps1"
+  stage_provision_scripts
   win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/provision.ps1" \
     || win_die "provisioning failed — see output above"
 

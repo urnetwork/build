@@ -143,6 +143,11 @@ build {
 
   # Provision the toolchain over ssh (PowerShell). Kept in a separate script so it
   # can be iterated without touching the template.
+  provisioner "file" {
+    source      = "${path.root}/../disable-auto-servicing.ps1"
+    destination = "C:/Windows/Temp/disable-auto-servicing.ps1"
+  }
+
   provisioner "powershell" {
     script            = "${path.root}/scripts/provision.ps1"
     execution_policy  = "bypass"
