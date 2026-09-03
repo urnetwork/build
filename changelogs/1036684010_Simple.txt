@@ -1,0 +1,4 @@
+- Dashboard widget: the mark next to the location name is the country color disc
+- Dashboard widget: the location's country color disc replaces the connector mark next to the location name
+- Fix Windows provide state compilation
+- Blob: make immutable artifact writes atomic

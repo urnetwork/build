@@ -1,0 +1,1 @@
+- Dashboard widget: the location's country color disc replaces the connector mark next to the location name
