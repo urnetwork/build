@@ -80,6 +80,16 @@ try {
     throw "urnetworkd selftest failed with exit code $selfTestExitCode"
   }
 
+  # QEMU's slirp DNS proxy can lag the SSH service during a fresh guest boot.
+  # The signup lifecycle below deliberately uses the ordinary OS resolver, so
+  # wait for that exact name path before its first non-idempotent POST. The
+  # provider's SDK uses in-process DoH and therefore cannot prove this path is
+  # ready merely by reaching its own ready marker.
+  Wait-AcceptanceControlPlaneDns -HostNames @(
+    "api.bringyour.com",
+    "connect.bringyour.com"
+  )
+
   $appAgentState = Install-AcceptanceAppScopedAgent `
     -ServiceExecutable $serviceExecutable `
     -Agent $Agent `

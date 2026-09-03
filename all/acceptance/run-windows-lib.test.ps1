@@ -53,6 +53,63 @@ finally {
   Remove-Item -LiteralPath $probe, $probeOut, $probeErr -Force -ErrorAction SilentlyContinue
 }
 
+# SSH readiness does not imply QEMU's slirp DNS proxy is ready. Exercise the
+# bounded retry without sleeping so the first non-idempotent signup POST never
+# becomes the network-readiness probe.
+$dnsState = [pscustomobject]@{
+  ApiAttempts = 0
+  ConnectAttempts = 0
+  Sleeps = 0
+}
+$dnsResolver = {
+  param([string]$HostName)
+  if ($HostName -eq "api.bringyour.com") {
+    $dnsState.ApiAttempts++
+    if ($dnsState.ApiAttempts -eq 1) {
+      throw "simulated startup miss"
+    }
+  }
+  elseif ($HostName -eq "connect.bringyour.com") {
+    $dnsState.ConnectAttempts++
+  }
+  return [System.Net.IPAddress]::Parse("192.0.2.1")
+}
+$dnsSleeper = {
+  param([int]$Milliseconds)
+  if ($Milliseconds -ne 17) {
+    throw "unexpected DNS retry delay: $Milliseconds"
+  }
+  $dnsState.Sleeps++
+}
+Wait-AcceptanceControlPlaneDns `
+  -HostNames @("api.bringyour.com", "connect.bringyour.com") `
+  -Attempts 2 `
+  -RetryDelayMilliseconds 17 `
+  -Resolver $dnsResolver `
+  -Sleeper $dnsSleeper
+if ($dnsState.ApiAttempts -ne 2 -or $dnsState.ConnectAttempts -ne 1 -or $dnsState.Sleeps -ne 1) {
+  throw "control-plane DNS retry did not re-check the complete host set after one startup miss"
+}
+
+$terminalDnsState = [pscustomobject]@{ Sleeps = 0 }
+$terminalDnsFailed = $false
+try {
+  Wait-AcceptanceControlPlaneDns `
+    -HostNames @("api.bringyour.com") `
+    -Attempts 2 `
+    -RetryDelayMilliseconds 0 `
+    -Resolver { param([string]$HostName) throw "still unavailable" } `
+    -Sleeper { param([int]$Milliseconds) $terminalDnsState.Sleeps++ }
+}
+catch {
+  $terminalDnsFailed = $_.Exception.Message -match "api\.bringyour\.com" -and `
+    $_.Exception.Message -match "after 2 attempts" -and `
+    $_.Exception.Message -match "still unavailable"
+}
+if (-not $terminalDnsFailed -or $terminalDnsState.Sleeps -ne 1) {
+  throw "control-plane DNS terminal failure was not bounded or did not preserve its cause"
+}
+
 # The long-running provider can exit cleanly while Windows PowerShell 5.1 keeps
 # ExitCode blank. Its atomic result file is the success contract; a blank shell
 # property must not turn verified bidirectional traffic into a false failure.

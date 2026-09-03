@@ -58,6 +58,59 @@ function Invoke-AcceptanceProcess {
   return $process.ExitCode
 }
 
+function Wait-AcceptanceControlPlaneDns {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory = $true)][string[]]$HostNames,
+    [int]$Attempts = 60,
+    [int]$RetryDelayMilliseconds = 1000,
+    [scriptblock]$Resolver = {
+      param([string]$HostName)
+      [System.Net.Dns]::GetHostAddresses($HostName)
+    },
+    [scriptblock]$Sleeper = {
+      param([int]$Milliseconds)
+      Start-Sleep -Milliseconds $Milliseconds
+    }
+  )
+
+  if ($HostNames.Count -eq 0) {
+    throw "at least one control-plane DNS host is required"
+  }
+  if ($Attempts -lt 1) {
+    throw "control-plane DNS attempts must be positive"
+  }
+  if ($RetryDelayMilliseconds -lt 0) {
+    throw "control-plane DNS retry delay cannot be negative"
+  }
+
+  $lastFailure = "no lookup attempted"
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    $ready = $true
+    foreach ($hostName in $HostNames) {
+      try {
+        $addresses = @(& $Resolver $hostName)
+        if ($addresses.Count -eq 0) {
+          throw "lookup returned no addresses"
+        }
+      }
+      catch {
+        $ready = $false
+        $lastFailure = "$hostName`: $($_.Exception.Message)"
+        break
+      }
+    }
+    if ($ready) {
+      return
+    }
+    if ($attempt -lt $Attempts) {
+      & $Sleeper $RetryDelayMilliseconds
+    }
+  }
+
+  throw "acceptance control-plane DNS did not become ready after $Attempts attempts ($lastFailure)"
+}
+
 function Wait-AcceptanceProcessExit {
   [CmdletBinding()]
   param(
