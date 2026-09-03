@@ -49,3 +49,6 @@
 [submodule "goidenticons"]
 	path = goidenticons
 	url = git@github.com:urnetwork/goidenticons.git
+[submodule "operator-proxy"]
+	path = operator-proxy
+	url = git@github.com:urnetwork/operator-proxy.git
