@@ -373,6 +373,18 @@ builder_message "updating the generated ur.io changelog"
     node react/scripts/generate-changelog.mjs)
 warn_trap 'ur.io changelog update failed; using the committed changelog as a stand-in'
 
+# The install page's desktop downloads: the newest complete GitHub release
+# (Windows MSI, Ubuntu daemon deb + AppImage) as of this run, i.e. the previous
+# release, since this run's own desktop bundles are attached later. Same
+# strictness and fallback as the changelog: the generator writes only on
+# success, so the committed releases.js remains a valid stand-in.
+builder_message "updating the generated ur.io desktop releases"
+(cd $WARP_HOME/mmm/ur.io &&
+    RELEASES_STRICT=1 \
+    GITHUB_TOKEN="$GITHUB_API_KEY" \
+    node react/scripts/generate-releases.mjs)
+warn_trap 'ur.io releases update failed; using the committed releases as a stand-in'
+
 # regenerate every app's strings from the shared localization store:
 # localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
 # windows .resw, linux .po. Runs while every repo is still on main (localizations
@@ -610,15 +622,17 @@ if [ "$CONNECT_IP_UPDATE" ]; then
 fi
 
 
-# Push the changelog generated before the tests to mmm main, stamped with the
-# release version. Stage only its two source files; the web build derives the
-# public markdown and llms assets from these committed inputs.
+# Push the changelog and the desktop releases generated before the tests to
+# mmm main, stamped with the release version. Stage only their source files;
+# the web build derives the public markdown and llms assets from these
+# committed inputs.
 (cd $WARP_HOME/mmm &&
     git add \
         ur.io/react/src/data/changelog.js \
-        ur.io/react/src/data/changelog-version.js &&
+        ur.io/react/src/data/changelog-version.js \
+        ur.io/react/src/data/releases.js &&
     if ! git diff --cached --quiet; then
-        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog update" &&
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog and releases update" &&
         git push
     fi)
 error_trap 'ur.io changelog update push'
