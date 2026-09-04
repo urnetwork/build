@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,7 +19,8 @@ set -u
 
 event_log="$1"
 sample_count_file="$2"
-rollout_script="$3"
+build_home="$3"
+rollout_source="$4"
 : > "$event_log"
 
 record_event() {
@@ -61,11 +63,14 @@ sleep() {
 }
 
 BUILD_ENV=main
+BUILD_HOME="$build_home"
 WARP_VERSION=2026.9.3+1036806790
 EXTERNAL_WARP_VERSION=2026.9.3-1036806790
 STAGE_SECONDS=60
 
-source "$rollout_script"
+# Execute the exact source command used by run.sh. This catches entrypoint path
+# regressions while every external rollout boundary remains a local fake.
+eval "$rollout_source"
 if [[ -n "${SINGLE_SERVICE:-}" ]]; then
     warp_rollout_deploy "$SINGLE_SERVICE" "${SINGLE_PERCENT:-25}"
 else
@@ -89,7 +94,24 @@ func rolloutRoot(t *testing.T) string {
 	return filepath.Dir(filename)
 }
 
-// Execute the production shell functions against deterministic fake boundaries.
+// Extract the release entrypoint's source command so tests exercise its path,
+// rather than bypassing it by sourcing deploy-rollout.zsh directly.
+func rolloutSourceCommand(t *testing.T) string {
+	t.Helper()
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := regexp.MustCompile(`(?m)^[\t ]*source "[^"\n]*deploy-rollout\.zsh"[\t ]*$`)
+	matches := pattern.FindAllString(string(runData), -1)
+	if len(matches) != 1 {
+		t.Fatalf("run.sh rollout source command count = %d, want 1", len(matches))
+	}
+	return strings.TrimSpace(matches[0])
+}
+
+// Execute the production source path and shell functions against deterministic
+// fake boundaries. No command in this harness reaches a live Warp service.
 func runRollout(t *testing.T, environment ...string) rolloutResult {
 	t.Helper()
 	tempDir := t.TempDir()
@@ -102,7 +124,8 @@ func runRollout(t *testing.T, environment ...string) rolloutResult {
 		"rollout-test",
 		eventLog,
 		sampleCountFile,
-		filepath.Join(rolloutRoot(t), "deploy-rollout.zsh"),
+		filepath.Dir(rolloutRoot(t)),
+		rolloutSourceCommand(t),
 	)
 	command.Env = append(os.Environ(), environment...)
 	output, err := command.CombinedOutput()
@@ -295,8 +318,8 @@ func TestRolloutStatusSampleFailureStopsBeforeNextWave(t *testing.T) {
 	}
 }
 
-// Pin the release entrypoint to the tested implementation and one immediate
-// error trap instead of allowing raw, unchecked rollout commands to return.
+// Pin the release entrypoint to the tested implementation, with immediate
+// checks for both loading and invoking it.
 func TestRunUsesCanonicalRolloutContract(t *testing.T) {
 	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
@@ -306,7 +329,8 @@ func TestRunUsesCanonicalRolloutContract(t *testing.T) {
 	if strings.Contains(runSource, "warpctl deploy") {
 		t.Fatal("run.sh contains a deploy outside the canonical rollout wrapper")
 	}
-	required := `source "$BUILD_HOME/build/all/deploy-rollout.zsh"
+	required := `source "$BUILD_HOME/all/deploy-rollout.zsh"
+    error_trap 'load warp service rollout'
     warp_rollout
     error_trap 'warp service rollout'`
 	if !strings.Contains(runSource, required) {

@@ -2107,7 +2107,10 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
 
 
 if [ "$WARP_SKIP_DEPLOY" = "" ]; then
-    source "$BUILD_HOME/build/all/deploy-rollout.zsh"
+    # BUILD_HOME is the build repository root (set from this script's parent
+    # above), so the rollout implementation is directly under all/.
+    source "$BUILD_HOME/all/deploy-rollout.zsh"
+    error_trap 'load warp service rollout'
     warp_rollout
     error_trap 'warp service rollout'
 fi
