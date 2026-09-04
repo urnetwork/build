@@ -1,0 +1,8 @@
+- Fix localized metadata for English-only pages
+- 2026.9.4-1037327320 restore android pin
+- Format SDK Go sources
+- Refresh the ABI-generator release lock
+- Pin and preflight the ABI generator
+- Freeze corrected testnet release candidate
+- Refresh testnet release lock for runtime evidence
+- Authenticate historical runtime evidence efficiently
