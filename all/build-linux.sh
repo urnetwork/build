@@ -203,12 +203,22 @@ elif [ ! -f "$BUILD_HOME/sdk/cgo/go.sum" ]; then
   exit 1
 else
   echo ">>> building the linux cgo sdk ($WARP_VERSION)"
+  # The staging directory deliberately preserves generated output, so remove
+  # every artifact this invocation owns before calling make. This is a second
+  # fail-closed boundary behind sdk/cgo/Makefile's command chaining: even if a
+  # future recipe accidentally masks a failed cross-compile, an older .so or
+  # zip cannot satisfy the assertions below and enter a new release.
+  rm -f \
+    "$BUILD_HOME/sdk/cgo/build/linux/amd64/libURnetworkSdk.so" \
+    "$BUILD_HOME/sdk/cgo/build/linux/arm64/libURnetworkSdk.so" \
+    "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
   (cd "$BUILD_HOME/sdk/cgo" && WARP_VERSION="$WARP_VERSION" make build_linux)
 fi
 
-# make chains recipe commands with ';', so a failed cross-compile does not stop
-# the zip step — verify both .so's exist before feeding the packaging build (a
-# partial zip would otherwise sail through to broken artifacts).
+# The cgo Makefile propagates each cross-compile failure, and the pre-build
+# removal above prevents stale output from surviving one. Keep independent
+# artifact assertions here because this script is the packaging trust boundary:
+# a partial or externally supplied SDK must never reach linux/build.sh.
 for a in amd64 arm64; do
   so="$BUILD_HOME/sdk/cgo/build/linux/$a/libURnetworkSdk.so"
   if [ ! -f "$so" ]; then
@@ -223,10 +233,8 @@ for a in amd64 arm64; do
   fi
 done
 
-# The zip is the LAST command in the same ';'-chained recipe, so it can fail
-# while every .so above succeeds and make still exits 0 — and it, not the .so
-# files, is what build.sh actually hands to fetch-deps.sh. Assert it for the
-# same reason the loop above exists.
+# The zip, not the loose .so files, is what build.sh hands to fetch-deps.sh.
+# Assert it independently of make for the same trust-boundary reason.
 SDK_ZIP="$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
 if [ ! -s "$SDK_ZIP" ]; then
   echo "ERROR: $SDK_ZIP is missing or empty — the sdk zip step did not run" >&2
