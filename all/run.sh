@@ -65,6 +65,7 @@ required_build_tools=(
     java
     jq
     make
+    mktemp
     nc
     node
     npm
@@ -1404,14 +1405,11 @@ github_create_draft_release () {
 github_release_upload () {
     virustotal "$1" "$2"
 
-    GITHUB_UPLOAD=`$BUILD_CURL \
-        -X POST \
-        -H 'Accept: application/vnd.github+json' \
-        -H 'X-GitHub-Api-Version: 2022-11-28' \
-        -H 'Content-Type: application/octet-stream' \
-        -H "Authorization: Bearer $GITHUB_API_KEY" \
-        "$GITHUB_UPLOAD_URL?name=$1" \
-        --data-binary "@$2"`
+    # This transport preserves GitHub's response headers/message and retries
+    # only explicit rate-limit rejections. Ambiguous transport failures,
+    # duplicate assets, and permanent authorization failures remain fail-closed.
+    GITHUB_UPLOAD=$("$BUILD_HOME/all/github-release-upload.zsh" \
+        "$GITHUB_UPLOAD_URL" "$1" "$2")
     error_trap "github release upload $1"
 }
 
