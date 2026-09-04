@@ -1,0 +1,7 @@
+        <ul>
+          <li>Device rpc: add bounded attempt diagnostics</li>
+          <li>Fix dial context cancellation leak</li>
+          <li>Make packet completion accounting behavioral</li>
+          <li>Bound weighted shuffle statistical test runtime</li>
+          <li>Make control family resolver tests deterministic</li>
+        </ul>

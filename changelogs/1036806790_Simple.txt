@@ -1,0 +1,11 @@
+- 2026.9.3-1036684010 restore android pin
+- Device rpc: add bounded attempt diagnostics
+- Fix dial context cancellation leak
+- Make packet completion accounting behavioral
+- Bound weighted shuffle statistical test runtime
+- Make control family resolver tests deterministic
+- Warpctl: isolate exact service block containers
+- Unify release source path selection
+- Harden and atomically refresh release source lock
+- Fix runtime compatibility gate error scope
+- Harden runtime 453 release identity
