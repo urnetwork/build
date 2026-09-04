@@ -1,0 +1,4 @@
+- Harden Android egress probe cancellation
+- Points leaderboard: scrolling does not retry a failed page (the loading flip re-ran the load-more rule against the error, a hot retry loop); the footer's Try again is the retry
+- Account > Widgets: read the snapshot files off the main thread; the main thread only publishes the result
+- Observers publish only on change: listener callbacks, resets and the points leaderboard load-more rule gate their writes, so no observer can wake itself in a cycle

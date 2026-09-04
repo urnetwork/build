@@ -1,0 +1,10 @@
+- Account > Widgets: read the snapshot files off the main thread; the main thread only publishes the result
+- Observers publish only on change: listener callbacks, resets and the points leaderboard load-more rule gate their writes, so no observer can wake itself in a cycle
+- Account > Widgets: the previews show the real widget data like Android; the tunnel extension writes full snapshots at a 2 s cadence while the screen is open (preview-visible mark in the App Group), and the sample shows only without an account
+- Login stack: the Solana tile is always the fourth small button; without a wallet app the tap explains instead of hiding
+- DeepLinkRouter: consume writes pending only when there is a destination, ending the onReceive livelock that blanked the screen after sign-in and got the app watchdog-killed
+
+Under the hood
+- Keep browser device RPC grids stable
+- Points leaderboard view controller: claim the in-flight page in the scope that checks it, drop pages after close, state the goroutine-safety contract
+- Expose contract sender role for lifecycle diagnostics
