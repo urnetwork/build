@@ -39,6 +39,63 @@ type peerProviderResult struct {
 	RemoteIngressBytes   int64 `json:"remote_ingress_bytes"`
 }
 
+const peerProviderDeviceCloseTimeout = 20 * time.Second
+
+type peerProviderDeviceLifecycle interface {
+	SetProvideControlMode(mode sdk.ProvideControlMode)
+	SetTunnelStarted(tunnelStarted bool)
+	CloseAndWait(ctx context.Context) error
+}
+
+// peerProviderLifecycle keeps the provider's authenticated cleanup path alive
+// until every device-owned worker has stopped. In particular, contract-close
+// controls emitted while DeviceLocal closes must finish before removeClient
+// revokes the JWT they use and before NetworkSpaceManager cancels the shared
+// ClientStrategy. Cleanup continues after an error, but the joined error keeps
+// completePeerProvider from publishing a success marker.
+type peerProviderLifecycle struct {
+	device        peerProviderDeviceLifecycle
+	removeClient  func() error
+	logout        func() error
+	closeManager  func()
+	deviceTimeout time.Duration
+}
+
+func (self *peerProviderLifecycle) close() (result error) {
+	if self.device != nil {
+		self.device.SetProvideControlMode(sdk.ProvideControlModeNever)
+		self.device.SetTunnelStarted(false)
+		timeout := self.deviceTimeout
+		if timeout <= 0 {
+			timeout = peerProviderDeviceCloseTimeout
+		}
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), timeout)
+		if err := self.device.CloseAndWait(closeCtx); err != nil {
+			result = errors.Join(result, fmt.Errorf("close provider device: %w", err))
+		}
+		closeCancel()
+	}
+	if self.removeClient != nil {
+		result = errors.Join(result, self.removeClient())
+	}
+	if self.logout != nil {
+		result = errors.Join(result, self.logout())
+	}
+	if self.closeManager != nil {
+		self.closeManager()
+	}
+	return result
+}
+
+func finishPeerProvider(
+	path string,
+	result *peerProviderResult,
+	runErr error,
+	lifecycle *peerProviderLifecycle,
+) error {
+	return completePeerProvider(path, result, errors.Join(runErr, lifecycle.close()))
+}
+
 // packetStatsSnapshot keeps only the cumulative counters required to prove a
 // bidirectional request/response exchange.
 type packetStatsSnapshot struct {
@@ -297,17 +354,15 @@ func runPeerProvider(opts options) (returnErr error) {
 	_ = os.Remove(opts.ProviderStop)
 	_ = os.Remove(opts.ProviderResult)
 	_ = os.Remove(opts.ProviderReady)
-	var completion *peerProviderResult
-	// Registered before every lifecycle cleanup below, so it runs last. The
-	// atomic result is the cross-shell success marker only after client removal,
-	// logout, and device teardown have all left returnErr clear.
-	defer func() {
-		returnErr = completePeerProvider(opts.ProviderResult, completion, returnErr)
-	}()
-
 	sdk.Version = opts.SdkVersion
 	manager := sdk.NewNetworkSpaceManager(opts.StateDir)
-	defer manager.Close()
+	lifecycle := &peerProviderLifecycle{closeManager: manager.Close}
+	var completion *peerProviderResult
+	// One owner sequences and joins every provider resource before deciding
+	// whether the atomic cross-shell success marker may be published.
+	defer func() {
+		returnErr = finishPeerProvider(opts.ProviderResult, completion, returnErr, lifecycle)
+	}()
 	networkSpace := manager.UpdateNetworkSpaceValues(
 		sdk.NewNetworkSpaceKey("ur.network", "main"),
 		&sdk.NetworkSpaceValues{
@@ -341,11 +396,12 @@ func runPeerProvider(opts options) (returnErr error) {
 		return fmt.Errorf("persist network JWT: %w", err)
 	}
 	api.SetByJwt(networkJWT)
-	defer func() {
+	lifecycle.logout = func() error {
 		if err := localState.Logout(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("clear provider SDK session: %w", err))
+			return fmt.Errorf("clear provider SDK session: %w", err)
 		}
-	}()
+		return nil
+	}
 
 	requestCtx, cancel = context.WithTimeout(context.Background(), 45*time.Second)
 	client, err := api.AuthNetworkClientSyncWithContext(requestCtx, &sdk.AuthNetworkClientArgs{
@@ -366,14 +422,16 @@ func runPeerProvider(opts options) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	defer func() {
+	lifecycle.removeClient = func() error {
+		defer os.Remove(opts.ProviderReady)
 		if err := removeClient(api, networkJWT, clientId); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("release provider client: %w", err))
-		} else if err := removeActiveClient(opts.ActiveClient); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("clear retained provider client: %w", err))
+			return fmt.Errorf("release provider client: %w", err)
 		}
-		_ = os.Remove(opts.ProviderReady)
-	}()
+		if err := removeActiveClient(opts.ActiveClient); err != nil {
+			return fmt.Errorf("clear retained provider client: %w", err)
+		}
+		return nil
+	}
 	if err := writeActiveClient(opts.ActiveClient, clientId); err != nil {
 		return fmt.Errorf("retain provider client: %w", err)
 	}
@@ -397,11 +455,7 @@ func runPeerProvider(opts options) (returnErr error) {
 	if err != nil {
 		return fmt.Errorf("create provider device: %w", err)
 	}
-	defer device.Close()
-	defer func() {
-		device.SetProvideControlMode(sdk.ProvideControlModeNever)
-		device.SetTunnelStarted(false)
-	}()
+	lifecycle.device = device
 	device.SetTunnelStarted(true)
 	device.SetProvideNetworkMode(sdk.ProvideNetworkModeAll)
 	device.SetProvideControlMode(sdk.ProvideControlModeNetwork)

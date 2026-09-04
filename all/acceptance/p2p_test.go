@@ -2,13 +2,63 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/urnetwork/sdk"
 )
+
+type blockingPeerProviderDevice struct {
+	events  *[]string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (self *blockingPeerProviderDevice) SetProvideControlMode(mode sdk.ProvideControlMode) {
+	if mode != sdk.ProvideControlModeNever {
+		panic("provider cleanup did not disable provide control")
+	}
+	*self.events = append(*self.events, "provide-never")
+}
+
+func (self *blockingPeerProviderDevice) SetTunnelStarted(tunnelStarted bool) {
+	if tunnelStarted {
+		panic("provider cleanup left the tunnel started")
+	}
+	*self.events = append(*self.events, "tunnel-stopped")
+}
+
+func (self *blockingPeerProviderDevice) CloseAndWait(ctx context.Context) error {
+	*self.events = append(*self.events, "device-close-start")
+	if self.entered != nil {
+		close(self.entered)
+	}
+	select {
+	case <-ctx.Done():
+		*self.events = append(*self.events, "device-close-timeout")
+		return ctx.Err()
+	case <-self.release:
+		*self.events = append(*self.events, "device-close-done")
+		return nil
+	}
+}
+
+func peerProviderLifecycleTestCallbacks(events *[]string) (func() error, func() error, func()) {
+	return func() error {
+			*events = append(*events, "remove-client")
+			return nil
+		}, func() error {
+			*events = append(*events, "logout")
+			return nil
+		}, func() {
+			*events = append(*events, "close-manager")
+		}
+}
 
 // A provider handoff accepts exactly one canonical SDK id.
 func TestReadRetainedClientRequiresOneCanonicalId(t *testing.T) {
@@ -222,5 +272,100 @@ func TestCompletePeerProviderPublishesOnlyAfterSuccessfulCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("successful cleanup did not publish the marker: %v", err)
+	}
+}
+
+// DeviceLocal.Close is callback-safe but non-joining. The provider must not
+// revoke its client JWT or cancel the shared strategy until CloseAndWait has
+// released every admitted post-client-close contract control.
+func TestPeerProviderLifecycleJoinsDeviceBeforeIdentityTeardown(t *testing.T) {
+	events := []string{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	removeStarted := make(chan struct{})
+	removeClient, logout, closeManager := peerProviderLifecycleTestCallbacks(&events)
+	lifecycle := &peerProviderLifecycle{
+		device: &blockingPeerProviderDevice{
+			events:  &events,
+			entered: entered,
+			release: release,
+		},
+		removeClient: func() error {
+			close(removeStarted)
+			return removeClient()
+		},
+		logout:        logout,
+		closeManager:  closeManager,
+		deviceTimeout: time.Second,
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- lifecycle.close()
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("device join did not start")
+	}
+	select {
+	case <-removeStarted:
+		t.Fatal("provider identity teardown overtook the device join")
+	default:
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"provide-never",
+		"tunnel-stopped",
+		"device-close-start",
+		"device-close-done",
+		"remove-client",
+		"logout",
+		"close-manager",
+	}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("cleanup order = %v, want %v", events, want)
+	}
+}
+
+// A stuck device join is bounded and fails the provider proof, while later
+// resource cleanup still runs. That preserves one-shot cleanup without leaving
+// a provider process or local credential behind.
+func TestPeerProviderLifecycleFailsClosedWhenDeviceJoinBlocks(t *testing.T) {
+	events := []string{}
+	resultPath := filepath.Join(t.TempDir(), "provider-result.json")
+	removeClient, logout, closeManager := peerProviderLifecycleTestCallbacks(&events)
+	lifecycle := &peerProviderLifecycle{
+		device: &blockingPeerProviderDevice{
+			events:  &events,
+			release: make(chan struct{}),
+		},
+		removeClient:  removeClient,
+		logout:        logout,
+		closeManager:  closeManager,
+		deviceTimeout: 10 * time.Millisecond,
+	}
+
+	err := finishPeerProvider(resultPath, &peerProviderResult{Ok: true}, nil, lifecycle)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked close error = %v, want deadline exceeded", err)
+	}
+	if _, statErr := os.Stat(resultPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("blocked device join published provider success: %v", statErr)
+	}
+	want := []string{
+		"provide-never",
+		"tunnel-stopped",
+		"device-close-start",
+		"device-close-timeout",
+		"remove-client",
+		"logout",
+		"close-manager",
+	}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("blocked cleanup order = %v, want %v", events, want)
 	}
 }
