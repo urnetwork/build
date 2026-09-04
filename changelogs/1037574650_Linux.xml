@@ -1,0 +1,21 @@
+        <ul>
+          <li>Regenerate catalogs for the instant account keys</li>
+          <li>Seedphrase sheet: copy is a secondary pill with a copy glyph</li>
+          <li>Drawer referral row opens the Referrals page; Get Pro label key</li>
+          <li>Do not restart an onboarding flow that is already on screen</li>
+          <li>Points leaderboard: network name above the emoji tag</li>
+          <li>Points leaderboard rows: emoji tag on its own line above the network name</li>
+          <li>Points leaderboard: one continuous list that appends each chunk, never re-requests a failed page, shows the own name (from me or the jwt) on the header and the own anonymous row, ranked count on its own line under the emoji</li>
+          <li>Points leaderboard: the switch reveals the network name (fallbacks and regenerated po)</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Cancel stale JWT refresh on RPC publication</li>
+          <li>Wake failed token refresh when remote transport activates</li>
+          <li>Points leaderboard: the display name is the name the server sent, so a network sees its own name in its header while others see it as Anonymous</li>
+          <li>Synchronize platform transport auth snapshots</li>
+          <li>API spec: /network/clients lists top-level devices only; /network/proxies lists the hosted proxy devices</li>
+          <li>API spec: the points leaderboard lists every ranked network; points-ranking-visibility only reveals the name</li>
+        </ul>
+        <!-- end of the shared section -->

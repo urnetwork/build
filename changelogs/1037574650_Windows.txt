@@ -1,0 +1,15 @@
+- Regenerate strings for the instant account keys
+- Seedphrase sheet: copy is a secondary button with a copy glyph
+- Balance warning action uses the get_pro label like every other app
+- Points leaderboard: network name above the emoji tag
+- Points leaderboard rows: emoji tag on its own line above the network name
+- Points leaderboard: one continuous list that appends each chunk, never re-requests a failed page, shows the own name (from me or the jwt) on the header and the own anonymous row, ranked count on its own line under the emoji
+- Strings: the points leaderboard switch reveals the network name (regenerated resw)
+
+Under the hood
+- Cancel stale JWT refresh on RPC publication
+- Wake failed token refresh when remote transport activates
+- Points leaderboard: the display name is the name the server sent, so a network sees its own name in its header while others see it as Anonymous
+- Synchronize platform transport auth snapshots
+- API spec: /network/clients lists top-level devices only; /network/proxies lists the hosted proxy devices
+- API spec: the points leaderboard lists every ranked network; points-ranking-visibility only reveals the name

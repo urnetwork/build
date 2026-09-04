@@ -1,0 +1,20 @@
+- Always show both plans in the picker, before the store answers
+- One primary button per screen in the sign-up flows
+- One referrals screen everywhere
+- Persist onboarding completion so a rebuilt view never re-prompts
+- Open the upgrade sheet from the connect drawer's Get Pro
+- Points leaderboard: network name above the emoji tag
+- Stack the emoji tag above the name in points leaderboard rows
+- Drop the stale 0-5 axis under the referral bar
+- Widget sample: snap burst peaks onto the bucket grid
+- Fix the onboarding connector mark landing below the header slot
+- Widget sample: bursty client traffic curve, provide mode Never
+- Points leaderboard: the switch reveals the network name; catalog regenerated and the tab's literals follow
+
+Under the hood
+- Cancel stale JWT refresh on RPC publication
+- Wake failed token refresh when remote transport activates
+- Points leaderboard: the display name is the name the server sent, so a network sees its own name in its header while others see it as Anonymous
+- Synchronize platform transport auth snapshots
+- API spec: /network/clients lists top-level devices only; /network/proxies lists the hosted proxy devices
+- API spec: the points leaderboard lists every ranked network; points-ranking-visibility only reveals the name
