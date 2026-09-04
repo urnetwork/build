@@ -247,6 +247,15 @@ git_main () {
     git diff --quiet && git diff --cached --quiet && git checkout $branch_name && git pull --recurse-submodules
 }
 
+# Generated build-repository commits can race an unrelated main push during a
+# long release. Integrate that one observed remote advance and retry once; a
+# persistent push or rebase failure remains fatal to the caller.
+git_push_with_rebase_retry () {
+    git push && return 0
+    git pull --rebase || return $?
+    git push
+}
+
 (cd $WARP_HOME/config && git_main)
 error_trap 'pull warp config'
 (cd $WARP_HOME/vault && git_main)
@@ -1354,7 +1363,7 @@ error_trap 'extension push branch'
 (cd $BUILD_HOME &&
     git add . &&
     git commit -m "${EXTERNAL_WARP_VERSION}" &&
-    (git push || (git pull --rebase && git push)) &&
+    git_push_with_rebase_retry &&
     git_tag)
 error_trap 'push branch'
 # version code variants for the github flavor
@@ -1947,10 +1956,10 @@ error_trap 'android edit ungoogle settings'
     git push -u origin v${EXTERNAL_WARP_VERSION}-ungoogle)
 error_trap 'android ungoogle push branch'
 
-(cd $BUILD_HOME && 
-    git add . && 
-    git commit -m "$HOST build ungoogle" && 
-    git push)
+(cd $BUILD_HOME &&
+    git add . &&
+    git commit -m "$HOST build ungoogle" &&
+    git_push_with_rebase_retry)
 error_trap 'push ungoogle branch'
 (cd $BUILD_HOME && 
     git tag -a v${EXTERNAL_WARP_VERSION}-ungoogle -m "${EXTERNAL_WARP_VERSION}-ungoogle" && 
@@ -2020,7 +2029,7 @@ if [ "$ANDROID_RELEASE_COMMIT" ]; then
         git add android &&
         (git diff --cached --quiet ||
             (git commit -m "${EXTERNAL_WARP_VERSION} restore android pin" &&
-                (git push || (git pull --rebase && git push)))))
+                git_push_with_rebase_retry)))
     error_trap 'restore android pin'
     builder_message "android pin restored to \`${ANDROID_RELEASE_COMMIT}\` (the \`${EXTERNAL_WARP_VERSION}\` release commit); the degoogled tree stays on the \`v${EXTERNAL_WARP_VERSION}-ungoogle\` tag"
 else
