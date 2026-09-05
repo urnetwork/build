@@ -26,7 +26,8 @@ for arg in "$@"; do
   esac
 done
 
-root="${URNETWORK_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+here="$(cd "$(dirname "$0")" && pwd)"
+root="${URNETWORK_ROOT:-$(cd "$here/../../.." && pwd)}"
 tools_dir="${UR_ACCEPT_ANDROID_TOOLS:-$root/build/all/android/.acceptance-tools}"
 case "$tools_dir" in
   /*) ;;
@@ -38,6 +39,18 @@ avdmanager="$sdk_root/cmdline-tools/latest/bin/avdmanager"
 adb="$sdk_root/platform-tools/adb"
 emulator="$sdk_root/emulator/emulator"
 image="system-images;android-${api};google_apis;arm64-v8a"
+network_test_gate="$root/tests/network-intensive-suite-lock.sh"
+if [ ! -x "$network_test_gate" ]; then
+  echo "Android setup suite gate is missing or not executable: $network_test_gate" >&2
+  exit 127
+fi
+if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
+  exec "$network_test_gate" android-setup -- "$here/setup.sh" "$@"
+fi
+if ! "$network_test_gate" --verify-held; then
+  echo "Android setup inherited an invalid network-intensive lock" >&2
+  exit 70
+fi
 command -v timeout >/dev/null 2>&1 || { echo "ERROR: GNU timeout is required" >&2; exit 1; }
 for command_name in java go make node rsync; do
   command -v "$command_name" >/dev/null 2>&1 || { echo "ERROR: $command_name is required" >&2; exit 1; }

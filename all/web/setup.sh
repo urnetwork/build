@@ -17,9 +17,6 @@ react="$site/react"
 astro="$site/astro"
 extension="$root/extension"
 no_sudo=0
-temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-web-setup.XXXXXX")"
-cleanup() { rm -rf "$temporary_root"; }
-trap cleanup EXIT
 
 for arg in "$@"; do
   case "$arg" in
@@ -28,6 +25,23 @@ for arg in "$@"; do
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+
+network_test_gate="$root/tests/network-intensive-suite-lock.sh"
+if [ ! -x "$network_test_gate" ]; then
+  echo "Web setup suite gate is missing or not executable: $network_test_gate" >&2
+  exit 127
+fi
+if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
+  exec "$network_test_gate" web-setup -- "$here/setup.sh" "$@"
+fi
+if ! "$network_test_gate" --verify-held; then
+  echo "Web setup inherited an invalid network-intensive lock" >&2
+  exit 70
+fi
+
+temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-web-setup.XXXXXX")"
+cleanup() { rm -rf "$temporary_root"; }
+trap cleanup EXIT
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 

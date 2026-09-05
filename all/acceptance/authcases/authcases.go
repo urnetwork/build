@@ -444,6 +444,7 @@ func cleanupError(err error) error {
 
 func (r *Runner) redact(message string) string {
 	values := []string{
+		r.Config.Android.UnlockCode,
 		r.Config.DataPlaneAccount.Email, r.Config.DataPlaneAccount.Password,
 		r.Config.Signup.Password, r.Config.Signup.Phone.Number,
 		r.Config.Providers.Google.Email, r.Config.Providers.Google.Password, r.Config.Providers.Google.TOTPSecret,

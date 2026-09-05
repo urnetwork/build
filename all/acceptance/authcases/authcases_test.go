@@ -30,6 +30,7 @@ func lifecycleConfig(t *testing.T) *testconfig.Config {
 	}
 	return &testconfig.Config{
 		Version:   1,
+		Android:   testconfig.Android{UnlockCode: "010181"},
 		Lifecycle: testconfig.Lifecycle{AllowAccountCreateDelete: true},
 		EmailVerification: testconfig.EmailVerification{
 			BypassDomains: []string{"acceptance.invalid"}, SuppressAccountMessages: true,
@@ -255,11 +256,13 @@ func TestNetworkNameSuffixUsesServerAcceptedAlphabet(t *testing.T) {
 func TestRedactCoversProviderSecrets(t *testing.T) {
 	config := lifecycleConfig(t)
 	message := strings.Join([]string{
+		config.Android.UnlockCode,
 		config.Providers.Google.RecoveryEmail,
 		config.Providers.Google.TOTPSecret,
 	}, "\n")
 	redacted := (&Runner{Config: config}).redact(message)
-	if strings.Contains(redacted, config.Providers.Google.RecoveryEmail) ||
+	if strings.Contains(redacted, config.Android.UnlockCode) ||
+		strings.Contains(redacted, config.Providers.Google.RecoveryEmail) ||
 		strings.Contains(redacted, config.Providers.Google.TOTPSecret) {
 		t.Fatalf("redact() left provider secrets in %q", redacted)
 	}

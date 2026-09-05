@@ -29,16 +29,25 @@ var (
 	prefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	phonePattern  = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 	totpPattern   = regexp.MustCompile(`^[A-Za-z2-7 ]+$`)
+	unlockPattern = regexp.MustCompile(`^[0-9]{4,16}$`)
 )
 
 type Config struct {
 	Version           int               `yaml:"version" json:"version"`
+	Android           Android           `yaml:"android" json:"android"`
 	Lifecycle         Lifecycle         `yaml:"lifecycle" json:"lifecycle"`
 	EmailVerification EmailVerification `yaml:"email_verification" json:"email_verification"`
 	DataPlaneAccount  DataPlaneAccount  `yaml:"data_plane_account" json:"data_plane_account"`
 	Signup            Signup            `yaml:"signup" json:"signup"`
 	Providers         Providers         `yaml:"providers" json:"providers"`
 	Wallets           Wallets           `yaml:"wallets" json:"wallets"`
+}
+
+type Android struct {
+	// UnlockCode is host automation input. Runners must never print it or place
+	// it in an adb command argument; Android accepts it over the remote shell's
+	// standard input instead.
+	UnlockCode string `yaml:"unlock_code" json:"unlock_code" secret:"true"`
 }
 
 type Lifecycle struct {
@@ -167,6 +176,9 @@ func (c *Config) Validate(ready bool) error {
 	var problems []string
 	if c.Version != Version {
 		problems = append(problems, fmt.Sprintf("version must be %d", Version))
+	}
+	if isConfiguredString(c.Android.UnlockCode) && !unlockPattern.MatchString(c.Android.UnlockCode) {
+		problems = append(problems, "android.unlock_code must be 4..16 decimal digits")
 	}
 	if ready && !c.Lifecycle.AllowAccountCreateDelete {
 		problems = append(problems, "lifecycle.allow_account_create_delete must be true")

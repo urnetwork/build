@@ -15,6 +15,7 @@ import (
 )
 
 const validConfig = `version: 1
+android: {unlock_code: "010181"}
 lifecycle: {allow_account_create_delete: true}
 email_verification:
   bypass_domains: [acceptance.invalid]
@@ -70,6 +71,9 @@ func TestLoadGetAndResolve(t *testing.T) {
 	if got, err := config.Get("data_plane_account.email"); err != nil || got != "data@example.com" {
 		t.Fatalf("Get() = %q, %v", got, err)
 	}
+	if got, err := config.Get("android.unlock_code"); err != nil || got != "010181" {
+		t.Fatalf("Get(android.unlock_code) = %q, %v", got, err)
+	}
 	wantProfile := filepath.Join(filepath.Dir(path), "google.json")
 	if got := ResolveProfile(path, "google.json"); got != wantProfile {
 		t.Fatalf("ResolveProfile() = %q, want %q", got, wantProfile)
@@ -122,6 +126,7 @@ func TestValidateReadyRejectsMalformedIdentityFixtures(t *testing.T) {
 		want string
 	}{
 		{name: "short signup password", edit: func(config *Config) { config.Signup.Password = "too-short" }, want: "at least 12"},
+		{name: "android unlock code", edit: func(config *Config) { config.Android.UnlockCode = "01 0181" }, want: "decimal digits"},
 		{name: "phone", edit: func(config *Config) { config.Signup.Phone.Number = "555-0100" }, want: "E.164"},
 		{name: "seedphrase subnet", edit: func(config *Config) { config.Signup.SeedphraseRateLimitBypassIPs = []string{"192.0.2.0/24"} }, want: "canonical IP address"},
 		{name: "seedphrase mapped IPv4", edit: func(config *Config) {

@@ -24,6 +24,7 @@ roles="${ROLES:-daemon gui}"
 # Default to the arch that runs native on the Apple-Silicon host (fast). amd64
 # builds/tests under Docker's qemu emulation, so it's opt-in for the smoke test.
 ARCHES="${ARCHES:-arm64}"
+setup_arguments=("$@")
 
 usage() {
   cat <<EOF
@@ -50,6 +51,24 @@ while [ $# -gt 0 ]; do
     *)          echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+root="${URNETWORK_ROOT:-$(cd "$here/../../.." && pwd)}"
+network_test_gate="$root/tests/network-intensive-suite-lock.sh"
+if [ ! -x "$network_test_gate" ]; then
+  echo "Linux setup suite gate is missing or not executable: $network_test_gate" >&2
+  exit 127
+fi
+if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
+  if [ "${#setup_arguments[@]}" -eq 0 ]; then
+    exec "$network_test_gate" linux-setup -- "$here/setup.sh"
+  fi
+  exec "$network_test_gate" linux-setup -- \
+    "$here/setup.sh" "${setup_arguments[@]}"
+fi
+if ! "$network_test_gate" --verify-held; then
+  echo "Linux setup inherited an invalid network-intensive lock" >&2
+  exit 70
+fi
 
 # --- preflight ---------------------------------------------------------------
 echo ">>> preflight: checking docker"
