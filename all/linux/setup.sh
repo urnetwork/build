@@ -60,12 +60,12 @@ if [ ! -x "$network_test_gate" ]; then
 fi
 if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
   if [ "${#setup_arguments[@]}" -eq 0 ]; then
-    exec "$network_test_gate" linux-setup -- "$here/setup.sh"
+    exec "$network_test_gate" main-acceptance linux-setup -- "$here/setup.sh"
   fi
-  exec "$network_test_gate" linux-setup -- \
+  exec "$network_test_gate" main-acceptance linux-setup -- \
     "$here/setup.sh" "${setup_arguments[@]}"
 fi
-if ! "$network_test_gate" --verify-held; then
+if ! "$network_test_gate" --verify-held main-acceptance; then
   echo "Linux setup inherited an invalid network-intensive lock" >&2
   exit 70
 fi

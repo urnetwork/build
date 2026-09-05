@@ -8,7 +8,7 @@ name: Android build + test
 #
 #     (cd $BUILD_HOME/android/app &&
 #         ./gradlew clean assemblePlayRelease bundlePlayRelease \
-#             assembleSolana_dappRelease assembleEthos_dappRelease)
+#             assembleSolana_dappRelease)
 #
 # ...but that line is only half of what the pipeline actually does, and the
 # other half is the part that catches things. This workflow calls the android
@@ -74,8 +74,8 @@ name: Android build + test
 # Android cannot package an installable APK at all without a signature, and
 # every release flavor here declares a signingConfig whose storeFile is
 # ${WARP_HOME}/release/android/signing/app.jks with passwords read from a
-# sibling app.properties (build.gradle:207-241, wired per flavor at :283, :322,
-# :341 and the ethos_dapp equivalent). A missing storeFile does not warn — it
+# sibling app.properties (build.gradle:207-241, wired per shipping flavor). A
+# missing storeFile does not warn — it
 # fails validateSigning<Variant> — which is why all/build-fdroid.sh:135 has to
 # bind-mount $WARP_HOME/release into its container.
 #
@@ -700,7 +700,7 @@ jobs:
           # PKCS12 (keytool's default since JDK 9) requires the key password to
           # equal the store password, which is why one password is used for
           # every field below rather than five.
-          for alias in github play solana_dapp ethos_dapp; do
+          for alias in github play solana_dapp; do
             keytool -genkeypair -noprompt \
               -keystore "$signing/app.jks" \
               -storetype PKCS12 \
@@ -714,7 +714,7 @@ jobs:
           # The keys build.gradle's signingSecret() looks up (:39-49, :215-241).
           {
             echo "password=$pass"
-            for alias in github play solana_dapp ethos_dapp; do
+            for alias in github play solana_dapp; do
               echo "${alias}.password=$pass"
             done
           } > "$signing/app.properties"
@@ -757,7 +757,7 @@ jobs:
           path: android/app/app/build/reports/tests/
           if-no-files-found: warn
 
-      # run.sh:1464-1487 uploads four artifacts by exact name. The names are
+      # run.sh uploads three artifacts by exact name. The names are
       # produced by AGP from build.gradle:154-156's archivesName
       # ("${applicationId}-${versionName}-${versionCode}") plus the flavor and
       # the `universalApk true` split (:420-427) — i.e. from local.properties,
@@ -769,7 +769,7 @@ jobs:
           set -uo pipefail
           fail=0
           v="${UR_APP_VERSION}-${UR_APP_VERSION_CODE}"
-          for flavor in play solana_dapp ethos_dapp; do
+          for flavor in play solana_dapp; do
             apk="apk/${flavor}/release/com.bringyour.network-${v}-${flavor}-universal-release.apk"
             if [ -s "$apk" ]; then
               echo "ok  $apk ($(stat -c %s "$apk") bytes)"

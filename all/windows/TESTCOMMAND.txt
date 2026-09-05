@@ -7,12 +7,18 @@
 #
 # When "Press any key to boot from CD or DVD..." shows in Screen Sharing, press a
 # key; Windows Setup should start (language screen — this test has no autounattend).
-set -eu
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$here/lib.sh"
 
 ISO=/Users/brien/urnetwork/xops/windows/Win11_25H2_English_Arm64_v2.iso
 VIRTIO=/Users/brien/urnetwork/xops/windows/virtio-win-0.1.285.iso
 UEFI_CODE=/opt/homebrew/share/qemu/edk2-aarch64-code.fd
-UEFI_VARS=/opt/homebrew/share/qemu/edk2-arm-vars.fd
+UEFI_VARS_TEMPLATE=/opt/homebrew/share/qemu/edk2-arm-vars.fd
+win_init
+UEFI_VARS="$UEFI_VARS_TEMPLATE"
 
 # fresh scratch disk + writable UEFI vars each run
 rm -f /tmp/efivars.fd /tmp/wintest.qcow2
@@ -22,7 +28,7 @@ qemu-img create -f qcow2 /tmp/wintest.qcow2 90G
 echo ">>> booting — connect: open vnc://127.0.0.1:5901  (password: windows)"
 
 exec qemu-system-aarch64 \
-  -machine virt -accel hvf -cpu host -smp 4 -m 8192 \
+  -machine virt -accel hvf -cpu host -smp "$CPUS" -m 8192 \
   -drive if=pflash,format=raw,readonly=on,file="$UEFI_CODE" \
   -drive if=pflash,format=raw,file=/tmp/efivars.fd \
   -device ramfb -device qemu-xhci -device usb-kbd -device usb-tablet \

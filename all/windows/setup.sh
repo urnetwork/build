@@ -58,6 +58,7 @@ Options:
 
 One-time prep: brew install qemu
 Env overrides: IMAGE, SSH_KEY, UEFI_CODE, UEFI_VARS_TEMPLATE, CPUS, MEM, DISK_SIZE.
+CPUS must be positive and is capped by a positive inherited GOMAXPROCS.
 ISO gate overrides (deliberate use only): WIN_REQUIRED_BUILD / WIN_REQUIRED_EDITION
 to target a different build, or WINDOWS_ISO_SKIP_CHECK=1 to bypass the check.
 EOF
@@ -142,12 +143,12 @@ if [ ! -x "$network_test_gate" ]; then
 fi
 if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
   if [ "${#setup_arguments[@]}" -eq 0 ]; then
-    exec "$network_test_gate" windows-setup -- "$here/setup.sh"
+    exec "$network_test_gate" main-acceptance windows-setup -- "$here/setup.sh"
   fi
-  exec "$network_test_gate" windows-setup -- \
+  exec "$network_test_gate" main-acceptance windows-setup -- \
     "$here/setup.sh" "${setup_arguments[@]}"
 fi
-if ! "$network_test_gate" --verify-held; then
+if ! "$network_test_gate" --verify-held main-acceptance; then
   echo "Windows setup inherited an invalid network-intensive lock" >&2
   exit 70
 fi

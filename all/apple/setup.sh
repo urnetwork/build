@@ -25,6 +25,20 @@ for arg in "$@"; do
 done
 
 root="${URNETWORK_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+network_test_gate="$root/tests/network-intensive-suite-lock.sh"
+if [ ! -x "$network_test_gate" ]; then
+  echo "Apple setup suite gate is missing or not executable: $network_test_gate" >&2
+  exit 127
+fi
+if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
+  exec "$network_test_gate" main-acceptance apple-setup -- \
+    "$here/setup.sh" "$@"
+fi
+if ! "$network_test_gate" --verify-held main-acceptance; then
+  echo "Apple setup inherited an invalid network-intensive lock" >&2
+  exit 70
+fi
+
 tools_dir="${UR_ACCEPT_APPLE_TOOLS:-$root/build/all/apple/.acceptance-tools}"
 case "$tools_dir" in
   /*) ;;

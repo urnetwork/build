@@ -45,9 +45,10 @@ if [ ! -x "$network_test_gate" ]; then
   exit 127
 fi
 if [ "${URNETWORK_NETWORK_TEST_LOCK_HELD:-}" != 1 ]; then
-  exec "$network_test_gate" android-setup -- "$here/setup.sh" "$@"
+  exec "$network_test_gate" main-acceptance android-setup -- \
+    "$here/setup.sh" "$@"
 fi
-if ! "$network_test_gate" --verify-held; then
+if ! "$network_test_gate" --verify-held main-acceptance; then
   echo "Android setup inherited an invalid network-intensive lock" >&2
   exit 70
 fi
@@ -255,4 +256,4 @@ done
 echo ">>> SMOKE TEST PASSED"
 echo "AVD: $avd_name"
 echo "Build tools: $build_tools_version"
-echo "ABI: $abi (required by the github, Solana, Ethos, and F-Droid targets)"
+echo "ABI: $abi (required by the github, Solana, and F-Droid targets)"
