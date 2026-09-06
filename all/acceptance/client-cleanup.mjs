@@ -18,7 +18,12 @@ async function post(apiURL, route, body, jwt, fetchImpl) {
     signal: AbortSignal.timeout(30_000),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`main API ${route} returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`main API ${route} returned HTTP ${response.status}`);
+    error.route = route;
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 
@@ -73,6 +78,29 @@ function readClientMarker(file) {
   return lines[0];
 }
 
+function cleanupFailureSummary(error) {
+  if (
+    typeof error?.route === "string" &&
+    /^\/[a-z0-9/-]+$/.test(error.route) &&
+    Number.isInteger(error?.status)
+  ) {
+    return `main API ${error.route} returned HTTP ${error.status}`;
+  }
+  if (error?.message === "cleanup login returned no network session") {
+    return error.message;
+  }
+  if (String(error?.message).startsWith("cleanup login failed:")) {
+    return "cleanup login rejected";
+  }
+  if (String(error?.message).startsWith("network-client cleanup failed:")) {
+    return "network-client cleanup rejected";
+  }
+  if (["AbortError", "TimeoutError", "TypeError"].includes(error?.name)) {
+    return `cleanup request failed (${error.name})`;
+  }
+  return "cleanup request failed";
+}
+
 export async function cleanupClientFiles(files, environment = process.env, fetchImpl = fetch) {
   if (!Array.isArray(files) || files.length === 0) {
     throw new Error("at least one acceptance client marker is required");
@@ -109,9 +137,10 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
   }
 
   if (failures.length > 0) {
+    const summaries = [...new Set(failures.map(cleanupFailureSummary))];
     throw new AggregateError(
       failures,
-      `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup`,
+      `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup: ${summaries.join("; ")}`,
     );
   }
   return { releasedClients, removedMarkers };

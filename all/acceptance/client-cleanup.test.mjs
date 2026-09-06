@@ -114,18 +114,23 @@ test("batch cleanup retains a failed group but removes independent successes", a
   fs.writeFileSync(succeeded, "successful-client\n");
   const removed = [];
 
-  await assert.rejects(cleanupClientFiles(
-    [failedA, failedB, succeeded],
-    { UR_ACCEPT_USER: "user", UR_ACCEPT_PASS: "pass" },
-    async (url, options) => {
-      if (url.endsWith("/auth/login-with-password")) {
-        return response({ network: { by_jwt: "jwt" } });
-      }
-      const clientId = JSON.parse(options.body).client_id;
-      removed.push(clientId);
-      return clientId === "failed-client" ? response({}, 503) : response({});
-    },
-  ), /one retained network client group failed/);
+  await assert.rejects(
+    cleanupClientFiles(
+      [failedA, failedB, succeeded],
+      { UR_ACCEPT_USER: "user", UR_ACCEPT_PASS: "pass" },
+      async (url, options) => {
+        if (url.endsWith("/auth/login-with-password")) {
+          return response({ network: { by_jwt: "jwt" } });
+        }
+        const clientId = JSON.parse(options.body).client_id;
+        removed.push(clientId);
+        return clientId === "failed-client" ? response({}, 503) : response({});
+      },
+    ),
+    (error) => error.message.includes("one retained network client group failed cleanup") &&
+      error.message.includes("HTTP 503") &&
+      !error.message.includes("failed-client"),
+  );
 
   assert.deepEqual(removed, ["failed-client", "successful-client"]);
   assert.equal(fs.existsSync(failedA), true);
