@@ -28,6 +28,15 @@ done
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="${URNETWORK_ROOT:-$(cd "$here/../../.." && pwd)}"
+android_acceptance_lib="$root/android/test-main-lib.sh"
+[ -f "$android_acceptance_lib" ] || {
+  echo "ERROR: Android acceptance helper library is missing" >&2
+  exit 1
+}
+# setup and the acceptance runner must classify the same guest CPU, renderer,
+# and foreground-window evidence before either reports a usable AVD.
+# shellcheck disable=SC1090
+source "$android_acceptance_lib"
 tools_dir="${UR_ACCEPT_ANDROID_TOOLS:-$root/build/all/android/.acceptance-tools}"
 case "$tools_dir" in
   /*) ;;
@@ -215,7 +224,7 @@ if [ -z "$serial" ]; then
     exit 1
   }
   serial="emulator-$console_port"
-  args=(-avd "$avd_name" -no-snapshot -no-boot-anim -netdelay none -netspeed full -port "$console_port")
+  args=(-avd "$avd_name" -gpu host -no-snapshot -no-boot-anim -netdelay none -netspeed full -port "$console_port")
   [ "$headless" -eq 1 ] && args+=(-no-window)
   echo ">>> booting $avd_name for smoke test on $serial"
   "$emulator" "${args[@]}" >"$run_dir/emulator.log" 2>&1 &
@@ -252,6 +261,22 @@ done
   echo "ERROR: emulator has no DNS/network route to api.bringyour.com" >&2
   exit 1
 }
+
+renderer_evidence="$run_dir/emulator.log"
+if [ "$started_emulator" -ne 1 ]; then
+  renderer_evidence="$run_dir/surfaceflinger.txt"
+  : >"$renderer_evidence"
+  chmod 600 "$renderer_evidence"
+  timeout 15 "$adb" -s "$serial" shell dumpsys SurfaceFlinger \
+    </dev/null >"$renderer_evidence" 2>/dev/null || true
+fi
+setup_preflight="$run_dir/setup-smoke-preflight.txt"
+if ! android_acceptance_preflight_device \
+    "$adb" "$serial" setup-avd setup-smoke "$setup_preflight" "$renderer_evidence"; then
+  echo "ERROR: acceptance AVD failed its CPU, host-renderer, or focused-dialog preflight" >&2
+  sed -n '1,20p' "$setup_preflight" >&2
+  exit 1
+fi
 
 echo ">>> SMOKE TEST PASSED"
 echo "AVD: $avd_name"
