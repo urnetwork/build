@@ -58,7 +58,7 @@ Options:
 
 One-time prep: brew install qemu
 Env overrides: IMAGE, SSH_KEY, UEFI_CODE, UEFI_VARS_TEMPLATE, CPUS, MEM, DISK_SIZE.
-CPUS must be positive and is capped by a positive inherited GOMAXPROCS.
+CPUS must be positive and defaults to 6; GOMAXPROCS does not change guest CPUs.
 ISO gate overrides (deliberate use only): WIN_REQUIRED_BUILD / WIN_REQUIRED_EDITION
 to target a different build, or WINDOWS_ISO_SKIP_CHECK=1 to bypass the check.
 EOF

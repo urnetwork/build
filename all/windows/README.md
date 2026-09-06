@@ -118,11 +118,11 @@ brew install qemu
 `setup.sh` and `build.sh` share `lib.sh`, so a green smoke test means `build.sh`
 boots the same working VM.
 
-Every active QEMU path uses the CPU count resolved by `win_init`. A positive
-inherited `GOMAXPROCS` caps an explicit `CPUS` value and supplies the VM count
-when `CPUS` is unset; a lower explicit `CPUS` remains in force. Standalone runs
-with an unset or invalid `GOMAXPROCS` retain the historical six-vCPU default,
-and a malformed explicit `CPUS` is rejected before QEMU starts.
+Every active QEMU path uses the CPU count resolved by `win_init`. `CPUS`
+controls the Windows guest topology and defaults to six; a malformed explicit
+value is rejected before QEMU starts. It is deliberately independent of
+inherited `GOMAXPROCS`, which budgets host-side Go work. Coupling the two can
+silently produce a one-vCPU guest and make the ARM64 link exceed its watchdog.
 
 ### Per release (automatic)
 

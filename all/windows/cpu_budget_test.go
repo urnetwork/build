@@ -45,21 +45,22 @@ printf '%s' "$CPUS"
 	return string(output), err
 }
 
-// A valid Go process budget is also the VM ceiling, while standalone callers
-// without one retain the pre-existing CPUS/default behavior.
-func TestWinInitAppliesCPUBudget(t *testing.T) {
+// GOMAXPROCS budgets host-side Go work only. Guest vCPU topology is an
+// independent correctness requirement: an inherited scheduler budget must not
+// silently turn a Windows build VM into a one-vCPU machine.
+func TestWinInitKeepsGuestTopologyIndependentFromGoBudget(t *testing.T) {
 	tests := []struct {
 		name        string
 		environment []string
 		wantCPUs    string
 	}{
-		{name: "Go budget supplies an unset CPUS", environment: []string{"GOMAXPROCS=1"}, wantCPUs: "1"},
-		{name: "Go budget caps a higher explicit CPUS", environment: []string{"GOMAXPROCS=2", "CPUS=6"}, wantCPUs: "2"},
-		{name: "lower explicit CPUS is preserved", environment: []string{"GOMAXPROCS=2", "CPUS=1"}, wantCPUs: "1"},
+		{name: "one Go core keeps the default guest topology", environment: []string{"GOMAXPROCS=1"}, wantCPUs: "6"},
+		{name: "one Go core preserves an explicit guest topology", environment: []string{"GOMAXPROCS=1", "CPUS=4"}, wantCPUs: "4"},
+		{name: "higher Go budget keeps the default guest topology", environment: []string{"GOMAXPROCS=8"}, wantCPUs: "6"},
+		{name: "explicit one-vCPU diagnostic remains possible", environment: []string{"GOMAXPROCS=8", "CPUS=1"}, wantCPUs: "1"},
 		{name: "both unset use the legacy default", environment: nil, wantCPUs: "6"},
 		{name: "invalid Go budget uses the legacy default", environment: []string{"GOMAXPROCS=invalid"}, wantCPUs: "6"},
 		{name: "invalid Go budget preserves explicit CPUS", environment: []string{"GOMAXPROCS=-2", "CPUS=4"}, wantCPUs: "4"},
-		{name: "valid Go budget replaces rather than raises the legacy default", environment: []string{"GOMAXPROCS=8"}, wantCPUs: "8"},
 	}
 
 	for _, test := range tests {
@@ -210,7 +211,7 @@ wait
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEvents := "install:1\noverlay:1\nimage-rw:1\n"
+	wantEvents := "install:6\noverlay:6\nimage-rw:6\n"
 	if string(events) != wantEvents {
 		t.Fatalf("QEMU CPU events = %q, want %q", events, wantEvents)
 	}

@@ -11,9 +11,9 @@
 # Not executable on its own. Callers set `set -euo pipefail`, then win_init.
 # SPDX-License-Identifier: MPL-2.0
 
-# Accept only positive decimal values that Bash can compare safely. An explicit
-# invalid CPUS is fatal; an invalid GOMAXPROCS is ignored for compatibility with
-# standalone callers that previously received the six-vCPU default.
+# Accept only positive decimal values that Bash can compare safely. CPUS is the
+# Windows guest topology and is deliberately independent of GOMAXPROCS, which
+# budgets host-side Go work. An explicit invalid CPUS is fatal.
 win_is_positive_integer() {
   case "$1" in
     ''|*[!0-9]*) return 1 ;;
@@ -22,20 +22,12 @@ win_is_positive_integer() {
 }
 
 win_init() {
-  local requested_cpus="${CPUS:-}" go_max_procs="${GOMAXPROCS:-}"
+  local requested_cpus="${CPUS:-}"
 
   if [ -n "$requested_cpus" ] && ! win_is_positive_integer "$requested_cpus"; then
     win_die "CPUS must be a positive integer (got '$requested_cpus')"
   fi
-  if win_is_positive_integer "$go_max_procs"; then
-    if [ -z "$requested_cpus" ] || [ "$go_max_procs" -lt "$requested_cpus" ]; then
-      CPUS="$go_max_procs"
-    else
-      CPUS="$requested_cpus"
-    fi
-  else
-    CPUS="${requested_cpus:-6}"
-  fi
+  CPUS="${requested_cpus:-6}"
 
   WIN_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   IMAGE="${IMAGE:-$WIN_HERE/output/windows-arm64.qcow2}"
