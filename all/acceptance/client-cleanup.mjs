@@ -58,20 +58,100 @@ export function readCredentials(environment = process.env) {
   };
 }
 
-export async function cleanupClientFile(file, environment = process.env, fetchImpl = fetch) {
-  const clientId = fs.readFileSync(file, "utf8").trim();
+function readClientMarker(file) {
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile()) {
+    throw new Error("acceptance client marker must be a regular file");
+  }
+  const lines = fs.readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length !== 1) {
+    throw new Error("acceptance client marker must contain exactly one non-empty line");
+  }
+  return lines[0];
+}
+
+export async function cleanupClientFiles(files, environment = process.env, fetchImpl = fetch) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("at least one acceptance client marker is required");
+  }
+
+  // Read and validate the whole ledger before mutating either API or disk.
+  // Multiple runners can retain aliases for the same client; group them so the
+  // destructive API operation happens exactly once.
+  const markerGroups = new Map();
+  for (const file of files) {
+    const clientId = readClientMarker(file);
+    const aliases = markerGroups.get(clientId) ?? [];
+    aliases.push(file);
+    markerGroups.set(clientId, aliases);
+  }
+
   const { user, password } = readCredentials(environment);
-  await releaseClient({ clientId, user, password, fetchImpl });
-  fs.rmSync(file, { force: true });
+  let releasedClients = 0;
+  let removedMarkers = 0;
+  const failures = [];
+  for (const [clientId, aliases] of markerGroups) {
+    try {
+      await releaseClient({ clientId, user, password, fetchImpl });
+      for (const file of aliases) {
+        fs.rmSync(file, { force: true });
+        removedMarkers += 1;
+      }
+      releasedClients += 1;
+    } catch (error) {
+      // Continue with independent client groups, but retain every alias for
+      // this group so a later cleanup can retry it explicitly.
+      failures.push(error);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup`,
+    );
+  }
+  return { releasedClients, removedMarkers };
+}
+
+export async function cleanupClientFile(file, environment = process.env, fetchImpl = fetch) {
+  const clientId = readClientMarker(file);
+  try {
+    await cleanupClientFiles([file], environment, fetchImpl);
+  } catch (error) {
+    // Preserve the original single-file API's concrete failure for existing
+    // Linux/Windows callers while the multi-file CLI reports grouped failures.
+    if (error instanceof AggregateError && error.errors.length === 1) {
+      throw error.errors[0];
+    }
+    throw error;
+  }
   return clientId;
 }
 
+export async function runCleanupCLI(
+  files,
+  environment = process.env,
+  fetchImpl = fetch,
+  stdout = process.stdout,
+) {
+  const result = await cleanupClientFiles(files, environment, fetchImpl);
+  const clientWord = result.releasedClients === 1 ? "client" : "clients";
+  const markerWord = result.removedMarkers === 1 ? "marker" : "markers";
+  stdout.write(
+    `acceptance: released ${result.releasedClients} retained network ${clientWord} from ${result.removedMarkers} ${markerWord}\n`,
+  );
+  return result;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const file = process.argv[2];
-  if (!file) {
-    console.error("usage: node client-cleanup.mjs <active-client-id-file>");
+  const files = process.argv.slice(2);
+  if (files.length === 0) {
+    console.error("usage: node client-cleanup.mjs <active-client-id-file> [...]");
     process.exit(2);
   }
-  const clientId = await cleanupClientFile(file);
-  console.log(`acceptance: released retained network client ${clientId}`);
+  await runCleanupCLI(files);
 }
