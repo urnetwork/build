@@ -170,3 +170,161 @@ func TestGoModForkUpdateRejectsMissingModule(t *testing.T) {
 		t.Fatalf("missing module exit = %v, output=%q", err, output)
 	}
 }
+
+// sim-testnet imports server, while server imports the published SN libraries.
+// Keeping sim-testnet in the SN module therefore makes each module zip contain
+// the checksum of the other, which cannot be finalized without moving a public
+// tag. Exercise the production fork helpers and prove the operator harness is
+// preserved in Git but omitted from the versioned SN module graph.
+func TestGoModForkCanPreserveSimulatorOutsidePublishedModule(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sim-testnet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"go.mod": `module example.invalid/sn
+
+go 1.26.7
+
+require example.invalid/server/v2026 v2026.9.7-9999999999
+`,
+		"sn.go":                    "package sn\n",
+		"sim-testnet/main.go":      "package main\nfunc main() {}\n",
+		"sim-testnet/evidence.txt": "preserved release evidence\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	harness := `
+set -eu
+GO_MOD_VERSION=2026
+# The fixture has no retract directive, so a no-op keeps this test independent
+# of whether GNU sed is named sed or gsed on the test host.
+BUILD_SED=true
+eval "$1"
+eval "$2"
+eval "$3"
+go_mod_fork sim-testnet
+`
+	command := exec.Command(
+		"zsh", "-c", harness, "go-module-cycle-test",
+		runFunction(t, "go_mod_fork_prepare"),
+		runFunction(t, "go_mod_fork_tidy"),
+		runFunction(t, "go_mod_fork"),
+	)
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("SN module fork failed: %v\n%s", err, output)
+	}
+	for _, name := range []string{"sim-testnet/main.go", "sim-testnet/evidence.txt", "v2026/sn.go", "v2026/go.mod"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("forked release lacks %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "v2026", "sim-testnet")); !os.IsNotExist(err) {
+		t.Fatalf("sim-testnet entered the published SN module: %v", err)
+	}
+	goMod, err := os.ReadFile(filepath.Join(root, "v2026", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(goMod), "example.invalid/server") {
+		t.Fatalf("published SN module retained the server edge:\n%s", goMod)
+	}
+}
+
+// Public Go module versions are content-addressed by go.sum and the checksum
+// database. Deleting and recreating a tag can make a consumer retain the first
+// archive forever, so release choreography must be append-only even when a
+// later commit only updates a nested build module.
+func TestRunPublishesImmutableAcyclicGoModuleTags(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(runData)
+	for _, forbidden := range []string{
+		"git push --delete origin",
+		"git_tag recreate",
+		"git tag -d v${EXTERNAL_WARP_VERSION}",
+		"sn bootstrap push branch",
+		"sn finalize branch",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Errorf("run.sh can move a published module tag through %q", forbidden)
+		}
+	}
+
+	snFork := strings.Index(source, "go_mod_fork 'sim-testnet'")
+	snTag := strings.Index(source, "error_trap 'sn push branch'")
+	serverFork := strings.Index(source, "go_mod_fork 'connect/sim-latency/baseline'")
+	serverTag := strings.Index(source, "error_trap 'server push branch'")
+	if snFork < 0 || snTag < 0 || serverFork < 0 || serverTag < 0 || !(snFork < snTag && snTag < serverFork && serverFork < serverTag) {
+		t.Fatalf("immutable module order is sn-fork=%d sn-tag=%d server-fork=%d server-tag=%d", snFork, snTag, serverFork, serverTag)
+	}
+	if got := strings.Count(source, "(cd $BUILD_HOME/sn &&\n    git_commit &&\n    git_tag)"); got != 1 {
+		t.Fatalf("SN root tag publication count = %d, want 1", got)
+	}
+	sdkStart := strings.Index(source, "(cd $BUILD_HOME/sdk &&\n    git_commit &&\n    sdk_tagged_module_tree=")
+	if sdkStart < 0 {
+		t.Fatal("SDK release does not record its root module tree before publication")
+	}
+	sdkEndOffset := strings.Index(source[sdkStart:], "error_trap 'sdk push branch'")
+	if sdkEndOffset < 0 {
+		t.Fatal("SDK release block has no checked terminal stage")
+	}
+	sdkBlock := source[sdkStart : sdkStart+sdkEndOffset]
+	if got := strings.Count(sdkBlock, "git_tag"); got != 1 {
+		t.Fatalf("SDK public tag publication count = %d, want 1", got)
+	}
+	if !strings.Contains(sdkBlock, `test "$sdk_tagged_module_tree" = `+"`"+`git rev-parse HEAD:v${GO_MOD_VERSION}`+"`"+`)`) {
+		t.Fatal("SDK release does not prove nested lock commits preserve the tagged root module tree")
+	}
+}
+
+// Exercise the exact production tag helper against a local origin. A second
+// publication attempt must fail and leave both the tag object and peeled commit
+// unchanged.
+func TestGitTagRefusesToMovePublishedVersion(t *testing.T) {
+	tempDir := t.TempDir()
+	remote := filepath.Join(tempDir, "remote.git")
+	repository := filepath.Join(tempDir, "release")
+	runGit(t, tempDir, "init", "--bare", remote)
+	runGit(t, tempDir, "init", "-b", "release", repository)
+	runGit(t, repository, "config", "user.name", "Build Harness Test")
+	runGit(t, repository, "config", "user.email", "build-harness-test@example.invalid")
+	commitTestFile(t, repository, "first", "first\n", "first release tree")
+	runGit(t, repository, "remote", "add", "origin", remote)
+	runGit(t, repository, "push", "-u", "origin", "release")
+
+	harness := `
+set -u
+EXTERNAL_WARP_VERSION=2026.9.7-9999999999
+builder_message() { print -r -- "$*" }
+eval "$1"
+git_tag
+`
+	first := exec.Command("zsh", "-c", harness, "immutable-tag-test", runFunction(t, "git_tag"))
+	first.Dir = repository
+	if output, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("first tag publication failed: %v\n%s", err, output)
+	}
+	tagRef := "refs/tags/v2026.9.7-9999999999"
+	before := runGit(t, repository, "ls-remote", "--tags", "origin", tagRef, tagRef+"^{}")
+	commitTestFile(t, repository, "second", "second\n", "later release tree")
+
+	second := exec.Command("zsh", "-c", harness, "immutable-tag-test", runFunction(t, "git_tag"))
+	second.Dir = repository
+	output, err := second.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "refusing to overwrite") {
+		t.Fatalf("second tag publication exit = %v, output=%q", err, output)
+	}
+	after := runGit(t, repository, "ls-remote", "--tags", "origin", tagRef, tagRef+"^{}")
+	if after != before {
+		t.Fatalf("published tag moved:\nbefore: %s\nafter:  %s", before, after)
+	}
+}

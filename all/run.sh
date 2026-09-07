@@ -1069,7 +1069,6 @@ npm_publish () {
 
 
 git_commit () {
-    git tag -d v${EXTERNAL_WARP_VERSION}
     git add . &&
     if ! (git diff --quiet && git diff --cached --quiet); then
         git commit -m "${EXTERNAL_WARP_VERSION}" &&
@@ -1084,18 +1083,10 @@ git_commit () {
 # silently overwriting it -- this also avoids fighting a published immutable-release
 # tag lock.
 #
-# Pass "recreate" to deliberately move the tag to the current commit. This is only
-# used where the same version is re-tagged within a single run (the sdk re-tags
-# after its fork/lock files are regenerated). The caller must drop the local tag
-# first, which git_commit already does via `git tag -d`.
 git_tag () {
     local tag="v${EXTERNAL_WARP_VERSION}"
-    if [ "$1" = "recreate" ]; then
-        git push --delete origin "refs/tags/$tag" &&
-        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}" &&
-        git push origin "refs/tags/$tag"
-    elif git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once). Pass 'recreate' to move it intentionally."
+    if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once)."
         return 1
     else
         git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}" &&
@@ -1230,15 +1221,17 @@ error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
     git_commit &&
+    sdk_tagged_module_tree=`git rev-parse HEAD:v${GO_MOD_VERSION}` &&
     git_tag &&
     go_mod_fork_update 'build' &&
     go_mod_fork_update 'cgo' &&
     go_mod_fork_update 'js' &&
     npm_fork_update 'js' &&
+    # These are nested build/npm modules and are excluded from the tagged root
+    # Go module. Preserve their generated locks on the release branch without
+    # moving the already-published root module tag.
     git_commit &&
-    # re-tag the same version now that the fork/lock files above were regenerated;
-    # "recreate" intentionally moves the existing tag instead of failing on the duplicate
-    git_tag recreate)
+    test "$sdk_tagged_module_tree" = `git rev-parse HEAD:v${GO_MOD_VERSION}`)
 error_trap 'sdk push branch'
 
 (cd $BUILD_HOME/sdk/js &&
@@ -1265,16 +1258,18 @@ error_trap 'js-sdk publish'
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
-    # sim-testnet now imports server, while server imports sn. Publish a
-    # bootstrap sn tag before tidying so server can resolve this same-version
-    # module cycle; sn is tidied and re-tagged after server is available below.
-    go_mod_fork_prepare)
+    # sim-testnet is an operator/integration harness that imports server, while
+    # server imports the published sn libraries. Preserve its source beside the
+    # versioned module in the Git release, but keep it out of the sn module zip.
+    # This removes the cryptographic sn <-> server go.sum cycle and lets both
+    # public module tags remain immutable.
+    go_mod_fork 'sim-testnet')
 error_trap 'sn edit'
 
 (cd $BUILD_HOME/sn &&
     git_commit &&
     git_tag)
-error_trap 'sn bootstrap push branch'
+error_trap 'sn push branch'
 
 
 (cd $BUILD_HOME/server &&
@@ -1309,17 +1304,6 @@ error_trap 'server edit'
     git_commit &&
     git_tag)
 error_trap 'server push branch'
-
-
-# Complete the half of the sn/server module cycle deferred above. Moving the sn
-# tag is intentional and mirrors the sdk's post-generation re-tag: server now
-# exists at this version, so tidy can resolve the full sim-testnet dependency
-# graph and the final tag contains the regenerated go.mod/go.sum.
-(cd $BUILD_HOME/sn &&
-    go_mod_fork_tidy &&
-    git_commit &&
-    git_tag recreate)
-error_trap 'sn finalize branch'
 
 
 (cd $BUILD_HOME/android && 
