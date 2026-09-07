@@ -1072,7 +1072,10 @@ git_commit () {
     git add . &&
     if ! (git diff --quiet && git diff --cached --quiet); then
         git commit -m "${EXTERNAL_WARP_VERSION}" &&
-        git push -u origin v${EXTERNAL_WARP_VERSION}
+        # The SDK makes a second release-branch commit after publishing the
+        # same-named immutable module tag. Spell out the remote heads ref so
+        # Git never has to choose between refs/heads/v... and refs/tags/v....
+        git push -u origin "HEAD:refs/heads/v${EXTERNAL_WARP_VERSION}"
     fi
 }
 

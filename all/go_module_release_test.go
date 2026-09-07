@@ -286,6 +286,57 @@ func TestRunPublishesImmutableAcyclicGoModuleTags(t *testing.T) {
 	}
 }
 
+// SDK commits its nested build-module locks after its root module tag has been
+// published. The release branch and tag deliberately have the same name, so
+// the production commit helper must push an explicit heads ref instead of an
+// ambiguous short refname.
+func TestGitCommitPushesBranchWhenReleaseTagHasSameName(t *testing.T) {
+	tempDir := t.TempDir()
+	remote := filepath.Join(tempDir, "remote.git")
+	repository := filepath.Join(tempDir, "release")
+	version := "2026.9.7-9999999999"
+	releaseRef := "v" + version
+
+	runGit(t, tempDir, "init", "--bare", remote)
+	runGit(t, tempDir, "init", "-b", releaseRef, repository)
+	runGit(t, repository, "config", "user.name", "Build Harness Test")
+	runGit(t, repository, "config", "user.email", "build-harness-test@example.invalid")
+	taggedCommit := commitTestFile(t, repository, "root", "root module\n", "root release tree")
+	runGit(t, repository, "remote", "add", "origin", remote)
+	runGit(t, repository, "push", "-u", "origin", "HEAD:refs/heads/"+releaseRef)
+	runGit(t, repository, "tag", "-a", releaseRef, "-m", version)
+	runGit(t, repository, "push", "origin", "refs/tags/"+releaseRef)
+
+	if err := os.WriteFile(filepath.Join(repository, "go.sum"), []byte("nested module lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	harness := `
+set -eu
+EXTERNAL_WARP_VERSION="$1"
+eval "$2"
+git_commit
+`
+	command := exec.Command("zsh", "-c", harness, "branch-tag-collision-test", version, runFunction(t, "git_commit"))
+	command.Dir = repository
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("post-tag branch commit failed: %v\n%s", err, output)
+	}
+
+	head := runGit(t, repository, "rev-parse", "HEAD")
+	remoteBranch := runGit(t, tempDir, "--git-dir", remote, "rev-parse", "refs/heads/"+releaseRef)
+	if remoteBranch != head {
+		t.Fatalf("remote release branch = %s, want post-tag commit %s", remoteBranch, head)
+	}
+	remoteTag := runGit(t, tempDir, "--git-dir", remote, "rev-parse", "refs/tags/"+releaseRef+"^{}")
+	if remoteTag != taggedCommit {
+		t.Fatalf("immutable release tag moved to %s, want %s", remoteTag, taggedCommit)
+	}
+	upstream := runGit(t, repository, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if upstream != "origin/"+releaseRef {
+		t.Fatalf("release branch upstream = %q, want %q", upstream, "origin/"+releaseRef)
+	}
+}
+
 // Exercise the exact production tag helper against a local origin. A second
 // publication attempt must fail and leave both the tag object and peeled commit
 // unchanged.
