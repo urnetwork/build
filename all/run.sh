@@ -180,6 +180,36 @@ if [ ! "$STAGE_SECONDS" ]; then
 fi
 
 
+# Release branches refer to versioned URnetwork modules by the tag this run has
+# just pushed. Those repositories are private, so neither proxy.golang.org nor
+# sum.golang.org can resolve a new tag anonymously. Keep the authentication
+# setup process-local: tell Go which module namespaces are private and make the
+# HTTPS URLs emitted by Go's VCS resolver use the SSH credentials already
+# required for every build checkout. GIT_CONFIG_COUNT composes with any caller
+# configuration instead of mutating the builder's global git config.
+configure_private_go_modules () {
+    local private_go_modules='github.com/urnetwork,github.com/urfoundation'
+    export GOPRIVATE="${GOPRIVATE:+${GOPRIVATE},}${private_go_modules}"
+    export GONOPROXY="${GONOPROXY:+${GONOPROXY},}${private_go_modules}"
+    export GONOSUMDB="${GONOSUMDB:+${GONOSUMDB},}${private_go_modules}"
+
+    local git_config_count="${GIT_CONFIG_COUNT:-0}"
+    if [[ ! "$git_config_count" =~ '^[0-9]+$' ]]; then
+        echo "GIT_CONFIG_COUNT must be a non-negative integer, got: $git_config_count" >&2
+        return 1
+    fi
+    export "GIT_CONFIG_KEY_${git_config_count}=url.ssh://git@github.com/urnetwork/.insteadOf"
+    export "GIT_CONFIG_VALUE_${git_config_count}=https://github.com/urnetwork/"
+    (( git_config_count += 1 ))
+    export "GIT_CONFIG_KEY_${git_config_count}=url.ssh://git@github.com/urfoundation/.insteadOf"
+    export "GIT_CONFIG_VALUE_${git_config_count}=https://github.com/urfoundation/"
+    (( git_config_count += 1 ))
+    export GIT_CONFIG_COUNT="$git_config_count"
+}
+configure_private_go_modules
+error_trap 'private Go module access configuration'
+
+
 # Per-run apple signing keychain (BUILD_APPLE_IDENTITY; see the header note and
 # REMOTEBUILD.md option 1). Runs before any long work so a signing problem fails
 # the build in seconds, not an hour in. The BUILD_TEST block below re-arms this
@@ -984,11 +1014,11 @@ go_mod_fork () {
 go_mod_fork_update () {
     if [ $GO_MOD_VERSION != 0 ] && [ $GO_MOD_VERSION != 1 ]; then
         # the go go.sum needs to be updated for the forked mods
-        for f in *; do
-            if [ -e "$f/go.mod" ] && [[ "$f" =~ "^($1)\$" ]]; then
-                (cd $f && go mod tidy && go get -t ./...)
-            fi
-        done
+        if [ ! -e "$1/go.mod" ]; then
+            echo "missing forked module: $1/go.mod" >&2
+            return 1
+        fi
+        (cd "$1" && go mod tidy && go get -t ./...)
     fi
 }
 
