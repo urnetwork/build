@@ -15,6 +15,10 @@
 #   OUT_DIR     where to copy the resulting .msi files
 #   VERSION     release version, EXTERNAL_WARP_VERSION (passed to build.ps1)
 #   SDK_VERSION WARP_VERSION, baked into the SDK DLL (passed to build-sdk.ps1)
+#   WINDOWS_BUILD_ARCHITECTURES
+#               amd64, arm64, or amd64,arm64 (default)
+#   WINDOWS_BUILD_SKIP_CONTRACT_TESTS
+#               1 when a separate unit harness already owns the build contracts
 #   WIN_DIR     (optional) build root inside the VM (default C:/build/urnetwork)
 #   IMAGE       (optional) base qcow2 (default output/windows-arm64.qcow2)
 #   SSH_KEY     (optional) private key matching the image's authorized key
@@ -25,14 +29,22 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/lib.sh"
+# shellcheck source=build-plan.sh
+source "$here/build-plan.sh"
 
 : "${BUILD_HOME:?set BUILD_HOME}"
 : "${OUT_DIR:?set OUT_DIR}"
 : "${VERSION:?set VERSION}"           # EXTERNAL_WARP_VERSION, for the app/MSI
 : "${SDK_VERSION:?set SDK_VERSION}"   # WARP_VERSION, baked into the SDK DLL
 
-echo ">>> validating Windows build boundary contracts"
-(cd "$here" && go test ./...)
+win_windows_build_plan
+echo ">>> Windows build architectures: $WIN_BUILD_ARCHITECTURES"
+if [ "$WIN_BUILD_SKIP_CONTRACT_TESTS" = 1 ]; then
+  echo ">>> Windows build boundary unit tests: skipped by explicit caller request"
+else
+  echo ">>> validating Windows build boundary contracts"
+  (cd "$here" && go test ./...)
+fi
 
 win_init
 
@@ -67,13 +79,24 @@ echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # branches from run.sh) into the VM — no clone, no GitHub, no ssh key.
 win_sync_source "$BUILD_HOME"
 
+if [ "$WIN_BUILD_SKIP_CONTRACT_TESTS" != 1 ]; then
+  echo ">>> validating Windows acceptance helper contracts in the guest"
+  guest_contract_dir="C:/Windows/Temp/urnetwork-build-contracts"
+  win_ssh "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path '$guest_contract_dir' | Out-Null\""
+  win_scp_to "$BUILD_HOME/all/acceptance/run-windows-lib.ps1" \
+    "$guest_contract_dir/run-windows-lib.ps1"
+  win_scp_to "$BUILD_HOME/all/acceptance/run-windows-lib.test.ps1" \
+    "$guest_contract_dir/run-windows-lib.test.ps1"
+  win_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $guest_contract_dir/run-windows-lib.test.ps1 -Fixture $WIN_DIR/windows/app/installer/Package.wxs"
+fi
+
 # The cgo SDK builds natively in the VM now (Go + llvm-mingw, provisioned into
 # the image), replacing the old macOS cross-build. build-sdk.ps1 writes the zip
 # to sdk/cgo/build/ inside the VM; pull it back so run.sh uploads it as the
 # URnetworkSdkWindows artifact (the app build below consumes it in place).
 sdk_zip_vm="$WIN_DIR/sdk/cgo/build/URnetworkSdkWindows.zip"
 echo ">>> building the cgo SDK in the VM (build-sdk.ps1)"
-win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/build-sdk.ps1 -Version $SDK_VERSION -SdkDir $WIN_DIR/sdk/cgo"
+win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/build-sdk.ps1 -Version $SDK_VERSION -SdkDir $WIN_DIR/sdk/cgo $WIN_BUILD_SDK_POWERSHELL_ARGUMENTS"
 
 echo ">>> retrieving the SDK zip -> sdk/cgo/build/"
 mkdir -p "$BUILD_HOME/sdk/cgo/build"
@@ -83,9 +106,10 @@ echo ">>> building the MSI (build.ps1, with split-tunnel driver)"
 # -IncludeDriver builds driver/SplitTunnel.vcxproj (SplitTunnel.sys) and harvests it
 # into the MSI. build.ps1 installs the WDK MSBuild toolset (from the WDK.vsix) on
 # demand and copies the .sys into $bin for WiX. See windows/app/build.ps1.
-win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/app/build.ps1 -Version $VERSION -SdkZip $sdk_zip_vm -IncludeDriver"
+win_ssh "powershell -ExecutionPolicy Bypass -File $WIN_DIR/windows/app/build.ps1 -Version $VERSION -SdkZip $sdk_zip_vm -IncludeDriver $WIN_BUILD_APP_POWERSHELL_ARGUMENTS"
 
 echo ">>> retrieving MSIs"
 win_scp_from "$WIN_DIR/windows/app/build/out/*.msi" "$OUT_DIR/"
+win_windows_verify_msi_outputs "$OUT_DIR" "$VERSION"
 
 echo ">>> windows MSIs -> $(ls "$OUT_DIR"/*.msi | xargs -n1 basename | tr '\n' ' ')"

@@ -130,6 +130,12 @@ silently produce a one-vCPU guest and make the ARM64 link exceed its watchdog.
 standalone on the local branches as-is) calls `build.sh` with
 `OUT_DIR`/`VERSION`/`SDK_VERSION` (and the exported `BUILD_HOME`). The cgo SDK
 builds in the VM (`windows/build-sdk.ps1`), then the MSIs.
+Release builds retain the default `amd64,arm64` plan. A focused caller may set
+`WINDOWS_BUILD_ARCHITECTURES=amd64` or `arm64`; the selector limits the SDK,
+dependency preparation, solution restore/build, and resulting MSI rather than
+discarding an unused artifact after a dual build. Only a caller whose separate
+unit harness already ran the build contracts may also set
+`WINDOWS_BUILD_SKIP_CONTRACT_TESTS=1`.
 It boots a copy-on-write overlay of the image (base stays pristine) and rsyncs
 the build home in, so releases build the exact local state. MSIs are uploaded
 to the GitHub release; **Store submission is manual.**
