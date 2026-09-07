@@ -56,6 +56,12 @@ container_build() {
     sudo apt-get install -y -t trixie openjdk-21-jdk-headless
     sudo update-alternatives --auto java
     curl -L https://go.dev/dl/go1.26.7.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/
+    # The buildserver image does not promise a system Go. The archive above is
+    # installed outside Debian's default PATH, and Gradle's Exec task preserves
+    # this environment when it launches the SDK Makefile. Put the pinned tool
+    # first so every descendant (gradle -> make -> go) resolves the Go we just
+    # installed instead of depending on mutable base-image contents.
+    export PATH="/usr/local/go/bin:$PATH"
 
     echo ">>> android ndk install"
     export ANDROID_HOME=/opt/android-sdk
@@ -84,7 +90,7 @@ container_build() {
     if [ "$go_version" == "" ]; then
         echo "go check: go will use /usr/local/go ($(/usr/local/go/bin/go version))"
     elif [[ "$go_version" =~ "go version go1.26.7" ]]; then
-        echo "go check: go will use system go ($go_version)"
+        echo "go check: go will use $(command -v go) ($go_version)"
     else
         echo "go check: system go must either be 1.26.7 or not installed"
         exit 1
