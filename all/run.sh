@@ -952,10 +952,14 @@ go_mod_edit_module () {
 }
 
 go_mod_edit_require () {
-    go mod edit -dropreplace=$1 &&
-    go mod edit -droprequire=$1 &&
+    go_mod_drop_require $1 &&
     go mod edit -require=$1${GO_MOD_SUFFIX}@v${EXTERNAL_WARP_VERSION} &&
     go_edit_require $1
+}
+
+go_mod_drop_require () {
+    go mod edit -dropreplace=$1 &&
+    go mod edit -droprequire=$1
 }
 
 go_edit_require () {
@@ -1249,7 +1253,10 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/operator-proxy &&
-    go_mod_edit_require github.com/urnetwork/server &&
+    # Only sim-testnet imports server. It is deliberately kept outside the
+    # published SN module below, so carrying this development-only requirement
+    # into v20xx would make tidy resolve the server tag before it can exist.
+    go_mod_drop_require github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urfoundation/sn &&

@@ -186,7 +186,9 @@ func TestGoModForkCanPreserveSimulatorOutsidePublishedModule(t *testing.T) {
 
 go 1.26.7
 
-require example.invalid/server/v2026 v2026.9.7-9999999999
+require example.invalid/server v0.0.0
+
+replace example.invalid/server => ./missing-server
 `,
 		"sn.go":                    "package sn\n",
 		"sim-testnet/main.go":      "package main\nfunc main() {}\n",
@@ -207,10 +209,13 @@ BUILD_SED=true
 eval "$1"
 eval "$2"
 eval "$3"
+eval "$4"
+go_mod_drop_require example.invalid/server
 go_mod_fork sim-testnet
 `
 	command := exec.Command(
 		"zsh", "-c", harness, "go-module-cycle-test",
+		runFunction(t, "go_mod_drop_require"),
 		runFunction(t, "go_mod_fork_prepare"),
 		runFunction(t, "go_mod_fork_tidy"),
 		runFunction(t, "go_mod_fork"),
@@ -268,6 +273,24 @@ func TestRunPublishesImmutableAcyclicGoModuleTags(t *testing.T) {
 	}
 	if got := strings.Count(source, "(cd $BUILD_HOME/sn &&\n    git_commit &&\n    git_tag)"); got != 1 {
 		t.Fatalf("SN root tag publication count = %d, want 1", got)
+	}
+	snStart := strings.Index(source, "(cd $BUILD_HOME/sn &&\n    go_mod_edit_module")
+	if snStart < 0 {
+		t.Fatal("SN release edit block is missing")
+	}
+	snEndOffset := strings.Index(source[snStart:], "error_trap 'sn edit'")
+	if snEndOffset < 0 {
+		t.Fatal("SN release edit block has no checked terminal stage")
+	}
+	snBlock := source[snStart : snStart+snEndOffset]
+	if strings.Contains(snBlock, "go_mod_edit_require github.com/urnetwork/server") {
+		t.Fatal("SN release publishes a server requirement before the server tag exists")
+	}
+	serverDrop := strings.Index(snBlock, "go_mod_drop_require github.com/urnetwork/server")
+	serverRewrite := strings.Index(snBlock, "go_edit_require_subpackages github.com/urnetwork/server")
+	simulatorFork := strings.Index(snBlock, "go_mod_fork 'sim-testnet'")
+	if serverDrop < 0 || serverRewrite < 0 || simulatorFork < 0 || !(serverDrop < serverRewrite && serverRewrite < simulatorFork) {
+		t.Fatalf("SN server-edge order is drop=%d rewrite=%d fork=%d", serverDrop, serverRewrite, simulatorFork)
 	}
 	sdkStart := strings.Index(source, "(cd $BUILD_HOME/sdk &&\n    git_commit &&\n    sdk_tagged_module_tree=")
 	if sdkStart < 0 {
