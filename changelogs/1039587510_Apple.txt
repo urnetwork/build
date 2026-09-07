@@ -1,0 +1,15 @@
+- Add no-VPN iOS hardware acceptance
+- Fit the seed phrase page and the connect drawer on a tablet mini in landscape
+- Onboarding referral step: one referral count bar, in the gold panel
+- Tablet layouts for the iPad app
+- Blend the purple selection into the selected yearly plan's gold dress
+- Place the referral progress bar where Android puts it
+- Call the post quantum identity the provider identity key
+
+Under the hood
+- Harden bounded connection write phases
+- Bound stalled HTTP transport writes
+- Fix canceled HTTP response cleanup
+- Fix canceled HTTP response fallback
+- Ignore lifecycle cancellation as provider failure
+- Complete bounded TCP inbound handoff

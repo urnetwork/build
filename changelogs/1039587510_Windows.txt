@@ -1,0 +1,12 @@
+- Show one referral progress bar on the onboarding referral step
+- Blend the selection pink into the selected yearly plan card
+- Referral bar placement: android's panel order
+- Regenerate resw: post quantum provider identity wording
+
+Under the hood
+- Harden bounded connection write phases
+- Bound stalled HTTP transport writes
+- Fix canceled HTTP response cleanup
+- Fix canceled HTTP response fallback
+- Ignore lifecycle cancellation as provider failure
+- Complete bounded TCP inbound handoff

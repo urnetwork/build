@@ -1,0 +1,17 @@
+        <ul>
+          <li>Show one referral progress bar on the onboarding referral step</li>
+          <li>Blend the selection pink into the selected yearly plan card</li>
+          <li>Referral bar placement: android's panel order</li>
+          <li>Post quantum provider identity wording</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Harden bounded connection write phases</li>
+          <li>Bound stalled HTTP transport writes</li>
+          <li>Fix canceled HTTP response cleanup</li>
+          <li>Fix canceled HTTP response fallback</li>
+          <li>Ignore lifecycle cancellation as provider failure</li>
+          <li>Complete bounded TCP inbound handoff</li>
+        </ul>
+        <!-- end of the shared section -->
