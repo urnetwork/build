@@ -1,0 +1,4 @@
+- Fix Android acceptance interaction root causes
+- Fix F-Droid Go toolchain and SDK output lock
+- Track proxy outbound request boundary
+- Harden proxy acceptance cleanup recovery
