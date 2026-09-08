@@ -117,6 +117,34 @@ win_require_tools() {
   return $missing
 }
 
+# Read the exact toolchain version required by the SDK that this build will
+# sync. Reject an absent or malformed directive instead of letting Go's
+# automatic toolchain download hide a stale reusable image.
+win_sdk_go_version() {
+  local module="$1" version
+  [ -f "$module" ] || { echo "SDK Go module is missing: $module" >&2; return 1; }
+  version="$(awk '$1 == "go" { print $2; exit }' "$module")"
+  printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || {
+    echo "SDK Go module has no valid go directive: $module" >&2
+    return 1
+  }
+  printf '%s\n' "$version"
+}
+
+# Validate a running guest before the expensive source sync/build. A mismatch
+# is a provisioning error, not permission to fetch a second toolchain through
+# the guest's comparatively fragile QEMU network path.
+win_assert_guest_go_version() {
+  local expected="$1" actual expected_line
+  actual="$(win_ssh 'C:\go\bin\go.exe version' | tr -d '\r')" || return
+  expected_line="go version go${expected} windows/arm64"
+  if [ "$actual" != "$expected_line" ]; then
+    echo "Windows base image Go mismatch: expected '$expected_line', got '$actual'." >&2
+    echo "Run $WIN_HERE/setup.sh --reprovision before building." >&2
+    return 1
+  fi
+}
+
 win_ensure_ssh_key() {
   if [ ! -f "$SSH_KEY" ]; then
     mkdir -p "$(dirname "$SSH_KEY")"

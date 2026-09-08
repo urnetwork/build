@@ -136,6 +136,8 @@ while [ $# -gt 0 ]; do
 done
 
 root="${URNETWORK_ROOT:-$(cd "$here/../../.." && pwd)}"
+expected_go_version="$(win_sdk_go_version "$root/sdk/cgo/go.mod")" \
+  || win_die "cannot determine the SDK Go version"
 network_test_gate="$root/tests/network-intensive-suite-lock.sh"
 if [ ! -x "$network_test_gate" ]; then
   echo "Windows setup suite gate is missing or not executable: $network_test_gate" >&2
@@ -228,7 +230,7 @@ win_wait_ssh || win_die "VM ssh did not come up — see README.md first-run note
 echo ">>> uploading + running smoke-test.ps1"
 win_scp_to "$here/smoke-test.ps1" "C:/Windows/Temp/smoke-test.ps1"
 smoke_rc=0
-win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/smoke-test.ps1" || smoke_rc=$?
+win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/smoke-test.ps1 -ExpectedGoVersion $expected_go_version" || smoke_rc=$?
 
 # --keep-up: neuter the teardown trap so the VM survives for debugging.
 if [ -n "$KEEP_UP" ]; then

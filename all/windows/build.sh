@@ -47,6 +47,8 @@ else
 fi
 
 win_init
+expected_go_version="$(win_sdk_go_version "$BUILD_HOME/sdk/cgo/go.mod")" \
+  || win_die "cannot determine the SDK Go version"
 
 [ -e "$UEFI_CODE" ] || win_die "missing $UEFI_CODE"
 mkdir -p "$OUT_DIR"
@@ -73,6 +75,10 @@ fi
 echo ">>> enforcing + verifying hermetic Windows guest policy"
 win_prepare_hermetic_guest \
   || win_die "could not disable Windows auto-servicing; refusing to start an interruptible release build"
+
+echo ">>> verifying the Windows guest has SDK Go $expected_go_version"
+win_assert_guest_go_version "$expected_go_version" \
+  || win_die "Windows base image toolchain is stale"
 
 echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # rsync the build server's whole local tree (all repos, already on the correct

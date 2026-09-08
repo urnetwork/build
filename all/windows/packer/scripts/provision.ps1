@@ -14,6 +14,28 @@ Set-StrictMode -Version Latest
 
 function Log($m) { Write-Host "[provision] $m" }
 
+# QEMU user networking occasionally resets a long HTTPS transfer. Windows 11's
+# inbox curl can resume the partial file across retries; publish the destination
+# only after curl reports a complete transfer so installers never consume a
+# truncated artifact.
+$curlExe = "$env:SystemRoot\System32\curl.exe"
+if (-not (Test-Path $curlExe)) { throw "missing inbox curl: $curlExe" }
+function Get-RemoteFile($Uri, $OutFile) {
+  $partial = "$OutFile.partial"
+  $curlArguments = @(
+    "--fail", "--location", "--silent", "--show-error",
+    "--retry", "12", "--retry-all-errors", "--retry-delay", "2",
+    "--connect-timeout", "30", "--speed-time", "60", "--speed-limit", "1024",
+    "--continue-at", "-", "--output", $partial, $Uri
+  )
+  & $curlExe @curlArguments
+  if ($LASTEXITCODE -ne 0) { throw "download failed after retries ($LASTEXITCODE): $Uri" }
+  if (-not (Test-Path $partial) -or (Get-Item $partial).Length -eq 0) {
+    throw "download produced no data: $Uri"
+  }
+  Move-Item -Force $partial $OutFile
+}
+
 # --- build-VM hygiene (FIRST, before any install) ---------------------------
 # This is a hermetic, throwaway-overlay build VM: each release boots a fresh CoW
 # copy, builds for ~an hour over one ssh session, and is discarded. Windows
@@ -54,10 +76,10 @@ powercfg /change hibernate-timeout-ac 0 | Out-Null
 
 # --- Visual Studio 2022 Build Tools -----------------------------------------
 # Native ARM64 toolset + the x64 cross tools + ATL/MFC (WiX/driver need them).
-Log "installing VS 2022 Build Tools (ARM64 + x64 cross)"
+Log "configuring VS 2022 Build Tools (ARM64 + x64 cross)"
 $vsBootstrap = "$env:TEMP\vs_buildtools.exe"
-Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_buildtools.exe" -OutFile $vsBootstrap
-$vsArgs = @(
+Get-RemoteFile "https://aka.ms/vs/17/release/vs_buildtools.exe" $vsBootstrap
+$vsCommonArgs = @(
   "--quiet", "--wait", "--norestart", "--nocache",
   "--add", "Microsoft.VisualStudio.Workload.VCTools",
   "--add", "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
@@ -80,13 +102,29 @@ $vsArgs = @(
   # the image (smaller image; no dormant MSBuild auto-integration to reason about).
   "--remove", "Microsoft.VisualStudio.Component.Vcpkg"
 )
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$vsInstallPath = ""
+if (Test-Path $vswhere) {
+  $vsInstallPath = [string]((& $vswhere -latest -products Microsoft.VisualStudio.Product.BuildTools -property installationPath | Select-Object -First 1))
+}
+if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
+  Log "installing VS 2022 Build Tools"
+  $vsArgs = $vsCommonArgs
+} else {
+  # The bootstrapper defaults to the install operation. On a provisioned image
+  # that operation exits 1 with "already installed" before it applies any
+  # component changes, so reprovisioning must explicitly modify that instance.
+  Log "modifying existing VS 2022 Build Tools at $vsInstallPath"
+  $quotedVsInstallPath = '"' + $vsInstallPath + '"'
+  $vsArgs = @("modify", "--installPath", $quotedVsInstallPath) + $vsCommonArgs
+}
 $p = Start-Process -FilePath $vsBootstrap -ArgumentList $vsArgs -Wait -PassThru -NoNewWindow
 if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "VS Build Tools install failed ($($p.ExitCode))" }
 
 # --- Windows Driver Kit (WFP split-tunnel callout driver) --------------------
 Log "installing Windows Driver Kit"
 $wdk = "$env:TEMP\wdksetup.exe"
-Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196230" -OutFile $wdk  # WDK for Win11 22H2
+Get-RemoteFile "https://go.microsoft.com/fwlink/?linkid=2196230" $wdk  # WDK for Win11 22H2
 Start-Process -FilePath $wdk -ArgumentList @("/quiet", "/norestart") -Wait -NoNewWindow
 
 # --- WiX v5 (MSI) ------------------------------------------------------------
@@ -99,7 +137,7 @@ $toolsDir  = "$env:USERPROFILE\.dotnet\tools"
 # Pinning -InstallDir + exporting DOTNET_ROOT below is what lets wix.exe run.
 if (-not (Test-Path "$dotnetDir\dotnet.exe")) {
   $dotnet = "$env:TEMP\dotnet-install.ps1"
-  Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $dotnet
+  Get-RemoteFile "https://dot.net/v1/dotnet-install.ps1" $dotnet
   & $dotnet -Channel 8.0 -Architecture arm64 -InstallDir "$dotnetDir"
 }
 # dotnet apphosts (wix.exe) resolve the runtime via DOTNET_ROOT; PATH needs
@@ -131,7 +169,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue) -and -not (Test-Path "C
   Log "installing git"
   $git = "$env:TEMP\git-arm64.exe"
   # Git for Windows ARM64 installer (adjust the asset URL when bumping versions).
-  Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-arm64.exe" -OutFile $git
+  Get-RemoteFile "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-arm64.exe" $git
   Start-Process -FilePath $git -ArgumentList @("/VERYSILENT", "/NORESTART") -Wait -NoNewWindow
 }
 $env:PATH = "C:\Program Files\Git\cmd;$env:PATH"
@@ -146,7 +184,9 @@ if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
     Log "installing Chocolatey"
     Set-ExecutionPolicy Bypass -Scope Process -Force
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    $chocolateyInstall = "$env:TEMP\install-chocolatey.ps1"
+    Get-RemoteFile "https://community.chocolatey.org/install.ps1" $chocolateyInstall
+    & $chocolateyInstall
   }
   Log "installing rsync (cwRsync $rsyncVersion via Chocolatey)"
   & "$env:ProgramData\chocolatey\bin\choco.exe" install rsync --version=$rsyncVersion -y --no-progress
@@ -185,14 +225,29 @@ if (Test-Path "$goRoot\bin\go.exe") {
   $goInstalled = (& "$goRoot\bin\go.exe" version) -replace '^go version go([^\s]+).*$', '$1'
 }
 if ($goInstalled -ne $goVersion) {
+  $goZip = "$env:TEMP\go-$goVersion.zip"
+  Get-RemoteFile "https://go.dev/dl/go$goVersion.windows-arm64.zip" $goZip
   if ($goInstalled) {
     Log "replacing Go $goInstalled with $goVersion (windows/arm64)"
-    Remove-Item -Recurse -Force $goRoot
   } else {
     Log "installing Go $goVersion (windows/arm64)"
   }
-  $goZip = "$env:TEMP\go-$goVersion.zip"
-  Invoke-WebRequest -Uri "https://go.dev/dl/go$goVersion.windows-arm64.zip" -OutFile $goZip
+  if (Test-Path $goRoot) {
+    # A just-executed go.exe can retain a transient image/file-system lock even
+    # after the native command returns. Reprovisioning observed the first delete
+    # fail while the same file was removable seconds later, so join that short
+    # Windows lifecycle boundary instead of abandoning an otherwise healthy base.
+    for ($removeAttempt = 1; $removeAttempt -le 30; $removeAttempt++) {
+      try {
+        Remove-Item -Recurse -Force $goRoot
+        break
+      } catch {
+        if ($removeAttempt -eq 30) { throw }
+        Start-Sleep -Seconds 2
+      }
+    }
+  }
+  if (Test-Path $goRoot) { throw "old Go toolchain still exists after removal retries: $goRoot" }
   Expand-Archive -Path $goZip -DestinationPath "C:\" -Force   # -> C:\go
   $check = (& "$goRoot\bin\go.exe" version)
   if ($check -notmatch [regex]::Escape("go$goVersion")) {
@@ -208,7 +263,7 @@ $llvmDir = "C:\llvm-mingw"
 if (-not (Test-Path "$llvmDir\bin\clang.exe")) {
   Log "installing llvm-mingw $llvmVersion (ucrt, windows/arm64 host)"
   $llvmZip = "$env:TEMP\llvm-mingw-$llvmVersion.zip"
-  Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$llvmVersion/llvm-mingw-$llvmVersion-ucrt-aarch64.zip" -OutFile $llvmZip
+  Get-RemoteFile "https://github.com/mstorsjo/llvm-mingw/releases/download/$llvmVersion/llvm-mingw-$llvmVersion-ucrt-aarch64.zip" $llvmZip
   Expand-Archive -Path $llvmZip -DestinationPath "C:\" -Force  # -> C:\llvm-mingw-<ver>-ucrt-aarch64
   if (Test-Path $llvmDir) { Remove-Item -Recurse -Force $llvmDir }
   Rename-Item "C:\llvm-mingw-$llvmVersion-ucrt-aarch64" $llvmDir

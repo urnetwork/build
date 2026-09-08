@@ -1,6 +1,8 @@
 # Smoke test: verify the build image has everything windows/app/build.ps1 needs.
 # Uploaded + run over ssh by setup.sh. Exits 0 if all critical checks pass, else 1.
 # SPDX-License-Identifier: MPL-2.0
+param([Parameter(Mandatory=$true)][string]$ExpectedGoVersion)
+
 $ErrorActionPreference = 'Continue'
 $script:fail = 0
 
@@ -12,6 +14,16 @@ try { $v = (git --version) 2>&1 | Select-Object -First 1; Ok 'git' $v } catch { 
 
 # WiX v5 (dotnet global tool) ------------------------------------------------
 try { $v = (wix --version) 2>&1 | Select-Object -First 1; Ok 'wix' $v } catch { Bad 'wix' 'wix not on PATH (dotnet tool)' }
+
+# Go must match sdk/cgo/go.mod exactly. A stale image otherwise succeeds by
+# downloading another toolchain inside every disposable build overlay.
+$goExe = 'C:\go\bin\go.exe'
+$expectedGo = "go version go$ExpectedGoVersion windows/arm64"
+if (Test-Path $goExe) {
+  $actualGo = (& $goExe version) 2>&1 | Select-Object -First 1
+  if ($LASTEXITCODE -eq 0 -and $actualGo -eq $expectedGo) { Ok 'go' $actualGo }
+  else { Bad 'go' "expected '$expectedGo', got '$actualGo'" }
+} else { Bad 'go' "missing $goExe; expected '$expectedGo'" }
 
 # Visual Studio + MSVC cross toolsets (ARM64 native + x64 cross) via vswhere --
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
