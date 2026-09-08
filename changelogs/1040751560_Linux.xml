@@ -1,0 +1,5 @@
+        <ul>
+          <li>Join device RPC producers before final drain</li>
+          <li>Fix optional local state reads across native bindings</li>
+          <li>Keep console failures nonfatal and stabilize rollover tests</li>
+        </ul>

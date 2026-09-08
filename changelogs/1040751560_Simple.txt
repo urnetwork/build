@@ -1,0 +1,11 @@
+- Restore Apple tunnels autonomously after restart
+- Create Wintun root before staging dependencies
+- Streamline Windows acceptance builds
+- Add on-chain identity logo
+- Make Windows reprovisioning resilient
+- 2026.9.7-1039843330 restore android pin
+- Join device RPC producers before final drain
+- Fix optional local state reads across native bindings
+- Size nginx status map for production routes
+- Fix Redis alert rate window
+- Expose competition readiness check details

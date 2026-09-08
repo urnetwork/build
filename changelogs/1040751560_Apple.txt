@@ -1,3 +1,6 @@
+- Restore Apple tunnels autonomously after restart
+
+Under the hood
 - Join device RPC producers before final drain
 - Fix optional local state reads across native bindings
 - Keep console failures nonfatal and stabilize rollover tests
