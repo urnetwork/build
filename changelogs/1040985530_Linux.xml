@@ -1,0 +1,11 @@
+        <ul>
+          <li>Regenerate message catalogs for the Pro benefits prompt</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Rotate saturated provider generations</li>
+          <li>Retire unreliable provider sources safely</li>
+          <li>Bound Reliability provider retirement</li>
+        </ul>
+        <!-- end of the shared section -->

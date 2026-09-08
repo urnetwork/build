@@ -1,0 +1,10 @@
+- Upgrade screen: one-line Pro prompt, equal-height plan cards with more vertical padding
+- Regenerate message catalogs for the Pro benefits prompt
+- Regenerate string catalogs for the Pro benefits prompt
+- 2026.9.8-1040779940 restore android pin
+- Rotate saturated provider generations
+- Retire unreliable provider sources safely
+- Bound Reliability provider retirement
+- Harden backup archive monitoring
+- Track Subtensor runtime 455 mirror transition
+- Add the one-line Pro benefits prompt

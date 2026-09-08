@@ -1,5 +1,3 @@
-- Upgrade screen: one-line Pro prompt, equal-height plan cards with more vertical padding
-
 - Rotate saturated provider generations
 - Retire unreliable provider sources safely
 - Bound Reliability provider retirement
