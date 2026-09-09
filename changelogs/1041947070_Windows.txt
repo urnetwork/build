@@ -1,0 +1,21 @@
+- Points board: draggable position indicator, tab reset and backward paging
+- Leaderboard position indicator strings
+- Connect page: skeleton placeholders for the dns readings and transport legend
+- Regenerate the localization catalog
+- Onboarding: client events, the sign-up opt-out, tier prices, the welcome offer page, the inline pay sheet and campaign deep links
+- Connect page easter egg: two seconds between taps
+- Connect page easter egg: five taps on the status dot play the Pro celebration
+- Get Pro sheet without explainer, equal-height plan cards, and the Pro celebration flight
+- Points leaderboard: the own row reads Anonymous like everyone else's until the network opts in
+- Regenerate string catalogs for the Test animation label
+
+Under the hood
+- Points leaderboard: seek to a rank, page both ways, scroll label tiers
+- Represent unavailable points epoch metrics
+- Auth client args: time_zone and locale in the C ABI headers and the TS types; wire round-trip test
+- Auth client args: time_zone and locale for the onboarding campaign's local-time sends and template language
+- C ABI: export the client event queue as a handle with its methods, and carry product_updates through the json boundary
+- C ABI headers: the client event flush interval constant in millis
+- Onboarding: export the event flush interval as millis for gomobile; regenerate the C ABI and the TS types
+- Finalize authenticated testnet evidence and registration paths
+- API spec: the onboarding program contract

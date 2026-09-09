@@ -1,0 +1,42 @@
+- Add the leaderboard indicator's tier and position strings to the catalog
+- Leaderboard: tab taps scroll to the top, points list gets a draggable position indicator
+- Connect drawer: skeleton placeholders for the dns rows and transport legend
+- Shorter onboarding tagline
+- Auth-client carries the device time zone and locale for the onboarding sends, set through the SDK args when the linked framework has the fields
+- Onboarding email links: urnetwork://onboarding routes to Connect, Widgets, the offer and Support with the one-tap answer; feedback and placed-widget events; presentation and routing tests
+- Plans from the price tier with the welcome offer: storefront-aware balance, one presentation for every plan surface, the final offer page everyone reaches, App Store offer code redemption, purchase events
+- Product events: a session-bound SDK event queue behind a typed facade; sign-up pages carry the periodic product updates switch
+- Sign-up referral code: tell a failed check apart from an invalid code
+- Draw the Pro celebration in a clear overlay, not over the tab view
+- Emit the app catalog's connector symbol at SF Symbols 6 too
+- Persist the dns resolver settings in the app's own local state
+- Add a rule by hand on the split rules sheet
+- Stop the widget chart drawing past its data, and add a refresh button
+- Persist split rules in the app's own local state
+- Connect: five quick taps on the connected icon play the Pro celebration
+- Get Pro: title and two equal cards; the Pro celebration flight with a pixelated screen
+- Points leaderboard: show the caller's own row as Anonymous until they opt in
+
+Under the hood
+- Points leaderboard: seek to a rank, page both ways, scroll label tiers
+- Represent unavailable points epoch metrics
+- Auth client args: time_zone and locale in the C ABI headers and the TS types; wire round-trip test
+- Auth client args: time_zone and locale for the onboarding campaign's local-time sends and template language
+- C ABI: export the client event queue as a handle with its methods, and carry product_updates through the json boundary
+- C ABI headers: the client event flush interval constant in millis
+- Onboarding: export the event flush interval as millis for gomobile; regenerate the C ABI and the TS types
+- Onboarding program: plan-response tier/offer/experiments, offer issue, closed client events with a persisted queue, Stripe payment sheet and prices, campaign tokens, price presentation math
+- Finalize authenticated testnet evidence and registration paths
+- Points leaderboard: own list row stays anonymous; the name on me is for the own card
+- API spec: points leaderboard seek_rank, prev_cursor and row position
+- Spec: onboarding admin results and experiments endpoints as deployed
+- API spec: auth-client time_zone and locale land with the campaign engine; Brevo webhook tag, template_id, custom header and ts_event fields
+- API spec: onboarding and analytics as strict OpenAPI 3.1 — tags, camelCase operationIds, closed client-event oneOf, 401/429 responses, examples, Brevo webhook, time_zone, planned admin results and experiments endpoints
+- API spec: the onboarding program contract
+- Bound network tests by forward progress
+- Ignore evaluation epoch ping cancellations
+- API spec: referral code validation is unauthenticated and rate limited
+- API spec: wallet challenge endpoint, Bittensor wallet auth fields, auth method enums
+- Avoid classifying window teardown as platform failure
+- Observe owned contract waits independently of backend request gating
+- Points leaderboard spec: the caller's own list row is anonymous until it opts in

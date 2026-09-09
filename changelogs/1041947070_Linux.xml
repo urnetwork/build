@@ -1,0 +1,28 @@
+        <ul>
+          <li>Points board: draggable position indicator, tab reset and backward paging</li>
+          <li>Leaderboard position indicator strings</li>
+          <li>Connect page: skeleton placeholders for the dns readings and transport legend</li>
+          <li>Shorter onboarding tagline; regenerate the localization catalog</li>
+          <li>Regenerate the localization catalog</li>
+          <li>Onboarding: the offer deep link opens the offer page without passing through the welcome page</li>
+          <li>Onboarding: the SDK's client event queue, product_updates on the create call, time zone and locale on the client registration</li>
+          <li>Onboarding: client events, the sign-up opt-out, tier prices, the welcome offer page, the inline pay sheet and campaign deep links</li>
+          <li>Sign-up referral code: a failed check is not an invalid code</li>
+          <li>Connect page easter egg: two seconds between taps</li>
+          <li>Connect page easter egg: five taps on the connected dot play the Pro celebration</li>
+          <li>Get Pro sheet without explainer, equal-height plan cards, and the Pro celebration flight</li>
+          <li>Regenerate message catalogs for the Test animation label</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Points leaderboard: seek to a rank, page both ways, scroll label tiers</li>
+          <li>Represent unavailable points epoch metrics</li>
+          <li>Auth client args: time_zone and locale in the C ABI headers and the TS types; wire round-trip test</li>
+          <li>Auth client args: time_zone and locale for the onboarding campaign's local-time sends and template language</li>
+          <li>C ABI: export the client event queue as a handle with its methods, and carry product_updates through the json boundary</li>
+          <li>C ABI headers: the client event flush interval constant in millis</li>
+          <li>Onboarding: export the event flush interval as millis for gomobile; regenerate the C ABI and the TS types</li>
+          <li>Onboarding program: plan-response tier/offer/experiments, offer issue, closed client events with a persisted queue, Stripe payment sheet and prices, campaign tokens, price presentation math</li>
+        </ul>
+        <!-- end of the shared section -->
