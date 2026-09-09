@@ -2134,6 +2134,48 @@ builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.
 
 
 if [ "$WARP_SKIP_DEPLOY" = "" ]; then
+    # Apply the exact Server release's schema and Grafana definitions before
+    # any service can start that release. The LAN runner selects the builder
+    # host's us-fmt settings, so these commands reach Main directly rather than
+    # depending on a developer's loopback SSH forwards. Point it at the binary
+    # already built from server/v<major> above; executing source from another
+    # checkout would break the release/version invariant.
+    BUILD_HOST_GOOS=$(go env GOOS)
+    error_trap 'resolve build host Go OS for Main pre-deploy'
+    BUILD_HOST_GOARCH=$(go env GOARCH)
+    error_trap 'resolve build host Go architecture for Main pre-deploy'
+    MAIN_BRINGYOURCTL_DIR="$BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl"
+    MAIN_BRINGYOURCTL_BINARY="$MAIN_BRINGYOURCTL_DIR/build/$BUILD_HOST_GOOS/$BUILD_HOST_GOARCH/bringyourctl"
+
+    BRINGYOURCTL_BINARY="$MAIN_BRINGYOURCTL_BINARY" \
+        "$MAIN_BRINGYOURCTL_DIR/run-main-lan.sh" db migrate
+    error_trap 'Main database migration before service rollout'
+
+    BRINGYOURCTL_BINARY="$MAIN_BRINGYOURCTL_BINARY" \
+        "$MAIN_BRINGYOURCTL_DIR/run-main-lan.sh" grafana load-defaults
+    error_trap 'Main Grafana defaults before service rollout'
+
+    # Export the release's onboarding email templates to Brevo and record their
+    # template ids in config/main/onboarding.yml before the services that send
+    # them roll out. build.sh renders mmm/onboarding/templates per locale from
+    # the localizations store, creates or updates each Brevo transactional
+    # template by name (idempotent, no sends), and write-config merges the ids
+    # into the brevo block of the config file. The key comes from
+    # $WARP_HOME/vault/main/brevo.yml; the builder host's IPs must be on the
+    # Brevo account's authorised-IP list.
+    (cd $WARP_HOME/mmm/onboarding &&
+        npm ci --silent &&
+        ./build.sh upload &&
+        ./build.sh write-config --config "$WARP_HOME/config/main/onboarding.yml")
+    error_trap 'onboarding email templates export to Brevo'
+    (cd $WARP_HOME/config &&
+        git add main/onboarding.yml &&
+        if ! git diff --cached --quiet; then
+            git commit -m "${EXTERNAL_WARP_VERSION} onboarding email templates" &&
+            git_push_with_rebase_retry
+        fi)
+    error_trap 'onboarding templates config push'
+
     # BUILD_HOME is the build repository root (set from this script's parent
     # above), so the rollout implementation is directly under all/.
     source "$BUILD_HOME/all/deploy-rollout.zsh"
