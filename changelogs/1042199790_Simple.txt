@@ -1,0 +1,5 @@
+- 2026.9.9-1042101210 restore android pin
+- Bind release lock to Substrate capacity recovery
+- Retry bounded Substrate reads after historical capacity refusals
+- Bind testnet release lock to historical EVM cooldown
+- Allow shared recovery time after historical EVM capacity refusals
