@@ -1,0 +1,3 @@
+- Fix Windows onboarding feature compilation
+- Lock bootstrap policy resume verification repair
+- Fix bootstrap policy verification after activation
