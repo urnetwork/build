@@ -1,0 +1,12 @@
+- Fix instant account completion classification
+- Auth code sign-in is a pushed screen, like the seedphrase sign-in
+- Connect drawer: drop the momentum carry-over, keep the speed-first release
+- Pro celebration easter egg: count taps on the big connector, not the status icon
+- Connect drawer: the content picks up the fling on the fling's own clock
+- Connect drawer: a flick decides by speed and carries on into the content
+- Pin CI to Xcode 26.3 (#346)
+
+Under the hood
+- Onboarding spec: connect.day connection days and the enrollment rule of the results cohort
+- Report expired provider evaluation budgets
+- Join generated client removal during teardown

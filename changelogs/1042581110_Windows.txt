@@ -1,0 +1,3 @@
+- Onboarding spec: connect.day connection days and the enrollment rule of the results cohort
+- Report expired provider evaluation budgets
+- Join generated client removal during teardown
