@@ -1,0 +1,8 @@
+- 2026.9.9-1042000000 restore android pin
+- Bind testnet release lock to strict read error classification
+- Preserve malformed Substrate response refusal during read recovery
+- Refresh testnet lock after WebSocket dependency declaration
+- Declare the existing WebSocket dependency directly
+- Bind testnet release lock to Substrate read recovery
+- Retry interrupted read-only Substrate calls on the shared client
+- Bind testnet release to historical RPC retry repair
