@@ -1,0 +1,16 @@
+- Pro celebration: pixelate a window snapshot on macOS too
+- Pro celebration: pixelate a snapshot of the screen, not the clear overlay
+
+Under the hood
+- Subprotocol stats: mirror the query counters and expose the per-id received count
+- Expose subprotocols on the device: enable by id, raw listeners, send, query, stats
+- Transfer: defer a timeout resend while cumulative ACKs are still advancing
+- Transfer: mixed-lane recovery — stop gap-resending relay items that are merely behind the direct lane
+- Transfer, p2p: keep ACKs off the unreliable lane and size the ICE UDP socket buffers
+- Transfer: never let a full unreliable flight stall a sequence that has a reliable carrier
+- Wait for processed client key registration before tunnel admission
+- Tun: bound the netstack outbound-queue wait so an injecting reader cannot deadlock the stack
+- Client.receive: an empty batch still reaches the callbacks
+- Client.receive hands subprotocol frames and queries to the registry first
+- Subprotocols: codec, registry, dispatch, sends, peer query and stats
+- Protocol: the subprotocol message and the peer subprotocols query

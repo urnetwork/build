@@ -1,0 +1,7 @@
+- Pro celebration: pixelate a window snapshot on macOS too
+- Pro celebration: pixelate a snapshot of the screen, not the clear overlay
+- Pixelate a window snapshot under the Pro celebration instead of the acrylic veil
+- 2026.9.10-1042581110 restore android pin
+- Subprotocol stats: mirror the query counters and expose the per-id received count
+- Expose subprotocols on the device: enable by id, raw listeners, send, query, stats
+- Wait for processed client key registration before tunnel admission

@@ -1,0 +1,14 @@
+        <ul>
+          <li>Subprotocol stats: mirror the query counters and expose the per-id received count</li>
+          <li>Expose subprotocols on the device: enable by id, raw listeners, send, query, stats</li>
+          <li>Transfer: defer a timeout resend while cumulative ACKs are still advancing</li>
+          <li>Transfer: mixed-lane recovery — stop gap-resending relay items that are merely behind the direct lane</li>
+          <li>Transfer, p2p: keep ACKs off the unreliable lane and size the ICE UDP socket buffers</li>
+          <li>Transfer: never let a full unreliable flight stall a sequence that has a reliable carrier</li>
+          <li>Wait for processed client key registration before tunnel admission</li>
+          <li>Tun: bound the netstack outbound-queue wait so an injecting reader cannot deadlock the stack</li>
+          <li>Client.receive: an empty batch still reaches the callbacks</li>
+          <li>Client.receive hands subprotocol frames and queries to the registry first</li>
+          <li>Subprotocols: codec, registry, dispatch, sends, peer query and stats</li>
+          <li>Protocol: the subprotocol message and the peer subprotocols query</li>
+        </ul>
