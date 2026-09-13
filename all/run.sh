@@ -2122,6 +2122,10 @@ builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build gossip'
 builder_message "service gossip \`${EXTERNAL_WARP_VERSION}\` available"
 
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/alt/Makefile)
+error_trap 'warpctl build alt'
+builder_message "service alt \`${EXTERNAL_WARP_VERSION}\` available"
+
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/proxy/Makefile)
 error_trap 'warpctl build proxy'
 builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
