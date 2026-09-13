@@ -61,6 +61,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         libgtkmm-4.0-dev \
         libadwaita-1-dev \
         libsecret-1-dev \
+        libzxing-cpp-dev \
         libglib2.0-dev \
         libglib2.0-bin \
         libgdk-pixbuf2.0-bin \
