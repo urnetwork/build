@@ -158,22 +158,36 @@ if ! "$emulator" -list-avds | grep -Fxq "$avd_name"; then
     --device "pixel_6"
 fi
 
+if [ "$avd_name" = urnetwork-acceptance ]; then
+  legacy_avd_state="$(android_acceptance_retire_legacy_reserved_avd \
+    "$adb" "$avd_name")" || {
+    echo "ERROR: could not safely retire or classify the reserved acceptance AVD" >&2
+    exit 1
+  }
+  if [ "$legacy_avd_state" = retired ]; then
+    echo ">>> retired a default-ID legacy acceptance AVD instance"
+  fi
+fi
+running_avd_status=0
+android_acceptance_no_running_avd "$adb" "$avd_name" || running_avd_status=$?
+case "$running_avd_status" in
+  0) ;;
+  1)
+    echo "ERROR: AVD $avd_name is already running outside this setup invocation" >&2
+    echo "Stop it explicitly or rerun setup with --recreate." >&2
+    exit 1
+    ;;
+  *)
+    echo "ERROR: could not prove that AVD $avd_name has no pre-existing emulator instance" >&2
+    exit 1
+    ;;
+esac
+
 run_dir="$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-android-setup.XXXXXX")"
 emulator_pid=""
+emulator_owner_token="setup-$$-$RANDOM"
 serial=""
 started_emulator=0
-
-find_avd_serial() {
-  local candidate state name devices
-  devices="$(timeout 15 "$adb" devices)" || return 1
-  while read -r candidate state _; do
-    case "$candidate" in emulator-*) ;; *) continue ;; esac
-    [ "$state" = device ] || continue
-    name="$(timeout 10 "$adb" -s "$candidate" emu avd name 2>/dev/null | sed -n '1p' | tr -d '\r')"
-    [ "$name" = "$avd_name" ] && { printf '%s\n' "$candidate"; return 0; }
-  done <<<"$devices"
-  return 1
-}
 
 available_console_port() {
   local port
@@ -189,25 +203,19 @@ available_console_port() {
 
 cleanup() {
   exit_status=$?
+  local cleanup_grace=0
   if [ "$started_emulator" -eq 1 ] && [ -n "$serial" ]; then
-    timeout 15 "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
-    for _ in $(seq 1 150); do
-      kill -0 "$emulator_pid" 2>/dev/null || break
-      sleep 0.2
-    done
-    if kill -0 "$emulator_pid" 2>/dev/null; then
-      kill -TERM "$emulator_pid" 2>/dev/null || true
-      for _ in $(seq 1 50); do
-        kill -0 "$emulator_pid" 2>/dev/null || break
-        sleep 0.2
-      done
-      if kill -0 "$emulator_pid" 2>/dev/null; then
-        kill -KILL "$emulator_pid" 2>/dev/null || true
-      fi
+    if android_acceptance_runner_owns_emulator \
+        "$adb" "$serial" "$avd_name" "$emulator_pid" \
+        "$emulator_owner_token"; then
+      cleanup_grace=150
+      timeout 15 "$adb" -s "$serial" emu kill >/dev/null 2>&1 || true
+    fi
+    if ! android_acceptance_stop_emulator_child \
+        "$emulator_pid" "$cleanup_grace" 50; then
       echo "ERROR: acceptance emulator required forced cleanup" >&2
       exit_status=1
     fi
-    wait "$emulator_pid" 2>/dev/null || true
   fi
   if ! rm -rf "$run_dir"; then
     exit_status=1
@@ -217,24 +225,26 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-serial="$(find_avd_serial || true)"
-if [ -z "$serial" ]; then
-  console_port="$(available_console_port)" || {
-    echo "ERROR: no free Android emulator console port" >&2
-    exit 1
-  }
-  serial="emulator-$console_port"
-  args=(-avd "$avd_name" -gpu host -no-snapshot -no-boot-anim -netdelay none -netspeed full -port "$console_port")
-  [ "$headless" -eq 1 ] && args+=(-no-window)
-  echo ">>> booting $avd_name for smoke test on $serial"
-  "$emulator" "${args[@]}" >"$run_dir/emulator.log" 2>&1 &
-  emulator_pid=$!
-  started_emulator=1
-else
-  echo ">>> reusing running $avd_name on $serial for smoke test"
-fi
+console_port="$(available_console_port)" || {
+  echo "ERROR: no free Android emulator console port" >&2
+  exit 1
+}
+serial="emulator-$console_port"
+args=(-avd "$avd_name" -read-only -gpu host -no-snapshot -no-boot-anim -netdelay none -netspeed full -port "$console_port")
+[ "$headless" -eq 1 ] && args+=(-no-window)
+echo ">>> booting a runner-owned $avd_name for smoke test"
+run_android_acceptance_shared_avd_emulator \
+  "$emulator" "$run_dir/emulator.log" "$emulator_owner_token" \
+  "${args[@]}" &
+emulator_pid=$!
+started_emulator=1
 
-timeout 180 "$adb" -s "$serial" wait-for-device
+android_acceptance_wait_for_runner_owned_emulator \
+  "$adb" "$serial" "$avd_name" "$emulator_pid" \
+  "$emulator_owner_token" 360 || {
+  echo "ERROR: setup emulator did not prove ownership by this invocation" >&2
+  exit 1
+}
 for _ in $(seq 1 180); do
   [ "$(timeout 10 "$adb" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
   sleep 2
@@ -263,13 +273,6 @@ done
 }
 
 renderer_evidence="$run_dir/emulator.log"
-if [ "$started_emulator" -ne 1 ]; then
-  renderer_evidence="$run_dir/surfaceflinger.txt"
-  : >"$renderer_evidence"
-  chmod 600 "$renderer_evidence"
-  timeout 15 "$adb" -s "$serial" shell dumpsys SurfaceFlinger \
-    </dev/null >"$renderer_evidence" 2>/dev/null || true
-fi
 setup_preflight="$run_dir/setup-smoke-preflight.txt"
 if ! android_acceptance_preflight_device \
     "$adb" "$serial" setup-avd setup-smoke "$setup_preflight" "$renderer_evidence"; then
