@@ -1,9 +1,9 @@
 #!/usr/bin/env zsh
 
 # Deploy one rollout step and preserve Warpctl's status before reporting success.
-# Config-updater, lb, and transparent proxy blocks cannot observe their live
-# versions through per-block LB status routes, so Warpctl deliberately rejects
-# --only-older for those services.
+# Config-updater, lb, transparent proxy, statusless Gossip, and unexposed Alt
+# blocks cannot observe their live versions through per-block LB status routes,
+# so Warpctl deliberately rejects --only-older for those services.
 warp_rollout_deploy() {
     local service="$1"
     local percent="$2"
@@ -19,7 +19,7 @@ warp_rollout_deploy() {
         "--percent=$percent"
     )
     case "$service" in
-        config-updater|lb|proxy)
+        config-updater|lb|proxy|gossip|alt)
             ;;
         grafana|taskworker|api|connect|web|app|mcp)
             deploy_args+=(--only-older)
@@ -59,10 +59,15 @@ warp_rollout_sample() {
 # status boundary, success message, or stage wait.
 warp_rollout() {
     local -a staged_services
+    local -a single_pass_services
     local percent
     local service
 
-    staged_services=(lb taskworker api connect web app mcp proxy)
+    staged_services=(lb taskworker api connect web app mcp)
+    # Gossip has no status route, while Alt and Proxy intentionally bypass the
+    # load balancer. Without --only-older, a cumulative rollout would retag and
+    # restart already selected unobservable blocks in every later wave.
+    single_pass_services=(gossip alt proxy)
 
     warp_rollout_sample 0 || return $?
 
@@ -74,6 +79,12 @@ warp_rollout() {
         for service in "${staged_services[@]}"; do
             warp_rollout_deploy "$service" "$percent" || return $?
         done
+
+        if (( percent == 100 )); then
+            for service in "${single_pass_services[@]}"; do
+                warp_rollout_deploy "$service" 100 || return $?
+            done
+        fi
 
         warp_rollout_sample "$percent" || return $?
         if (( percent < 100 )); then

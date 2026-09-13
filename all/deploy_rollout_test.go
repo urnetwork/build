@@ -177,7 +177,8 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 	)
 }
 
-// Assert the complete cumulative rollout order and every only-older boundary.
+// Assert the complete cumulative rollout order, every only-older boundary, and
+// the single pass for services whose running versions cannot be sampled.
 func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing.T) {
 	result := runRollout(t)
 	if result.exitCode != 0 {
@@ -192,15 +193,24 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 		deployEvent("grafana", 100, true),
 		deployMessage("grafana", 100, true),
 	}
-	services := []string{"lb", "taskworker", "api", "connect", "web", "app", "mcp", "proxy"}
+	services := []string{"lb", "taskworker", "api", "connect", "web", "app", "mcp"}
 	for _, percent := range []int{25, 50, 75, 100} {
 		for _, service := range services {
-			onlyOlder := service != "lb" && service != "proxy"
+			onlyOlder := service != "lb"
 			expected = append(
 				expected,
 				deployEvent(service, percent, onlyOlder),
 				deployMessage(service, percent, onlyOlder),
 			)
+		}
+		if percent == 100 {
+			for _, service := range []string{"gossip", "alt", "proxy"} {
+				expected = append(
+					expected,
+					deployEvent(service, 100, false),
+					deployMessage(service, 100, false),
+				)
+			}
 		}
 		sampleIndex := percent/25 + 1
 		expected = append(
@@ -232,7 +242,9 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 	}{
 		{service: "config-updater", percent: 100, exitCode: 37},
 		{service: "lb", percent: 50, exitCode: 38},
-		{service: "proxy", percent: 75, exitCode: 39},
+		{service: "proxy", percent: 100, exitCode: 39},
+		{service: "gossip", percent: 100, exitCode: 40},
+		{service: "alt", percent: 100, exitCode: 42},
 	}
 	for _, test := range tests {
 		result := runRollout(
@@ -266,6 +278,38 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 				expectedLast,
 				result.events,
 			)
+		}
+	}
+}
+
+// Pin both new service images to the versioned Server Makefiles before the
+// canonical rollout is entered. The Server repository separately tests that
+// those Makefiles produce the binary copied by each Dockerfile.
+func TestRunBuildsAltAndGossipContainersBeforeRollout(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSource := string(runData)
+	rolloutAt := strings.Index(runSource, `source "$BUILD_HOME/all/deploy-rollout.zsh"`)
+	if rolloutAt < 0 {
+		t.Fatal("run.sh does not enter the canonical rollout")
+	}
+
+	for _, service := range []string{"gossip", "alt"} {
+		buildBlock := fmt.Sprintf(
+			"(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/%s/Makefile)\nerror_trap 'warpctl build %s'\nbuilder_message \"service %s \\`${EXTERNAL_WARP_VERSION}\\` available\"",
+			service,
+			service,
+			service,
+		)
+		buildAt := strings.Index(runSource, buildBlock)
+		if buildAt < 0 {
+			t.Errorf("run.sh is missing the checked %s image build", service)
+			continue
+		}
+		if buildAt > rolloutAt {
+			t.Errorf("run.sh builds %s after deployment starts", service)
 		}
 	}
 }
