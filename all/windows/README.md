@@ -1,6 +1,6 @@
 # Windows build environment — options & decision
 
-The Windows MSI must be built on Windows (msbuild + WDK + WiX). The build host is
+The Windows MSI must be built on Windows (MSBuild + WDK + CMake + WiX). The build host is
 an **Apple-Silicon Mac**. This doc records what does and doesn't work for running
 that Windows build environment from the Mac, and how it wires into `../run.sh`.
 
@@ -33,7 +33,7 @@ does headless, `Autounattend.xml`-driven Windows installs and runs on Apple
 Silicon.
 
 - **Provision once (Packer):** boot the Win11 ARM64 ISO with an autounattend that
-  installs VS Build Tools + WDK + WiX + OpenSSH Server, then export a `qcow2`.
+  installs VS Build Tools + WDK + CMake + WiX + OpenSSH Server, then export a `qcow2`.
 - **Each release (`build.sh`):** boot that image headless with QEMU (HVF), wait
   for ssh, hand off to the *existing* `windows/app/build.ps1` over ssh, copy the
   MSIs back, shut the VM down.
@@ -92,9 +92,9 @@ explicitly, so they're unaffected.
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
 | `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), enforce the hermetic guest policy, **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
 | `disable-auto-servicing.ps1` | shared provisioning/runtime guard: blocks Windows Update sources and verifies `UsoSvc` + `wuauserv` are disabled and stopped before a build starts |
-| `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, WiX, git, **rsync + the `cmd` ssh shell** |
+| `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, CMake, WiX, git, **rsync + the `cmd` ssh shell** |
 | `packer/http/Autounattend.pkrtpl.xml` | unattended install; bakes the stable ssh key, sets locale, enables OpenSSH, installs NetKVM at first logon |
-| `packer/scripts/provision.ps1` | installs VS Build Tools (ARM64+x64) + WDK + WiX + git + a pinned cwRsync; sets the `cmd` ssh shell |
+| `packer/scripts/provision.ps1` | installs VS Build Tools (ARM64+x64, including CMake) + WDK + WiX + git + a pinned cwRsync; sets the `cmd` ssh shell |
 
 The `packer/` directory name is vestigial — only the autounattend template and
 `provision.ps1` are used; there is no Packer build.

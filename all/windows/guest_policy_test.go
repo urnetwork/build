@@ -133,6 +133,49 @@ func TestProvisioningModifiesAnExistingVisualStudioInstallation(t *testing.T) {
 	}
 }
 
+func TestProvisioningInstallsAndExportsCMake(t *testing.T) {
+	provision := readBuildFile(t, "packer/scripts/provision.ps1")
+	for _, required := range []string{
+		`"--add", "Microsoft.VisualStudio.Component.VC.CMake.Project"`,
+		`-requires Microsoft.VisualStudio.Component.VC.CMake.Project`,
+		`-find "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"`,
+		`if ([string]::IsNullOrWhiteSpace($cmakeExe) -or -not (Test-Path $cmakeExe))`,
+		`$cmakeVersion = ((& $cmakeExe --version)`,
+		`[Environment]::SetEnvironmentVariable('Path', $machPath, 'Machine')`,
+		`$env:PATH = "$cmakeBin;$env:PATH"`,
+	} {
+		if !strings.Contains(provision, required) {
+			t.Errorf("CMake provisioning is missing %q", required)
+		}
+	}
+	component := strings.Index(provision, `"--add", "Microsoft.VisualStudio.Component.VC.CMake.Project"`)
+	installer := strings.Index(provision, `Start-Process -FilePath $vsBootstrap`)
+	discovery := strings.Index(provision, `$cmakeExe = [string]`)
+	pathExport := strings.Index(provision, `$env:PATH = "$cmakeBin;$env:PATH"`)
+	if component < 0 || installer < 0 || discovery < 0 || pathExport < 0 ||
+		!(component < installer && installer < discovery && discovery < pathExport) {
+		t.Fatalf("CMake must be requested before VS runs, then verified before PATH export: component=%d installer=%d discovery=%d path=%d", component, installer, discovery, pathExport)
+	}
+
+	smoke := readBuildFile(t, "smoke-test.ps1")
+	for _, required := range []string{
+		`Get-Command cmake -ErrorAction SilentlyContinue`,
+		`& $cmake.Source --version`,
+		`Bad 'cmake' 'cmake not on PATH (zxing-cpp source build requires it)'`,
+	} {
+		if !strings.Contains(smoke, required) {
+			t.Errorf("Windows smoke test is missing CMake check %q", required)
+		}
+	}
+
+	build := readBuildFile(t, "build.sh")
+	cmakeCheck := strings.Index(build, `win_assert_guest_cmake`)
+	sourceSync := strings.Index(build, `win_sync_source "$BUILD_HOME"`)
+	if cmakeCheck < 0 || sourceSync < 0 || cmakeCheck > sourceSync {
+		t.Fatalf("standalone builds must reject missing CMake before source sync: check=%d sync=%d", cmakeCheck, sourceSync)
+	}
+}
+
 func TestProvisioningRetriesTransientGoToolchainRemoval(t *testing.T) {
 	provision := readBuildFile(t, "packer/scripts/provision.ps1")
 	for _, required := range []string{
@@ -238,6 +281,40 @@ win_assert_guest_go_version 1.26.5
 		if (err == nil) != test.wantOK {
 			t.Errorf("version %q: success = %t, want %t", test.version, err == nil, test.wantOK)
 		}
+	}
+}
+
+func TestGuestCMakeGuardRejectsMissingOrInvalidTool(t *testing.T) {
+	script := `
+source "$1"
+WIN_HERE=/synthetic/windows
+win_ssh() {
+  printf '%s\n' "$FAKE_GUEST_CMAKE_VERSION"
+  return "${FAKE_GUEST_CMAKE_RC:-0}"
+}
+win_assert_guest_cmake
+`
+	for _, test := range []struct {
+		name    string
+		version string
+		rc      string
+		wantOK  bool
+	}{
+		{name: "usable", version: "cmake version 4.1.1", rc: "0", wantOK: true},
+		{name: "missing", version: "", rc: "1", wantOK: false},
+		{name: "invalid output", version: "unexpected", rc: "0", wantOK: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.Command("bash", "-c", script,
+				"guest-cmake-test", filepath.Join(windowsBuildRoot(t), "lib.sh"))
+			command.Env = append(os.Environ(),
+				"FAKE_GUEST_CMAKE_VERSION="+test.version,
+				"FAKE_GUEST_CMAKE_RC="+test.rc)
+			err := command.Run()
+			if (err == nil) != test.wantOK {
+				t.Errorf("version %q rc %s: success = %t, want %t", test.version, test.rc, err == nil, test.wantOK)
+			}
+		})
 	}
 }
 

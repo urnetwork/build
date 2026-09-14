@@ -145,6 +145,27 @@ win_assert_guest_go_version() {
   fi
 }
 
+# CMake is an image dependency, not a release dependency: fetch-deps.ps1 builds
+# pinned zxing-cpp source for each requested architecture before MSBuild begins.
+# Fail before the expensive source sync when an older reusable image predates
+# that tool, and point the operator at the only durable repair.
+win_assert_guest_cmake() {
+  local version
+  version="$(win_ssh 'powershell -NoProfile -NonInteractive -Command "$cmake = Get-Command cmake -ErrorAction SilentlyContinue; if (-not $cmake) { exit 1 }; $version = (& $cmake.Source --version 2>&1 | Select-Object -First 1); if ($LASTEXITCODE -ne 0) { Write-Error $version; exit 1 }; Write-Output $version"' | tr -d '\r')" || {
+    echo "Windows base image CMake is missing or unusable." >&2
+    echo "Run $WIN_HERE/setup.sh --reprovision before building." >&2
+    return 1
+  }
+  case "$version" in
+    "cmake version "*) echo "Windows base image CMake: $version" ;;
+    *)
+      echo "Windows base image returned an invalid CMake version: '$version'." >&2
+      echo "Run $WIN_HERE/setup.sh --reprovision before building." >&2
+      return 1
+      ;;
+  esac
+}
+
 win_ensure_ssh_key() {
   if [ ! -f "$SSH_KEY" ]; then
     mkdir -p "$(dirname "$SSH_KEY")"

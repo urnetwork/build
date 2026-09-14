@@ -3,10 +3,11 @@
 #
 # Installs, via direct download: Visual Studio 2022 Build Tools (native ARM64 +
 # x64 cross toolset, so one ARM VM cross-builds both MSIs), the Windows Driver Kit
-# (for the WFP split-tunnel driver), WiX v5, git, rsync, and the cgo SDK toolchain
-# (Go + llvm-mingw, so the URnetwork SDK DLLs build natively here instead of being
-# cross-built on the mac). The build source is rsync'd in from the build server at
-# build time (build.sh win_sync_source), not cloned here - no GitHub auth needed.
+# (for the WFP split-tunnel driver), CMake (for the pinned zxing-cpp source build),
+# WiX v5, git, rsync, and the cgo SDK toolchain (Go + llvm-mingw, so the URnetwork
+# SDK DLLs build natively here instead of being cross-built on the mac). The build
+# source is rsync'd in from the build server at build time (build.sh
+# win_sync_source), not cloned here - no GitHub auth needed.
 #
 # SPDX-License-Identifier: MPL-2.0
 $ErrorActionPreference = "Stop"
@@ -84,6 +85,10 @@ $vsCommonArgs = @(
   "--add", "Microsoft.VisualStudio.Workload.VCTools",
   "--add", "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
   "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+  # Required by windows/app/tools/fetch-deps.ps1 to build the pinned zxing-cpp
+  # source release for every selected target architecture. This is only a
+  # recommended component of the VCTools workload, so it must be explicit.
+  "--add", "Microsoft.VisualStudio.Component.VC.CMake.Project",
   "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621",
   "--add", "Microsoft.VisualStudio.Component.VC.ATL",
   "--add", "Microsoft.VisualStudio.Component.VC.ATL.ARM64",
@@ -120,6 +125,29 @@ if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
 }
 $p = Start-Process -FilePath $vsBootstrap -ArgumentList $vsArgs -Wait -PassThru -NoNewWindow
 if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "VS Build Tools install failed ($($p.ExitCode))" }
+
+# The headless release enters the VS developer shell before fetching app
+# dependencies, but the reusable VM contract must not depend on that shell
+# happening to expose optional tools. Locate the component-owned executable,
+# exercise it now, and persist its directory for future OpenSSH sessions.
+$cmakeExe = [string]((& $vswhere -latest `
+  -products Microsoft.VisualStudio.Product.BuildTools `
+  -requires Microsoft.VisualStudio.Component.VC.CMake.Project `
+  -find "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" |
+  Select-Object -First 1))
+if ([string]::IsNullOrWhiteSpace($cmakeExe) -or -not (Test-Path $cmakeExe)) {
+  throw "VS CMake component was requested but cmake.exe was not installed"
+}
+$cmakeVersion = ((& $cmakeExe --version) 2>&1 | Select-Object -First 1)
+if ($LASTEXITCODE -ne 0 -or $cmakeVersion -notmatch '^cmake version ') {
+  throw "VS CMake install is not usable: '$cmakeVersion'"
+}
+$cmakeBin = Split-Path -Parent $cmakeExe
+$machPath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+if ($machPath -notlike "*$cmakeBin*") { $machPath = "$cmakeBin;$machPath" }
+[Environment]::SetEnvironmentVariable('Path', $machPath, 'Machine')
+$env:PATH = "$cmakeBin;$env:PATH"
+Log "CMake ready: $cmakeVersion ($cmakeExe)"
 
 # --- Windows Driver Kit (WFP split-tunnel callout driver) --------------------
 Log "installing Windows Driver Kit"
