@@ -1,0 +1,5 @@
+        <ul>
+          <li>Bringyour.yml: document the whole device association shape</li>
+          <li>Bringyour.yml: leave the competition api to sn/api/competition.yml</li>
+          <li>Bringyour.yml: document every registered route, and correct the drifted ones</li>
+        </ul>

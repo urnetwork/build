@@ -1,3 +1,4 @@
 - Bringyour.yml: document the whole device association shape
 - Bringyour.yml: leave the competition api to sn/api/competition.yml
 - Bringyour.yml: document every registered route, and correct the drifted ones
+- Pin privacy-safe Mimir rejection classification boundaries
