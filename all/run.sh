@@ -8,6 +8,13 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
+# (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
+#            TWINE_PASSWORD/PYPI_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY,
+#            CARGO_REGISTRY_TOKEN, MAVEN_CENTRAL_USERNAME/PASSWORD plus
+#            SDK_GPG_KEY_ID, SDK_SWIFT_GIT_TOKEN, COCOAPODS_TRUNK_TOKEN.
+#            CONAN_LOGIN_USERNAME + CONAN_PASSWORD + SDK_CONAN_REMOTE_URL,
+#            SDK_VCPKG_GIT_TOKEN. A registry without credentials is skipped.
+#            See sdk/PACKAGEMANAGERS.md.
 # (optional) CONNECT_IP_UPDATE set (non-empty) to regenerate the connect IP
 #            tables (security + blocker) from the live feeds before the tests
 #            run, then push them to connect main (commit message stamped with
@@ -99,6 +106,19 @@ if [ "$BUILD_TEST" ]; then
     # Only the optional acceptance-test phase uses these host tools.
     required_build_tools+=(lsof pkill sudo)
 fi
+
+# Optional package managers only require their tools when publication is enabled.
+if [ "$NUGET_API_KEY" ]; then required_build_tools+=(dotnet); fi
+if [ "$CARGO_REGISTRY_TOKEN" ]; then required_build_tools+=(cargo); fi
+if [ "$GEM_HOST_API_KEY" ]; then required_build_tools+=(ruby gem); fi
+if [ "$MAVEN_CENTRAL_USERNAME" ] && [ "$MAVEN_CENTRAL_PASSWORD" ] && [ "$SDK_GPG_KEY_ID" ]; then
+    required_build_tools+=(mvn javadoc gpg)
+fi
+if [ "$SDK_SWIFT_GIT_TOKEN" ] || [ "$COCOAPODS_TRUNK_TOKEN" ]; then required_build_tools+=(swift); fi
+if [ "$SDK_VCPKG_GIT_TOKEN" ] || { [ "$CONAN_LOGIN_USERNAME" ] && [ "$CONAN_PASSWORD" ]; }; then
+    required_build_tools+=(cmake zig)
+fi
+if [ "$COCOAPODS_TRUNK_TOKEN" ]; then required_build_tools+=(pod); fi
 
 missing_build_tools=()
 for build_tool in "${required_build_tools[@]}"; do
@@ -1173,7 +1193,11 @@ npm_publish () {
     else
         npm ci && npm run build --if-present || return $?
     fi
-    npm publish --tag nightly
+    if [ "$SDK_NPM_PUBLISH" = yes ]; then
+        npm publish --tag nightly
+    else
+        builder_message "skipping npm publication: no publishing credentials"
+    fi
 }
 
 
@@ -1328,7 +1352,7 @@ error_trap 'sdk js edit'
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
-    go_mod_fork 'build' 'cgo' 'js')
+    go_mod_fork 'build' 'cgo' 'js' 'packaging' 'python' 'ruby' 'rust' 'csharp' 'java' 'kotlin' 'swift')
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
@@ -1346,8 +1370,21 @@ error_trap 'sdk edit'
     test "$sdk_tagged_module_tree" = `git rev-parse HEAD:v${GO_MOD_VERSION}`)
 error_trap 'sdk push branch'
 
-(cd $BUILD_HOME/sdk/js &&
-    npm_publish)
+# Package-manager release configuration lives beside the JS SDK publication.
+# Native publishers run after the required platform jobs, using this run's
+# artifact manifest. Swift/Carthage and Rust wait for public GitHub asset URLs.
+export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
+export SDK_PACKAGE_CHANNEL="${SDK_PACKAGE_CHANNEL:-nightly}"
+sdk_package_stage () {
+    go -C "$BUILD_HOME/sdk/packaging" run . release "$1"
+}
+sdk_package_stage plan
+error_trap 'sdk package publishing plan'
+SDK_NPM_PUBLISH="$(go -C "$BUILD_HOME/sdk/packaging" run . credential npm)"
+error_trap 'npm SDK publishing credential check'
+
+(cd "$BUILD_HOME/sdk/js" &&
+    make package check-package publish)
 error_trap 'js-sdk publish'
 
 
@@ -1479,8 +1516,14 @@ sleep 30
 
 
 (cd $BUILD_HOME/extension &&
-    npm_edit_module @urnetwork/localizations &&
-    npm_edit_module @urnetwork/sdk-js &&
+    # No registry version was created when npm credentials were absent. Keep
+    # the extension's existing registry pins in that case, so it can still build.
+    if [ "$SDK_NPM_PUBLISH" = yes ]; then
+        npm_edit_module @urnetwork/localizations &&
+        npm_edit_module @urnetwork/sdk-js || exit $?
+    else
+        builder_message "npm publication skipped; extension retains its current registry dependencies"
+    fi &&
     npm_fork_version "$EXTENSION_VERSION")
 error_trap 'extension edit'
 
@@ -1778,6 +1821,9 @@ github_create_draft_release
 (cd $BUILD_HOME/sdk/build && make)
 error_trap 'build sdk'
 
+sdk_package_stage mobile
+error_trap 'sdk Swift package build and check'
+
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
 github_release_upload "URnetworkSdk-sources-${EXTERNAL_WARP_VERSION}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.xcframework.zip" "$BUILD_HOME/sdk/build/apple/URnetworkSdk.xcframework.zip"
@@ -1975,6 +2021,12 @@ UR_REQUIRE_RPM=true UR_REQUIRE_ARCH_PKG=true OUT_DIR="$DESKTOP_OUT/linux" "$BUIL
 error_trap 'linux build'
 github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
 
+sdk_package_stage desktop
+error_trap 'sdk native package build, check and publish'
+for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
+    github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
+done
+
 # THE FLATPAK, built in its own Linux container. The release host is macOS, so
 # flatpak cannot be a host prerequisite. Dockerfile.flatpak installs flatpak,
 # native flatpak-builder, elfutils and their source helpers; the first run also
@@ -2165,6 +2217,9 @@ builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https:/
 
 github_create_release
 
+
+sdk_package_stage public
+error_trap 'sdk packages referencing public release assets'
 
 # create pre-releases for version code variants
 # this is needed for reproducible builds
