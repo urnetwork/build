@@ -1,5 +1,8 @@
+- 2026.9.13-1045655440 restore android pin
+- Require all attempted release components to succeed
 - Document open throughput program work
 - PROVIDERFIXES.md: the two provider fixes, how to verify them, and the open ceiling
 - Ip: test that the upstream socket actually autotunes through the dial path
 - Ip: time the unreachable-source release with a test clock, not the wall
 - Ip: put scaledPow2WindowSize's doc comment back on scaledPow2WindowSize
+- Lock historical fleet receipt replay correction
