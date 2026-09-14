@@ -152,3 +152,34 @@ func TestBuildLinuxRejectsPartialSdkAfterMaskedArchitectureFailure(t *testing.T)
 		t.Fatalf("stale amd64 output survived partial build: %v", statErr)
 	}
 }
+
+// Noble names the zxing-cpp development binary package libzxing-dev. Keep the
+// distro package and the pkg-config module as separate contracts: confusing
+// the upstream project name with Ubuntu's package name prevents the GUI image
+// from building, while omitting the module check can silently defer the same
+// mistake until Meson configures the product.
+func TestLinuxGuiImageUsesNobleZxingPackage(t *testing.T) {
+	allDir := filepath.Dir(buildLinuxScript(t))
+	dockerfile, err := os.ReadFile(filepath.Join(allDir, "linux", "Dockerfile.gui"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(dockerfile)
+	if !strings.Contains(source, "FROM ubuntu:24.04") {
+		t.Fatal("Linux GUI image no longer targets Ubuntu Noble; review its package contract")
+	}
+	if strings.Contains(source, "libzxing-cpp-dev") {
+		t.Fatal("Linux GUI image uses nonexistent Noble package libzxing-cpp-dev")
+	}
+	if got := strings.Count(source, "\n        libzxing-dev \\\n"); got != 1 {
+		t.Fatalf("Linux GUI image libzxing-dev count = %d, want 1", got)
+	}
+
+	smokeTest, err := os.ReadFile(filepath.Join(allDir, "linux", "smoke-test.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(smokeTest), "check_pc zxing       zxing") {
+		t.Fatal("Linux GUI smoke test does not verify the zxing pkg-config module")
+	}
+}
