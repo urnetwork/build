@@ -1,0 +1,8 @@
+- Lock the corrected runtime455 precompile probe and history replay
+- Record runtime455 precompile qualification and retained failures
+- Gofmt runtime455 census diagnostic tests
+- Pin the reviewed runtime source census and diagnose archive fixture identity
+- Gofmt cumulative precompile probe qualification source
+- Regenerate precompile probe artifact for runtime455 mapping
+- Record deterministic precompile restore qualification evidence
+- Initialize the caught probe self-mapping status
