@@ -40,7 +40,7 @@ uploads it as a release artifact.
 
 Recommended VM: Parallels or VMware Fusion (good Windows-on-ARM support + host
 folder sharing) or UTM. Provision once with: VS 2022 (v143, "Desktop C++"),
-Windows 11 SDK, the WDK, WiX v5, vcpkg, and the code-signing cert/token
+Windows 11 SDK, the WDK, CMake, WiX v5, and the code-signing cert/token
 (signing stays on the VM, never leaves).
 
 ### Connection: macOS build script ↔ Windows VM

@@ -80,6 +80,10 @@ echo ">>> verifying the Windows guest has SDK Go $expected_go_version"
 win_assert_guest_go_version "$expected_go_version" \
   || win_die "Windows base image toolchain is stale"
 
+echo ">>> verifying the Windows guest has CMake for zxing-cpp"
+win_assert_guest_cmake \
+  || win_die "Windows base image toolchain is stale"
+
 echo ">>> syncing the build home ($BUILD_HOME) into the VM at $WIN_DIR"
 # rsync the build server's whole local tree (all repos, already on the correct
 # branches from run.sh) into the VM — no clone, no GitHub, no ssh key.

@@ -2,7 +2,7 @@
 # One-time setup + smoke test for the local QEMU ARM Windows build environment.
 # Drives an unattended Windows install with the device layout validated
 # interactively (ramfb + usb-bot CD-ROM + NVMe disk, all inbox — no driver
-# injection), provisions the MSI toolchain (MSVC ARM64+x64, WDK, WiX, git) into
+# injection), provisions the MSI toolchain (MSVC ARM64+x64, WDK, CMake, WiX, git) into
 # the image over ssh, then smoke-tests it. The repo source is rsync'd in per build
 # (build.sh win_sync_source), not baked into the image. Run once on the
 # Apple-Silicon build host before a release.
@@ -211,7 +211,7 @@ else
 
   # 2. provision the MSI toolchain into the image over ssh (needs the VM's network,
   #    which is up since ssh connected — NetKVM installed at first logon).
-  echo ">>> provisioning the toolchain (VS Build Tools + WDK + WiX + git + rsync; slow)"
+  echo ">>> provisioning the toolchain (VS Build Tools + WDK + CMake + WiX + git + rsync; slow)"
   stage_provision_scripts
   win_ssh "powershell -ExecutionPolicy Bypass -File C:/Windows/Temp/provision.ps1" \
     || win_die "provisioning failed — see output above"

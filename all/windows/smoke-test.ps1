@@ -15,6 +15,15 @@ try { $v = (git --version) 2>&1 | Select-Object -First 1; Ok 'git' $v } catch { 
 # WiX v5 (dotnet global tool) ------------------------------------------------
 try { $v = (wix --version) 2>&1 | Select-Object -First 1; Ok 'wix' $v } catch { Bad 'wix' 'wix not on PATH (dotnet tool)' }
 
+# CMake (VS component, exported on the machine PATH) -------------------------
+$cmake = Get-Command cmake -ErrorAction SilentlyContinue
+if ($cmake) {
+  $v = (& $cmake.Source --version) 2>&1 | Select-Object -First 1
+  if ($LASTEXITCODE -eq 0 -and $v -match '^cmake version ') {
+    Ok 'cmake' "$v ($($cmake.Source))"
+  } else { Bad 'cmake' "failed to run $($cmake.Source): $v" }
+} else { Bad 'cmake' 'cmake not on PATH (zxing-cpp source build requires it)' }
+
 # Go must match sdk/cgo/go.mod exactly. A stale image otherwise succeeds by
 # downloading another toolchain inside every disposable build overlay.
 $goExe = 'C:\go\bin\go.exe'
