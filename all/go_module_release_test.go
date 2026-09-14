@@ -210,12 +210,14 @@ eval "$1"
 eval "$2"
 eval "$3"
 eval "$4"
+eval "$5"
 go_mod_drop_require example.invalid/server
 go_mod_fork sim-testnet
 `
 	command := exec.Command(
 		"zsh", "-c", harness, "go-module-cycle-test",
 		runFunction(t, "go_mod_drop_require"),
+		runFunction(t, "go_mod_fork_rebase_parent_replaces"),
 		runFunction(t, "go_mod_fork_prepare"),
 		runFunction(t, "go_mod_fork_tidy"),
 		runFunction(t, "go_mod_fork"),
@@ -239,6 +241,121 @@ go_mod_fork sim-testnet
 	}
 	if strings.Contains(string(goMod), "example.invalid/server") {
 		t.Fatalf("published SN module retained the server edge:\n%s", goMod)
+	}
+}
+
+// The release fork moves go.mod into vNNNN. Parent-relative replacements that
+// correctly found sibling repositories before that move must climb one more
+// level afterward, while paths inside the module and module-version
+// replacements must not be rewritten.
+func TestGoModForkRebasesSurvivingParentReplacements(t *testing.T) {
+	outer := t.TempDir()
+	root := filepath.Join(outer, "server")
+	for _, directory := range []string{
+		root,
+		filepath.Join(root, "third_party", "local"),
+		filepath.Join(outer, "warp"),
+		filepath.Join(outer, "shared"),
+	} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(root, "go.mod"): `module example.invalid/server
+
+go 1.26.7
+
+require (
+	example.invalid/local v0.0.0
+	example.invalid/obsolete v0.0.0
+	example.invalid/shared v0.0.0
+	example.invalid/warp v0.0.0
+)
+
+replace example.invalid/local => ./third_party/local
+
+replace example.invalid/obsolete => ../obsolete
+
+replace example.invalid/shared v0.0.0 => ../shared
+
+replace example.invalid/versioned => example.invalid/versioned-fork v1.2.3
+
+replace example.invalid/warp => ../warp
+`,
+		filepath.Join(root, "server.go"): `package server
+
+import (
+	"example.invalid/local"
+	"example.invalid/shared"
+	"example.invalid/warp"
+)
+
+const Value = local.Value + shared.Value + warp.Value
+`,
+		filepath.Join(root, "third_party", "local", "go.mod"):   "module example.invalid/local\n\ngo 1.26.7\n",
+		filepath.Join(root, "third_party", "local", "local.go"): "package local\n\nconst Value = 1\n",
+		filepath.Join(outer, "warp", "go.mod"):                  "module example.invalid/warp\n\ngo 1.26.7\n",
+		filepath.Join(outer, "warp", "warp.go"):                 "package warp\n\nconst Value = 2\n",
+		filepath.Join(outer, "shared", "go.mod"):                "module example.invalid/shared\n\ngo 1.26.7\n",
+		filepath.Join(outer, "shared", "shared.go"):             "package shared\n\nconst Value = 3\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	harness := `
+set -eu
+GO_MOD_VERSION=2026
+BUILD_SED=true
+eval "$1"
+eval "$2"
+eval "$3"
+eval "$4"
+eval "$5"
+go_mod_drop_require example.invalid/obsolete
+go_mod_fork
+`
+	command := exec.Command(
+		"zsh", "-c", harness, "go-module-relative-replace-test",
+		runFunction(t, "go_mod_drop_require"),
+		runFunction(t, "go_mod_fork_rebase_parent_replaces"),
+		runFunction(t, "go_mod_fork_prepare"),
+		runFunction(t, "go_mod_fork_tidy"),
+		runFunction(t, "go_mod_fork"),
+	)
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("server module fork failed: %v\n%s", err, output)
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(root, "v2026", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDirectives := []string{
+		"replace example.invalid/local => ./third_party/local",
+		"replace example.invalid/shared v0.0.0 => ../../shared",
+		"replace example.invalid/versioned => example.invalid/versioned-fork v1.2.3",
+		"replace example.invalid/warp => ../../warp",
+	}
+	for _, directive := range wantDirectives {
+		if !strings.Contains(string(goMod), directive) {
+			t.Errorf("forked go.mod lacks %q:\n%s", directive, goMod)
+		}
+	}
+	if strings.Contains(string(goMod), "example.invalid/obsolete") {
+		t.Errorf("forked go.mod restored dropped dependency:\n%s", goMod)
+	}
+
+	testCommand := exec.Command("go", "test", "./...")
+	testCommand.Dir = filepath.Join(root, "v2026")
+	testCommand.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off")
+	if output, err := testCommand.CombinedOutput(); err != nil {
+		t.Fatalf("forked module does not resolve its replacements: %v\n%s", err, output)
 	}
 }
 
