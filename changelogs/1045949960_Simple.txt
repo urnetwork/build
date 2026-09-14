@@ -1,0 +1,6 @@
+- 2026.9.14-1045806490 restore android pin
+- Warpctl: retry transient rollout status samples
+- Record qualified history fix and remaining testnet precompile blocker
+- Lock approved descendant commitment replay correction
+- Preserve approved consumption scope during fleet history replay
+- Record finalized renewals and deterministic regression evidence in report 2
