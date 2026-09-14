@@ -99,37 +99,37 @@ needs only `rpm` (for the payload assertion) plus `checkpolicy` +
 `semodule-utils` (for the SELinux policy module the Fedora path requires),
 all three added to `Dockerfile.daemon`.
 
-**The `.rpm` is warn-and-continue**, unlike the other four names. `run.sh`'s
-own non-blocking wrapper is not enough on its own: its uploads live *inside*
-the `then` branch, so any non-zero exit from `build-linux.sh` skips every Linux
-asset — the SDK zip and the AppImage included. So the tolerance lives per
-artifact inside `build-arch.sh`, and the `.rpm` runs only after the `.deb` and
-the tarball are already on disk. `UR_REQUIRE_RPM=true` turns it back into a
-gate (which is what the linux repo's own CI runs with).
+**RPM and Arch packages are required by `run.sh`.** It unconditionally passes
+`UR_REQUIRE_RPM=true` and `UR_REQUIRE_ARCH_PKG=true` to the existing Linux builder.
+The standalone script's defaults remain unchanged, but a release must not continue
+with a missing or failed package. Run-level output checks also require nonempty
+artifacts for every selected role/architecture and the existing single Flatpak.
 
 ## run.sh flow (added after the macOS app build)
 
 Each platform's build lives in its own script — `all/build-windows.sh` and
-`all/build-linux.sh` — which run.sh calls non-blocking (a flaky desktop build
-warns and skips that platform's artifacts instead of sinking the release):
+`all/build-linux.sh` — which run.sh calls as required release gates. Failure stops
+the release, and output completeness is checked before platform publication:
 
 ```sh
 # all/build-windows.sh: cgo SDK DLLs (Go + llvm-mingw) + MSIs (x64+arm64), all
 #                       built in the local QEMU/HVF ARM Windows VM
-if OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"; then
-    github_release_upload "URnetworkSdkWindows-${V}.zip" ...
-    github_release_upload URnetwork-*.msi ...   # (then submit to the Store manually)
-fi
+OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"
+error_trap 'windows build'
+require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"
+error_trap 'required windows artifacts'
+# Upload the nonempty SDK zip and requested MSIs; Store submission remains manual.
 
 # all/build-linux.sh: cgo SDK zip (native macOS cross-build: zig)
-#                     + deb/install-tarball/rpm (Ubuntu 22.04 container)
+#                     + deb/install-tarball/rpm/arch (Ubuntu 22.04 container)
 #                     + AppImage (Ubuntu 24.04 container), both amd64+arm64
-if OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"; then
-    github_release_upload "URnetworkSdkLinux-${V}.zip" ...
-    github_release_upload urnetwork-daemon_*.deb, *.install.tar.gz,
-                          urnetwork-daemon-*.{x86_64,aarch64}.rpm,
-                          URnetwork-*.AppImage + .AppImage.zsync
-fi
+UR_REQUIRE_RPM=true UR_REQUIRE_ARCH_PKG=true \
+  OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
+error_trap 'linux build'
+# Build the existing single-architecture Flatpak, checking its exit status.
+require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"
+error_trap 'required linux artifacts'
+# Upload the nonempty SDK zip and complete selected artifact matrix.
 ```
 
 Both scripts use the local branches AS-IS (run.sh configures the `v<version>`

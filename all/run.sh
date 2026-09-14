@@ -23,8 +23,8 @@
 # The apple stages need a signing keychain that is unlocked *in this build's own
 # login session*: keychain unlock state is scoped to the audit session that ran
 # the unlock, so an unlock from any other ssh session is invisible here, CodeSign
-# fails with `errSecInternalComponent`, the ios/macos archives are skipped, and
-# the release then hard-fails uploading the missing .ipa. See REMOTEBUILD.md for
+# fails with `errSecInternalComponent`, and the required ios/macos build fails
+# the release immediately. See REMOTEBUILD.md for
 # the full analysis and the ranked options.
 # With BUILD_APPLE_IDENTITY set, this script creates a throwaway per-run build
 # keychain (REMOTEBUILD.md option 1): it imports ~/.identity.p12 (passphrase in
@@ -158,13 +158,84 @@ error_trap () {
     fi
 }
 
-warn_trap () {
-    code=$?
-    if [ $code != 0 ]; then
-        builder_message "warning($code): $1. Build will continue."
+# Require concrete nonempty outputs even when a component reports success.
+require_build_artifacts () {
+    if [ "$#" -eq 0 ]; then
+        builder_message "error: required build artifact set is empty"
+        return 1
     fi
+    local artifact
+    for artifact in "$@"; do
+        if [ ! -f "$artifact" ] || [ ! -s "$artifact" ]; then
+            builder_message "error: required build artifact is missing or empty: $artifact"
+            return 1
+        fi
+    done
 }
 
+# Mirror the existing Windows architecture plan, not a nullglob-derived subset.
+require_windows_artifacts () {
+    local output_directory="$1" version="$2" suffix
+    local -a suffixes
+    case "${WINDOWS_BUILD_ARCHITECTURES:-amd64,arm64}" in
+        amd64,arm64) suffixes=(x64 arm64) ;;
+        amd64) suffixes=(x64) ;;
+        arm64) suffixes=(arm64) ;;
+        *) builder_message "error: invalid Windows architecture plan"; return 2 ;;
+    esac
+    for suffix in "${suffixes[@]}"; do
+        require_build_artifacts "$output_directory/URnetwork-$version-$suffix.msi" || return $?
+    done
+}
+
+# Every selected Linux role/architecture and the existing single Flatpak are required.
+require_linux_artifacts () {
+    local output_directory="$1" version="$2" architecture package_arch role flatpak_arch
+    local -a architectures roles
+    architectures=(${=${ARCHES:-amd64 arm64}})
+    roles=(${=${ROLES:-daemon gui}})
+    if [ "${#architectures}" -eq 0 ] || [ "${#roles}" -eq 0 ]; then
+        builder_message "error: empty Linux build plan"
+        return 2
+    fi
+    for architecture in "${architectures[@]}"; do
+        case "$architecture" in
+            amd64) package_arch=x86_64 ;;
+            arm64) package_arch=aarch64 ;;
+            *) builder_message "error: invalid Linux architecture plan"; return 2 ;;
+        esac
+        for role in "${roles[@]}"; do
+            case "$role" in
+                daemon)
+                    require_build_artifacts \
+                        "$output_directory/urnetwork-daemon_${version}_${architecture}.deb" \
+                        "$output_directory/urnetwork-daemon-${version}-${architecture}.install.tar.gz" \
+                        "$output_directory/urnetwork-daemon-${version}.${package_arch}.rpm" \
+                        "$output_directory/urnetwork-daemon-${version}-${package_arch}.pkg.tar.zst" || return $?
+                    ;;
+                gui)
+                    require_build_artifacts \
+                        "$output_directory/URnetwork-${version}-${architecture}.AppImage" \
+                        "$output_directory/URnetwork-${version}-${architecture}.AppImage.zsync" || return $?
+                    ;;
+                *) builder_message "error: invalid Linux role plan"; return 2 ;;
+            esac
+        done
+    done
+    flatpak_arch="${ARCH:-}"
+    if [ -z "$flatpak_arch" ]; then
+        case "$(uname -m)" in
+            x86_64) flatpak_arch=amd64 ;;
+            aarch64|arm64) flatpak_arch=arm64 ;;
+            *) builder_message "error: unsupported Flatpak build host"; return 2 ;;
+        esac
+    fi
+    case "$flatpak_arch" in
+        amd64|arm64) ;;
+        *) builder_message "error: invalid Flatpak architecture plan"; return 2 ;;
+    esac
+    require_build_artifacts "$output_directory/URnetwork-${version}-${flatpak_arch}.flatpak"
+}
 
 export BUILD_HOME=`realpath ..`
 export BUILD_ENV=main
@@ -405,28 +476,25 @@ fi
 # This is release synchronization, not site compilation: doing it here makes
 # the generated source part of repository history before the web build consumes
 # it. GITHUB_API_KEY raises the GitHub API limit for the release walk. Keep the
-# generator strict so this runner can report a failed refresh, but do not lose a
-# release over GitHub's API limit: the generator writes only after completing
-# the walk, so its committed changelog.js + changelog-version.js remain a valid
-# stand-in on failure and the later web build can safely consume them.
+# generator strict: these attempted release inputs are required, and a failed
+# refresh must not be replaced by committed content in the later web build.
 builder_message "updating the generated ur.io changelog"
 (cd $WARP_HOME/mmm/ur.io &&
     CHANGELOG_STRICT=1 \
     GITHUB_TOKEN="$GITHUB_API_KEY" \
     node react/scripts/generate-changelog.mjs)
-warn_trap 'ur.io changelog update failed; using the committed changelog as a stand-in'
+error_trap 'ur.io changelog update'
 
 # The install page's desktop downloads: the newest complete GitHub release
 # (Windows MSI, Ubuntu daemon deb + AppImage) as of this run, i.e. the previous
-# release, since this run's own desktop bundles are attached later. Same
-# strictness and fallback as the changelog: the generator writes only on
-# success, so the committed releases.js remains a valid stand-in.
+# release, since this run's own desktop bundles are attached later. This
+# attempted refresh is required, just like the changelog generator.
 builder_message "updating the generated ur.io desktop releases"
 (cd $WARP_HOME/mmm/ur.io &&
     RELEASES_STRICT=1 \
     GITHUB_TOKEN="$GITHUB_API_KEY" \
     node react/scripts/generate-releases.mjs)
-warn_trap 'ur.io releases update failed; using the committed releases as a stand-in'
+error_trap 'ur.io releases update'
 
 # regenerate every app's strings from the shared localization store:
 # localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
@@ -795,12 +863,10 @@ error_trap 'android edit settings'
 # above the generated bullets (--lede); if it still holds the shipped placeholder
 # text the generator ignores it and says so on stderr.
 #
-# warn_trap, not error_trap: a changelog is not worth losing a release over. The
-# generator renders both artifacts in full before it opens either output file, so
-# a failure of any kind -- no python3, GitHub unreachable, a rate limit -- leaves
-# the tree untouched and the `-s` guard below falls back to exactly the old
-# behaviour. GITHUB_API_KEY is already exported above for the ur.io changelog and
-# raises the API limit here too; every repo walked is public, so it is optional.
+# The attempted generator and its requested release inputs are required. Failed
+# generation must not silently substitute pending.txt or earlier generated notes.
+# GITHUB_API_KEY is already exported above for the ur.io changelog and raises the
+# API limit here too; every repo walked is public, so that token is optional.
 #
 # THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
 # shows no changelog for this app at all today. fdroiddata's
@@ -835,6 +901,11 @@ export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP
 export BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
 export BUILD_NOTES_PREFIX="$WARP_VERSION_CODE"
 rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"
+error_trap 'clear generated changelog outputs'
+for note_output in Full.md Simple.txt Android.txt Apple.txt Windows.txt Linux.xml; do
+    rm -f "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_$note_output"
+    error_trap 'clear generated release note'
+done
 builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
 python3 "$BUILD_HOME/all/changelog.py" \
     --repo "$BUILD_HOME" \
@@ -845,11 +916,15 @@ python3 "$BUILD_HOME/all/changelog.py" \
     --notes-dir "$BUILD_NOTES_DIR" \
     --notes-prefix "$BUILD_NOTES_PREFIX" \
     --full-out "$BUILD_CHANGELOG_FULL"
-warn_trap 'generate changelog'
-if [ ! -s "$BUILD_CHANGELOG_STORE" ] && [ -e "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" ]; then
-    builder_message "warning: changelog generation produced no store note; falling back to metadata/en-US/changelogs/pending.txt. Build will continue."
-    cp "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" "$BUILD_CHANGELOG_STORE"
-fi
+error_trap 'generate changelog'
+require_build_artifacts "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Full.md" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Simple.txt" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Android.txt" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Apple.txt" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Windows.txt" \
+    "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml"
+error_trap 'generated changelog artifacts'
 if [ -s "$BUILD_CHANGELOG_STORE" ]; then
     # ${=...} so zsh word-splits the offset list; zsh does not split on
     # whitespace by default the way bash does.
@@ -857,10 +932,12 @@ if [ -s "$BUILD_CHANGELOG_STORE" ]; then
         cp \
             "$BUILD_CHANGELOG_STORE" \
             "$BUILD_HOME/metadata/en-US/changelogs/$((WARP_VERSION_CODE+changelog_offset)).txt"
+        error_trap 'stage versioned Android changelog'
     done
     cp \
         "$BUILD_CHANGELOG_STORE" \
         "$BUILD_HOME/metadata/en-US/changelogs/default.txt"
+    error_trap 'stage default Android changelog'
     # $( ) rather than backticks: this nests a command substitution inside a
     # double-quoted string that already contains backticks (the Slack code
     # fence), and backticks cannot nest there. `wc -m` counts CHARACTERS, which
@@ -895,9 +972,8 @@ fi
 # dropped in there would either overwrite the real en-US note or invent a locale
 # in the F-Droid index. changelogs/ is a sibling and is invisible to that glob.
 #
-# NO trap on this block. The generator already ran under warn_trap above; what
-# is left is cat/wc/cp over files it either produced or did not, and every one
-# of them is guarded. A missing note is reported and skipped.
+# The required generated notes were verified above. Stage each opted-in copy
+# with a checked status rather than reporting a failed copy as success.
 if [ -d "$BUILD_NOTES_DIR" ]; then
     for store_note in \
         "Android.txt:Play Console -> release notes (pasted by hand), 500 chars. The unattended F-Droid copy is under metadata/en-US/changelogs/" \
@@ -908,10 +984,8 @@ if [ -d "$BUILD_NOTES_DIR" ]; then
         # ${x%%:*} / ${x#*:} rather than `cut`: no subprocess, and the field is
         # a path that must not be word-split.
         store_note_path="$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_${store_note%%:*}"
-        if [ ! -s "$store_note_path" ]; then
-            builder_message "warning: no store note at ${store_note%%:*}. Build will continue."
-            continue
-        fi
+        require_build_artifacts "$store_note_path"
+        error_trap 'generated storefront note'
         builder_message "store note ${store_note%%:*} ($(wc -m < "$store_note_path" | tr -d ' ') chars) -- ${store_note#*:}:
 \`\`\`
 $(cat "$store_note_path")
@@ -938,6 +1012,7 @@ $(cat "$store_note_path")
     if [ -s "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml" ]; then
         if [ -e "$linux_release_description" ]; then
             cp "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml" "$linux_release_description"
+            error_trap 'stage Linux release description'
             builder_message "linux release description staged into app/packaging/release-description.xml"
         else
             builder_message "note: urnetwork/linux has no app/packaging/release-description.xml, so the generated AppStream release description was not staged there. It is in changelogs/${BUILD_NOTES_PREFIX}_Linux.xml in this repo, ready for whoever wires the meson side. Build will continue."
@@ -1427,6 +1502,8 @@ github_create_draft_release () {
 }
 
 github_release_upload () {
+    require_build_artifacts "$2"
+    error_trap "required github release artifact $1"
     virustotal "$1" "$2"
 
     # This transport preserves GitHub's response headers/message and retries
@@ -1754,7 +1831,13 @@ builder_message "extension \`${EXTENSION_VERSION}\` available - https://github.c
 #    ITMS-90048: This bundle is invalid - Your archive contains paths that are not allowed: [._Symbols]
 # see https://github.com/flutter/flutter/issues/166367
 bug_fix_clean_ipa () {
-    unzip -l "$1" | grep ._Symbols && zip -d "$1" ._Symbols/ || echo "No ._Symbols found. Nothing to clean up."
+    local entries
+    entries=$(unzip -Z1 "$1") || return $?
+    if printf '%s\n' "$entries" | grep -Eq '^\._Symbols(/|$)'; then
+        zip -d "$1" '._Symbols' '._Symbols/*' || return $?
+    else
+        echo "No ._Symbols found. Nothing to clean up."
+    fi
 }
 
 # Headless provisioning auth (REMOTEBUILD.md): hand -allowProvisioningUpdates the
@@ -1776,6 +1859,7 @@ done
 
 
 (cd $BUILD_HOME/apple/app &&
+    rm -f build/URnetwork.ipa &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=iOS &&
     $BUILD_HOME/sdk/build/check_apple_size.sh \
@@ -1783,41 +1867,28 @@ done
         --extension-sdk $BUILD_HOME/sdk/build/apple/URnetworkExtensionSdk.xcframework \
         --extension build.xcarchive/Products/Applications/URnetwork.app/PlugIns/URnetworkVPN.appex &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
+    require_build_artifacts build/URnetwork.ipa &&
     bug_fix_clean_ipa build/URnetwork.ipa &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-# failure to deploy to apple connect means we can't create an iOS release, but other platforms can still release
-# typically this is because we've already submitting a release for this build version
-warn_trap 'ios deploy'
+error_trap 'ios build and deploy'
 
-# the deploy above is allowed to soft-fail, so the .ipa may not exist (e.g. the
-# export could not sign); skip the dependent uploads instead of hard-failing them
-if [ -f "$BUILD_HOME/apple/app/build/URnetwork.ipa" ]; then
-    github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
-
-    builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
-else
-    builder_message "warning: no ios .ipa artifact (deploy soft-failed above); skipping its release upload. Build will continue."
-fi
+github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
+builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 (cd $BUILD_HOME/apple/app &&
+    rm -f build/URnetwork.pkg &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
+    require_build_artifacts build/URnetwork.pkg &&
     xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
-# failure to deploy to apple connect means we can't create an macOS release, but other platforms can still release
-# typically this is because we've already submitting a release for this build version
-warn_trap 'macos deploy'
+error_trap 'macos build and deploy'
 
-if [ -f "$BUILD_HOME/apple/app/build/URnetwork.pkg" ]; then
-    github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
-
-    builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
-else
-    builder_message "warning: no macos .pkg artifact (deploy soft-failed above); skipping its release upload. Build will continue."
-fi
+github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # =============================================================================
@@ -1861,6 +1932,8 @@ DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
 builder_message "building windows app (cgo sdk + MSI in the local QEMU ARM Windows VM)"
 OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"
 error_trap 'windows build'
+require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"
+error_trap 'required windows artifacts'
 github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
 for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
     github_release_upload "$(basename "$msi")" "$msi"
@@ -1868,7 +1941,7 @@ done
 builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 builder_message "building linux app (cgo sdk + deb/install-tarball/rpm/arch on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container; then Flatpak in its dependency-complete Linux container)"
-OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
+UR_REQUIRE_RPM=true UR_REQUIRE_ARCH_PKG=true OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
 error_trap 'linux build'
 github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
 
@@ -1895,14 +1968,15 @@ LINUX_DIR="$BUILD_HOME/linux" \
 OUT_DIR="$DESKTOP_OUT/linux" \
     bash "$BUILD_HOME/all/linux/build-flatpak.sh"
 error_trap 'flatpak build'
+require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"
+error_trap 'required linux artifacts'
 
 # Six artifact types per arch (names normative — linux/MIGRATION.md):
 # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
 # urnetwork-daemon-<v>.<rpmarch>.rpm, urnetwork-daemon-<v>-<pkgarch>.pkg.tar.zst,
 # URnetwork-<v>-<arch>.AppImage + .AppImage.zsync, and URnetwork-<v>-<arch>.flatpak
-# (one native architecture). (N) nullglobs each pattern so a missing optional
-# type uploads nothing rather than a literal '*' — which is what makes the
-# .rpm's warn-and-continue behaviour in build-linux.sh work at this level.
+# (one native architecture). Exact selected outputs are required above; (N)
+# avoids literal wildcard uploads without allowing missing types to succeed.
 #
 # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
 # appear here. The .sha256/.asc sidecars the packaging scripts write are
@@ -2071,7 +2145,7 @@ github_create_release
     github_release_upload \
         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
         "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" &&
-    github_create_release true
+    github_create_release true &&
     echo "[1/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
 )
 error_trap 'android github armeabi-v7a reproducible pre-release'
@@ -2082,8 +2156,8 @@ error_trap 'android github armeabi-v7a reproducible pre-release'
     github_create_draft_release true &&
     github_release_upload \
         "com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" \
-        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"
-    github_create_release true
+        "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${BASE_EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk" &&
+    github_create_release true &&
     echo "[2/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
 )
 error_trap 'android github arm64-v8a reproducible pre-release'

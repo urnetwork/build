@@ -5,6 +5,19 @@ checked by the script at startup; the two below are host setup it can't do for
 you. See `build/DESKTOP_BUILD.md` for architecture and `windows/README.md` +
 `linux/README.md` for the desktop builds.
 
+## Required release components
+
+Every enabled component and attempted release-input generator in `run.sh` is a
+release gate. iOS/macOS build, signing/export, validation, store upload, and GitHub
+upload failures stop the release; missing, empty, or stale Apple exports cannot
+stand in for a new build. Windows/Linux must produce all outputs for their existing
+selected architecture/role plans, including RPM, Arch packages, and the existing
+single-architecture Flatpak. Every GitHub artifact must be a nonempty regular file.
+
+Notifications and best-effort VirusTotal observations are not build components.
+`BUILD_TEST`, `CONNECT_IP_UPDATE`, and `WARP_SKIP_DEPLOY` keep their explicit
+opt-in/skip behavior; commented-out build targets remain disabled.
+
 ## Passwordless sudo (required when tests are enabled)
 
 When `BUILD_TEST` is set, `run.sh` brings up a local test environment
