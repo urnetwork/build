@@ -109,7 +109,6 @@ if [ "$BUILD_TEST" ]; then
     required_build_tools+=(
         cargo
         clang++
-        dotnet
         gem
         gobind
         gomobile
@@ -158,7 +157,7 @@ if [[ ! `go version` =~ 'go version go1.26.7' ]]; then
     echo 'go 1.26.7 required' >&2
     exit 1
 fi
-if [ "$NUGET_API_KEY" ]; then
+if [ "$NUGET_API_KEY" ] || [ "$BUILD_TEST" ]; then
     if ! go -C "$WARP_HOME/sdk/packaging" run . check-tools csharp; then
         echo "NuGet build tools are not ready. Run make -C \"$WARP_HOME/sdk/csharp\" init before starting the release." >&2
         exit 1
