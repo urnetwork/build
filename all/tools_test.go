@@ -18,14 +18,15 @@ func TestSDKBuildToolsPreflight(t *testing.T) {
 	}
 	preflight := componentRegion(t, "# Check the complete host toolchain", "\n\nbuilder_message ()")
 	for _, test := range []struct {
-		name, nuget, cargo, missing, dotnetFailure, want string
-		wantProbe                                        bool
+		name, nuget, cargo, buildTest, missing, dotnetFailure, want string
+		wantProbe                                                   bool
 	}{
-		{"registries skipped", "", "", "", "1", "preflight passed", false},
-		{"NuGet ready without dotnet on PATH", "test-token", "", "", "", "preflight passed", true},
-		{"NuGet SDK incompatible", "test-token", "", "", "1", "sdk/csharp\" init", true},
-		{"required tool absent", "test-token", "", "zig", "", "Missing required build tool(s)", false},
-		{"enabled Cargo absent", "", "test-token", "", "", "  - cargo", false},
+		{"registries skipped", "", "", "", "", "1", "preflight passed", false},
+		{"NuGet ready without dotnet on PATH", "test-token", "", "", "", "", "preflight passed", true},
+		{"NuGet SDK incompatible", "test-token", "", "", "", "1", "sdk/csharp\" init", true},
+		{"required tool absent", "test-token", "", "", "zig", "", "Missing required build tool(s)", false},
+		{"enabled Cargo absent", "", "test-token", "", "cargo", "", "  - cargo", false},
+		{"SDK smoke tool absent", "", "", "1", "cargo", "", "  - cargo", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "build host with spaces")
@@ -35,7 +36,7 @@ func TestSDKBuildToolsPreflight(t *testing.T) {
 			}
 			// Keep an independent inventory: omitting a newly required command from
 			// the fixture should fail the successful preflight tests.
-			for _, name := range strings.Fields("bash codesign curl docker ffprobe git go gsed hdiutil java jq make mktemp nc node npm npx openssl pandoc pip productbuild productsign python python3 qemu-img qemu-system-aarch64 realpath rsync scp sdkmanager security shasum ssh ssh-keygen tar timeout unzip xcodebuild xcrun zip zig") {
+			for _, name := range strings.Fields("bash cargo clang++ codesign curl docker ffprobe gem git go gobind gomobile gsed hdiutil install_name_tool java jq make mktemp mvn nc node npm npx openssl otool pandoc pip pkill productbuild productsign python python3 qemu-img qemu-system-aarch64 realpath rsync ruby scp sdkmanager security shasum ssh ssh-keygen sudo swift tar timeout unzip xcodebuild xcrun zip zig") {
 				if name == test.missing {
 					continue
 				}
@@ -65,7 +66,7 @@ esac
 			// Do not inherit publishing credentials or shell startup files.
 			cmd.Env = []string{
 				"PATH=" + bin, "WARP_HOME=" + dir, "NVM_DIR=" + dir,
-				"NUGET_API_KEY=" + test.nuget, "CARGO_REGISTRY_TOKEN=" + test.cargo,
+				"BUILD_TEST=" + test.buildTest, "NUGET_API_KEY=" + test.nuget, "CARGO_REGISTRY_TOKEN=" + test.cargo,
 				"SDK_TOOL_TEST_LOG=" + log, "SDK_TOOL_TEST_FAILURE=" + test.dotnetFailure,
 			}
 			b, err := cmd.CombinedOutput()
