@@ -108,7 +108,8 @@ if [ "$BUILD_TEST" ]; then
 fi
 
 # Optional package managers only require their tools when publication is enabled.
-if [ "$NUGET_API_KEY" ]; then required_build_tools+=(dotnet); fi
+# C# uses the shared SDK/version/architecture probe below; dotnet@8 is keg-only
+# on Homebrew and does not have to be on the shell's PATH.
 if [ "$CARGO_REGISTRY_TOKEN" ]; then required_build_tools+=(cargo); fi
 if [ "$GEM_HOST_API_KEY" ]; then required_build_tools+=(ruby gem); fi
 if [ "$MAVEN_CENTRAL_USERNAME" ] && [ "$MAVEN_CENTRAL_PASSWORD" ] && [ "$SDK_GPG_KEY_ID" ]; then
@@ -139,6 +140,12 @@ fi
 if [[ ! `go version` =~ 'go version go1.26.7' ]]; then
     echo 'go 1.26.7 required' >&2
     exit 1
+fi
+if [ "$NUGET_API_KEY" ]; then
+    if ! go -C "$WARP_HOME/sdk/packaging" run . check-tools csharp; then
+        echo "NuGet build tools are not ready. Run make -C \"$WARP_HOME/sdk/csharp\" init before starting the release." >&2
+        exit 1
+    fi
 fi
 if [[ ! `java -version 2>&1` =~ 'openjdk version "21.0.' ]]; then
     echo 'java 21.0.x required' >&2
