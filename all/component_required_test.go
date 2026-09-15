@@ -104,6 +104,13 @@ xcrun() {
 }
 node() { record_component_step generate; }
 python3() { record_component_step generate; }
+go() {
+    if [[ "$#" != 6 || "$1" != -C || "$2" != "$BUILD_HOME/sdk/packaging" || "$3" != run || "$4" != . || "$5" != release || "$6" != desktop ]]; then
+        printf 'unexpected-go\n' >> "$event_log"
+        return 41
+    fi
+    record_component_step sdk-package-stage
+}
 eval "$2"
 eval "$3"
 printf 'release-continued\n' >> "$event_log"
@@ -130,6 +137,13 @@ func runComponent(t *testing.T, source, setup string, overrides ...string) compo
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	functions := componentFunctions(t, "error_trap", "warn_trap", "require_build_artifacts", "require_windows_artifacts", "require_linux_artifacts", "github_release_upload")
+	if strings.Contains(source, "sdk_package_stage desktop") {
+		stage := componentFunctions(t, "sdk_package_stage")
+		if stage == "" {
+			t.Fatal("missing required production sdk_package_stage helper")
+		}
+		functions += stage
+	}
 	command := exec.CommandContext(ctx, "zsh", "-c", componentHarness, "component-test", fixture, functions+setup, source)
 	command.Env = environmentWith(append([]string{
 		"BUILD_HOME=" + fixture,
@@ -431,10 +445,17 @@ func TestRunDesktopSelectedPlansRemainSupported(t *testing.T) {
 // Required desktop components preserve failure status rather than publishing a partial release.
 func TestRunDesktopBuildAndPublicationFailuresAreFatal(t *testing.T) {
 	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
-	for _, step := range []string{"windows-build", "linux-build", "flatpak-build", "publish"} {
+	steps := []string{"windows-build", "linux-build", "flatpak-build", "publish"}
+	if strings.Contains(source, "sdk_package_stage desktop") {
+		steps = append(steps, "sdk-package-stage")
+	}
+	for _, step := range steps {
 		result := runComponent(t, source, completeDesktopSetup, "FAIL_STEP="+step)
 		if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
 			t.Fatalf("%s failure was masked: %+v", step, result)
+		}
+		if step == "sdk-package-stage" && (strings.Count(result.events, "sdk-package-stage\n") != 1 || strings.Contains(result.events, "flatpak-build\n") || strings.Count(result.events, "publish\n") != 4) {
+			t.Fatalf("package stage failure reached later desktop steps: %+v", result)
 		}
 	}
 }
@@ -442,8 +463,12 @@ func TestRunDesktopBuildAndPublicationFailuresAreFatal(t *testing.T) {
 // A complete release still publishes both desktop matrices, even if ambient strict knobs are false.
 func TestRunDesktopRequiredComponentsSucceedWithStrictPackaging(t *testing.T) {
 	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	stageCount := 0
+	if strings.Contains(source, "sdk_package_stage desktop") {
+		stageCount = 1
+	}
 	result := runComponent(t, source, completeDesktopSetup, "UR_REQUIRE_RPM=false", "UR_REQUIRE_ARCH_PKG=false")
-	if result.exitCode != 0 || strings.Count(result.events, "publish\n") != 17 || !strings.Contains(result.events, "release-continued") {
+	if result.exitCode != 0 || strings.Count(result.events, "sdk-package-stage\n") != stageCount || strings.Count(result.events, "publish\n") != 17 || !strings.Contains(result.events, "release-continued") {
 		t.Fatalf("complete desktop artifacts did not publish with strict packaging: %+v", result)
 	}
 }

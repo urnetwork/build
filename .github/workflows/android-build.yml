@@ -680,7 +680,9 @@ jobs:
             || { echo "::error::warp.version_code is '$have_code' but the aar was stamped for '$UR_APP_VERSION_CODE'"; fail=1; }
           # And the NDK the app pins must be the one this runner has, or AGP
           # fails with its own (much later) message.
-          grep -q "ndkVersion '${UR_ANDROID_NDK_VERSION}'" android/app/app/build.gradle \
+          # Literal Groovy method/assignment spellings, not a Gradle parser.
+          ndk_version_pattern="${UR_ANDROID_NDK_VERSION//./\\.}"
+          grep -Eq "^[[:space:]]*ndkVersion([[:space:]]+|[[:space:]]*=[[:space:]]*)(['\"])${ndk_version_pattern}\\2[[:space:]]*;?([[:space:]]*//.*)?[[:space:]]*$" android/app/app/build.gradle \
             || { echo "::error::android app/app/build.gradle no longer pins ndkVersion '${UR_ANDROID_NDK_VERSION}' — update UR_ANDROID_NDK_VERSION in this workflow"; fail=1; }
           ndk="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk/${UR_ANDROID_NDK_VERSION}"
           [ -d "$ndk" ] || { echo "::error::NDK ${UR_ANDROID_NDK_VERSION} is not installed at $ndk"; fail=1; }
