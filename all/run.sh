@@ -103,8 +103,25 @@ required_build_tools=(
     zig
 )
 if [ "$BUILD_TEST" ]; then
-    # Only the optional acceptance-test phase uses these host tools.
-    required_build_tools+=(lsof pkill sudo)
+    # The acceptance phase and the SDK variant smoke scripts use these host
+    # tools. Keep the checks here so a test build fails before the local test
+    # environment or any SDK package work starts.
+    required_build_tools+=(
+        cargo
+        clang++
+        dotnet
+        gem
+        gobind
+        gomobile
+        install_name_tool
+        lsof
+        mvn
+        otool
+        pkill
+        ruby
+        sudo
+        swift
+    )
 fi
 
 # Optional package managers only require their tools when publication is enabled.
@@ -686,6 +703,22 @@ if [ "$BUILD_TEST" ]; then
             error_trap "$m tests"
             builder_message "$m tests passed."
         fi
+    done
+
+    # SDK package variants live below the SDK checkout, so they are not found
+    # by the top-level repository test loop above. Run every checked-in variant
+    # entry point explicitly; each script performs its own native/package smoke
+    # and exits non-zero on a load or consumer failure.
+    sdk_test_platforms=(cgo js python ruby rust java kotlin swift csharp)
+    for sdk_platform in "${sdk_test_platforms[@]}"; do
+        sdk_test="$BUILD_HOME/sdk/$sdk_platform/test.sh"
+        if [[ ! -x "$sdk_test" ]]; then
+            builder_message "error: missing executable SDK test script: sdk/$sdk_platform/test.sh"
+            exit 1
+        fi
+        (cd "$BUILD_HOME/sdk/$sdk_platform" && ./test.sh)
+        error_trap "sdk/$sdk_platform tests"
+        builder_message "sdk/$sdk_platform tests passed."
     done
 
     # Tests done — stop the local environment and re-arm the apple identity
