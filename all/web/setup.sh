@@ -209,19 +209,27 @@ timeout 120 node -e '
   });
 '
 
-echo ">>> installing Playwright Chromium"
-(cd "$react" && timeout 1200 npx playwright install chromium)
-echo ">>> smoke-testing Playwright Chromium"
+echo ">>> installing locked Playwright Chromium and WebKit revisions"
+(cd "$react" && timeout 1200 ./node_modules/.bin/playwright install chromium webkit) ||
+  die "required Chromium/WebKit browser installation failed; web phone/tablet acceptance cannot be omitted"
+echo ">>> smoke-testing Playwright Chromium and iPad WebKit"
 (cd "$react" && timeout 120 node -e '
-  const { chromium } = require("playwright");
+  const { chromium, webkit, devices } = require("playwright");
   (async () => {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setContent("<title>URnetwork acceptance setup</title>");
-    if (await page.title() !== "URnetwork acceptance setup") process.exitCode = 1;
-    await browser.close();
+    for (const engine of [chromium, webkit]) {
+      const browser = await engine.launch({ headless: true });
+      try {
+        const options = engine === webkit ? devices["iPad (gen 7)"] : {};
+        const page = await browser.newPage(options);
+        await page.setContent("<meta name=viewport content=width=device-width><title>URnetwork acceptance setup</title>");
+        if (await page.title() !== "URnetwork acceptance setup") throw new Error("browser smoke page did not load");
+        if (engine === webkit && !(await page.evaluate(() =>
+          innerWidth === 810 && navigator.maxTouchPoints > 0 && /iPad/.test(navigator.userAgent)
+        ))) throw new Error("WebKit iPad emulation is unavailable");
+      } finally { await browser.close(); }
+    }
   })().catch((error) => { console.error(error); process.exit(1); });
-')
+') || die "required Chromium/WebKit smoke test failed; install the reported host libraries and rerun setup"
 
 tls_dir="$temporary_root/tls"
 mkdir -p "$tls_dir"
