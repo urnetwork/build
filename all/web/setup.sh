@@ -212,24 +212,9 @@ timeout 120 node -e '
 echo ">>> installing locked Playwright Chromium and WebKit revisions"
 (cd "$react" && timeout 1200 ./node_modules/.bin/playwright install chromium webkit) ||
   die "required Chromium/WebKit browser installation failed; web phone/tablet acceptance cannot be omitted"
-echo ">>> smoke-testing Playwright Chromium and iPad WebKit"
-(cd "$react" && timeout 120 node -e '
-  const { chromium, webkit, devices } = require("playwright");
-  (async () => {
-    for (const engine of [chromium, webkit]) {
-      const browser = await engine.launch({ headless: true });
-      try {
-        const options = engine === webkit ? devices["iPad (gen 7)"] : {};
-        const page = await browser.newPage(options);
-        await page.setContent("<meta name=viewport content=width=device-width><title>URnetwork acceptance setup</title>");
-        if (await page.title() !== "URnetwork acceptance setup") throw new Error("browser smoke page did not load");
-        if (engine === webkit && !(await page.evaluate(() =>
-          innerWidth === 810 && navigator.maxTouchPoints > 0 && /iPad/.test(navigator.userAgent)
-        ))) throw new Error("WebKit iPad emulation is unavailable");
-      } finally { await browser.close(); }
-    }
-  })().catch((error) => { console.error(error); process.exit(1); });
-') || die "required Chromium/WebKit smoke test failed; install the reported host libraries and rerun setup"
+echo ">>> smoke-testing Playwright desktop, phone and iPad geometry plus trusted touch"
+(cd "$react" && timeout 120 node tests/browser-surface-smoke.mjs) ||
+  die "required Chromium/WebKit surface smoke failed; inspect the device/touch diagnostics and rerun setup after repair"
 
 tls_dir="$temporary_root/tls"
 mkdir -p "$tls_dir"
