@@ -8,6 +8,8 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
+# (optional) BUILD_URIO_CHANGELOG=0 skips only the GitHub-API-backed ur.io
+#            changelog source refresh; unset or 1 runs the strict refresh
 # (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
 #            TWINE_PASSWORD/PYPI_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY,
 #            CARGO_REGISTRY_TOKEN, MAVEN_CENTRAL_USERNAME/PASSWORD plus
@@ -518,15 +520,19 @@ fi
 # Refresh the committed ur.io changelog sources while mmm is still on main.
 # This is release synchronization, not site compilation: doing it here makes
 # the generated source part of repository history before the web build consumes
-# it. GITHUB_API_KEY raises the GitHub API limit for the release walk. Keep the
-# generator strict: these attempted release inputs are required, and a failed
-# refresh must not be replaced by committed content in the later web build.
-builder_message "updating the generated ur.io changelog"
-(cd $WARP_HOME/mmm/ur.io &&
-    CHANGELOG_STRICT=1 \
-    GITHUB_TOKEN="$GITHUB_API_KEY" \
-    node react/scripts/generate-changelog.mjs)
-error_trap 'ur.io changelog update'
+# it. GITHUB_API_KEY raises the GitHub API limit for the release walk. The stage
+# remains strict and default-enabled; BUILD_URIO_CHANGELOG=0 is an explicit host
+# override for builds that must avoid this GitHub API walk.
+if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
+    builder_message "updating the generated ur.io changelog"
+    (cd $WARP_HOME/mmm/ur.io &&
+        CHANGELOG_STRICT=1 \
+        GITHUB_TOKEN="$GITHUB_API_KEY" \
+        node react/scripts/generate-changelog.mjs)
+    error_trap 'ur.io changelog update'
+else
+    builder_message "skipping the generated ur.io changelog update (BUILD_URIO_CHANGELOG disabled)"
+fi
 
 # The install page's desktop downloads: the newest complete GitHub release
 # (Windows MSI, Ubuntu daemon deb + AppImage) as of this run, i.e. the previous

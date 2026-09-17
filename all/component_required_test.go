@@ -245,7 +245,7 @@ func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
 // Every attempted generator is a gate; committed or pending content is not a failed-run stand-in.
 func TestRunReleaseInputGenerationFailuresAreFatal(t *testing.T) {
 	for _, source := range []string{
-		componentRegion(t, `builder_message "updating the generated ur.io changelog"`, "# The install page's desktop downloads:"),
+		componentRegion(t, `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then`, "# The install page's desktop downloads:"),
 		componentRegion(t, `builder_message "updating the generated ur.io desktop releases"`, "# regenerate every app's strings"),
 		componentRegion(t, `builder_message "generating the changelog for`, "# metadata -- THE OTHER THREE STOREFRONTS"),
 	} {
@@ -261,6 +261,33 @@ printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt
 			t.Fatalf("failed generated release input was treated as optional: %+v", result)
 		}
 	}
+}
+
+// The ur.io changelog API walk is strict by default and when explicitly enabled,
+// while the host override skips only that generator and lets the release continue.
+func TestRunUrioChangelogGate(t *testing.T) {
+	source := componentRegion(t, `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then`, "# The install page's desktop downloads:")
+	for _, testCase := range []struct {
+		name     string
+		override string
+	}{
+		{name: "default", override: "BUILD_URIO_CHANGELOG="},
+		{name: "enabled", override: "BUILD_URIO_CHANGELOG=1"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := runComponent(t, source, "", "FAIL_STEP=generate", testCase.override)
+			if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
+				t.Fatalf("failed ur.io changelog generator was masked: %+v", result)
+			}
+		})
+	}
+
+	t.Run("disabled", func(t *testing.T) {
+		result := runComponent(t, source, "", "FAIL_STEP=generate", "BUILD_URIO_CHANGELOG=0")
+		if result.exitCode != 0 || strings.Contains(result.events, "generate\n") || !strings.Contains(result.events, "release-continued") {
+			t.Fatalf("disabled ur.io changelog generator was invoked or stopped the release: %+v", result)
+		}
+	})
 }
 
 // A zero-exit generator must still produce all requested nonempty release metadata.
