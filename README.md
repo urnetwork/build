@@ -29,11 +29,10 @@ audiences with very different limits:
   and a link to each commit. Budgeted against GitHub's 125,000-character release
   body limit.
 
-`all/run.sh` generates both during a release. It runs under `warn_trap`: if the
-generator fails for any reason the release still completes and the store note
-falls back to `metadata/en-US/changelogs/pending.txt`, which is also where you can
-put a human-written headline for the next release -- it is placed above the
-generated bullets.
+`all/run.sh` generates both during a release. Generation is required when it is
+enabled; a failed generator or missing output fails the release. The file
+`metadata/en-US/changelogs/pending.txt` remains the place for a human-written
+headline for the next release -- it is placed above the generated bullets.
 
 The same text is written under the base version code and under each offset in
 `FDROID_VERSION_CODE_OFFSETS` (default `0 2 3`), plus `default.txt`. That is not
@@ -41,8 +40,11 @@ redundancy: fdroiddata's recipe declares `VercodeOperation: ['%c + 2', '%c + 3']
 for the ABI-split APKs and fdroidserver matches changelog files by exact
 filename, so a base-code-only file means F-Droid shows no changelog at all.
 
-Set `BUILD_RELEASE_BODY_CHANGELOG=` to publish releases without the full
-changelog in the body.
+Set `BUILD_URIO_CHANGELOG=0` to skip both this release-body/store-note generator
+and the ur.io website changelog refresh. This does not skip the ur.io desktop
+release metadata refresh. When generation remains enabled, set
+`BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full changelog from the GitHub
+release body while retaining the generated store notes.
 
 Run it by hand for any pair of releases -- it is deterministic, and it needs no
 token for these repos because they are all public:
