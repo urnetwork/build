@@ -41,6 +41,7 @@ type Config struct {
 	Signup            Signup            `yaml:"signup" json:"signup"`
 	Providers         Providers         `yaml:"providers" json:"providers"`
 	Wallets           Wallets           `yaml:"wallets" json:"wallets"`
+	Payments          Payments          `yaml:"payments" json:"payments"`
 }
 
 type Android struct {
@@ -114,6 +115,48 @@ type BittensorWallet struct {
 	Address    string `yaml:"address" json:"address"`
 	Mnemonic   string `yaml:"mnemonic" json:"mnemonic" secret:"true"`
 	SS58Prefix int    `yaml:"ss58_prefix" json:"ss58_prefix"`
+}
+
+// Payments configures the real-money acceptance cases: a USDC transfer on
+// Solana mainnet into the production merchant address, so the campaign proves
+// the path a paying customer actually takes rather than a synthetic webhook.
+//
+// Every field here is optional. An unconfigured section is the normal state
+// and means the payment cases report SKIP -- the same shape as
+// lifecycle.allow_account_create_delete, which also guards an action the suite
+// must never take by accident. Money is different from an account, though: an
+// account the suite creates it can also delete, and a transfer it broadcasts
+// is gone. So the guard is off by default and two ceilings bound the damage a
+// misconfiguration can do.
+type Payments struct {
+	// AllowRealUsdcSpend must be true before any transfer is built. While it
+	// is false the payer is never even constructed.
+	AllowRealUsdcSpend bool `yaml:"allow_real_usdc_spend" json:"allow_real_usdc_spend"`
+	// MaxSpendUsd caps a single payment.
+	MaxSpendUsd float64 `yaml:"max_spend_usd" json:"max_spend_usd"`
+	// MaxCampaignSpendUsd caps everything one campaign may spend. A runner
+	// that has spent this much refuses the next payment rather than
+	// continuing.
+	MaxCampaignSpendUsd float64 `yaml:"max_campaign_spend_usd" json:"max_campaign_spend_usd"`
+	// SolanaRpcUrl is the JSON-RPC endpoint the payer broadcasts through.
+	// The public mainnet endpoint rate-limits hard; use the Helius endpoint
+	// the server already reconciles against.
+	SolanaRpcUrl string `yaml:"solana_rpc_url" json:"solana_rpc_url" optional:"true" secret:"true"`
+	// Payer is the funded wallet. NEVER a production wallet: it should hold
+	// only what a campaign is allowed to spend, so that a bug costs that and
+	// nothing more.
+	Payer PayerWallet `yaml:"payer" json:"payer"`
+}
+
+type PayerWallet struct {
+	Address          string `yaml:"address" json:"address" optional:"true"`
+	PrivateKeyBase58 string `yaml:"private_key_base58" json:"private_key_base58" optional:"true" secret:"true"`
+}
+
+// Enabled reports whether the payment cases may spend. A section that is
+// enabled but incomplete is a configuration error, not a skip -- see Validate.
+func (p Payments) Enabled() bool {
+	return p.AllowRealUsdcSpend
 }
 
 func Load(path string) (*Config, error) {
@@ -232,6 +275,7 @@ func (c *Config) Validate(ready bool) error {
 	if c.Wallets.Bittensor.SS58Prefix < 0 || c.Wallets.Bittensor.SS58Prefix > 16383 {
 		problems = append(problems, "wallets.bittensor.ss58_prefix must be between 0 and 16383")
 	}
+	problems = append(problems, c.Payments.problems()...)
 	if ready {
 		for path, value := range c.StringValues() {
 			if strings.TrimSpace(value) == "" || strings.HasPrefix(value, "REPLACE_ME") {
@@ -264,6 +308,79 @@ func (c *Config) Validate(ready bool) error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// problems validates the payments section. An unconfigured section is silent:
+// not spending is the default and needs no ceremony. A section that is turned
+// ON, though, is checked hard and at every level, because each field is
+// something that -- wrong -- either loses money or lets the suite spend more
+// of it than anyone intended.
+//
+// This runs in both validation modes, not just ready. A machine that never
+// runs the payment cases should still be told its guard is half-set, rather
+// than discovering it mid-campaign.
+func (p Payments) problems() []string {
+	var problems []string
+
+	// The ceilings are meaningful even while the guard is off: they are what
+	// bounds the blast radius the moment someone turns it on.
+	if p.MaxSpendUsd < 0 {
+		problems = append(problems, "payments.max_spend_usd must not be negative")
+	}
+	if p.MaxCampaignSpendUsd < 0 {
+		problems = append(problems, "payments.max_campaign_spend_usd must not be negative")
+	}
+	if 0 < p.MaxSpendUsd && 0 < p.MaxCampaignSpendUsd && p.MaxCampaignSpendUsd < p.MaxSpendUsd {
+		problems = append(problems,
+			"payments.max_campaign_spend_usd must not be less than payments.max_spend_usd")
+	}
+
+	if !p.AllowRealUsdcSpend {
+		// Nothing else is required, but a half-configured section that looks
+		// armed is worth naming: someone filled in a funded wallet and
+		// expected it to be used.
+		if isConfiguredString(p.Payer.PrivateKeyBase58) && !isConfiguredString(p.Payer.Address) {
+			problems = append(problems,
+				"payments.payer.address must be set alongside payments.payer.private_key_base58")
+		}
+		return problems
+	}
+
+	if !isConfiguredString(p.SolanaRpcUrl) {
+		problems = append(problems,
+			"payments.solana_rpc_url is required when payments.allow_real_usdc_spend is true")
+	} else if !strings.HasPrefix(p.SolanaRpcUrl, "https://") {
+		// Broadcasting a signed transfer over plaintext is not acceptable
+		// even in a test.
+		problems = append(problems, "payments.solana_rpc_url must be an https url")
+	}
+	if !isConfiguredString(p.Payer.Address) {
+		problems = append(problems,
+			"payments.payer.address is required when payments.allow_real_usdc_spend is true")
+	}
+	if !isConfiguredString(p.Payer.PrivateKeyBase58) {
+		problems = append(problems,
+			"payments.payer.private_key_base58 is required when payments.allow_real_usdc_spend is true")
+	}
+	if isConfiguredString(p.Payer.Address) && isConfiguredString(p.Payer.PrivateKeyBase58) {
+		// Same check walletfixture makes for the signing wallet: prove the
+		// key belongs to the address before the suite is allowed to spend
+		// from it.
+		if _, err := walletfixture.NewSolana(p.Payer.Address, p.Payer.PrivateKeyBase58); err != nil {
+			problems = append(problems, "payments.payer: "+err.Error())
+		}
+	}
+	// A ceiling of zero with spending enabled would refuse every payment,
+	// which reads as a broken campaign rather than a deliberate one.
+	if p.MaxSpendUsd <= 0 {
+		problems = append(problems,
+			"payments.max_spend_usd must be greater than zero when payments.allow_real_usdc_spend is true")
+	}
+	if p.MaxCampaignSpendUsd <= 0 {
+		problems = append(problems,
+			"payments.max_campaign_spend_usd must be greater than zero when payments.allow_real_usdc_spend is true")
+	}
+	return problems
 }
 
 func validPrefix(value string, maxLength int) bool {
@@ -307,6 +424,13 @@ func collectStrings(value reflect.Value, typ reflect.Type, prefix string, values
 		fieldValue := value.Field(i)
 		switch fieldValue.Kind() {
 		case reflect.String:
+			// Validate(ready) requires every collected string to be set.
+			// Fields tagged optional are exempt: the payments section is
+			// unconfigured on every machine that is not running the
+			// real-money cases, and that is not a provisioning failure.
+			if field.Tag.Get("optional") == "true" {
+				continue
+			}
 			values[path] = fieldValue.String()
 		case reflect.Struct:
 			collectStrings(fieldValue, field.Type, path, values)
@@ -341,6 +465,10 @@ func (c *Config) Get(path string) (string, error) {
 		return strconv.FormatInt(value.Int(), 10), nil
 	case reflect.Bool:
 		return strconv.FormatBool(value.Bool()), nil
+	case reflect.Float64:
+		// Shell callers read the spend ceilings; 'f' with -1 precision keeps
+		// 25 as "25" and 12.5 as "12.5" rather than 1.25e+01.
+		return strconv.FormatFloat(value.Float(), 'f', -1, 64), nil
 	default:
 		return "", fmt.Errorf("config path %q is not a scalar", path)
 	}
