@@ -18,6 +18,15 @@ Notifications and best-effort VirusTotal observations are not build components.
 `BUILD_TEST`, `CONNECT_IP_UPDATE`, and `WARP_SKIP_DEPLOY` keep their explicit
 opt-in/skip behavior; commented-out build targets remain disabled.
 
+The extension consumes the exact localizations and JavaScript SDK versions
+published by the same release. Before editing its lockfile, `run.sh` uses a
+fresh npm cache to fetch and inspect each exact package tarball. Expected
+ETARGET/exact-tarball E404 propagation misses retry for at most 60 attempts at
+10-second intervals; authentication, transport, and other registry failures
+remain immediately fatal. The bounds can be changed for controlled testing via
+`NPM_PACKAGE_READY_MAX_ATTEMPTS` and
+`NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`.
+
 ## Passwordless sudo (required when tests are enabled)
 
 When `BUILD_TEST` is set, `run.sh` brings up a local test environment

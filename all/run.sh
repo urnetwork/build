@@ -17,6 +17,9 @@
 #            CONAN_LOGIN_USERNAME + CONAN_PASSWORD + SDK_CONAN_REMOTE_URL,
 #            SDK_VCPKG_GIT_TOKEN. A registry without credentials is skipped.
 #            See sdk/PACKAGEMANAGERS.md.
+# (optional) NPM_PACKAGE_READY_MAX_ATTEMPTS and
+#            NPM_PACKAGE_READY_RETRY_DELAY_SECONDS override the bounded exact
+#            package/tarball propagation wait (defaults: 60 attempts, 10s).
 # (optional) CONNECT_IP_UPDATE set (non-empty) to regenerate the connect IP
 #            tables (security + blocker) from the live feeds before the tests
 #            run, then push them to connect main (commit message stamped with
@@ -1556,14 +1559,18 @@ error_trap 'localizations edit'
 error_trap 'localizations push branch'
 
 
-# give npm a bit of time to ingest the latest packages before we link against them
-sleep 30
-
-
 (cd $BUILD_HOME/extension &&
     # No registry version was created when npm credentials were absent. Keep
     # the extension's existing registry pins in that case, so it can still build.
     if [ "$SDK_NPM_PUBLISH" = yes ]; then
+        # npm acknowledges a publish before registry metadata and its tarball
+        # are necessarily available. Prove both exact dependencies with fresh
+        # caches before npm install resolves the extension lock; the helper
+        # retries only the expected bounded ETARGET/E404 propagation window.
+        "$BUILD_HOME/all/npm-package-ready.zsh" \
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION" &&
+        "$BUILD_HOME/all/npm-package-ready.zsh" \
+            @urnetwork/sdk-js "$EXTERNAL_WARP_VERSION" &&
         npm_edit_module @urnetwork/localizations &&
         npm_edit_module @urnetwork/sdk-js || exit $?
     else
