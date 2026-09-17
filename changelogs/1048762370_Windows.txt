@@ -1,0 +1,25 @@
+- Regenerate string catalogs for the USDC chain wording
+- Notify pacing of Windows network quality changes
+- Make Windows acceptance build reproducible
+- Lower the Windows large-host bar to 7 GiB so every 8 GiB machine qualifies
+- Set the Windows large-host bar to more than 8 GiB
+- Raise the Windows large-host bar to 32 GiB
+- Give the Windows service a 256 MiB device target on hosts with 16 GiB or more
+- Take the Windows device target to 128 MiB inside a 384 MiB process budget
+- Size the Windows service device at the 64 MiB memory target
+- Pin the hide-to-tray sheet sweep and the sheet gate in the contract tests
+- Close every open sheet when the window hides to the tray
+- Regenerate the strings for the Seeker confirmation title
+- Upper-case chips and kickers with the user's linguistic casing
+- Match the Linux port on the card's menu label and an abandoned link
+- Tidy the Solana wallet surfaces after review
+- Title a Polygon payout wallet "Wallet"
+- Pin that a wallet sign-in clears an abandoned sso attempt
+- Keep a superseded wallet flow's late challenge off the bridge
+- Keep a Solana removal and a payout switch apart
+- Decide the Solana payout switch on a fresh read
+- Share one chart clip, and open the provider sheet on the pushed policy
+- Close the provider transport sheet when the window hides to the tray
+- Keep the provider statistics and the extender status across a hide
+- Commit the Solana payout wallet's three reads in the tested unit
+- Add the Solana connect sheet

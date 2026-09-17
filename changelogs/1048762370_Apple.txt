@@ -1,0 +1,69 @@
+- Regenerate the string catalog for the USDC chain wording
+- Notify pacing of Apple network quality changes
+- Lower the macOS large-host bar to 7 GiB so every 8 GiB Mac qualifies
+- Set the macOS large-host bar to more than 8 GiB
+- Raise the macOS large-host bar to 32 GiB
+- Give macOS a 256 MiB device target on hosts with 16 GiB or more
+- Take the macOS device target to 128 MiB inside a 384 MiB process budget
+- Raise the macOS device memory target to 64 MiB
+- Read the extender setting only while the role is supported
+- Earnings: the Solana sheet stays up while linking; one wallet removal at a time
+- Earnings: the USDC waiting line needs an amount and answered reads
+- Earnings: wallet links reach only their own flow; the payout connect keeps no wallet session
+- Earnings: wallet failures without a server message read as the sentence alone
+- Earnings: a wallet's key after its reported error still links; a failed payout read selects the wallet
+- MacOS: the open window handles urnetwork:// links
+- One gate for the provider statistics
+- Seed the provider statistics when the throughput store is set up
+- Test the Extender switch against the device
+- Give the read-only Extender row its button role
+- Extender statistics above the provider statistics on macOS
+- Extender row under the provide mode on macOS
+- Earnings: three-dot menu with Connect Solana wallet; the Solana wallet card
+- Earnings: the Solana wallet connect flow and sheet
+- Earnings: restore the Solana wallet data layer
+- Regenerate localized strings for the Solana wallet option
+- Regenerate localized strings for the extender start failure
+- Regenerate localized strings for the extender statistics section
+- Regenerate localized strings for the extender status row
+
+Under the hood
+- Expose carrier handoff memory telemetry
+- Expose network quality changes through SDK
+- Fix browser-safe WASM teardown
+- Expose peer subprotocol messaging to JavaScript
+- Serialize SDK package smoke checks
+- Expose explicit SDK smoke make targets
+- Run the Go SDK smoke without test caching
+- Add per-variant SDK smoke test entry points
+- Discover SDK test modules by active target
+- Log device RPC failures once per outage
+- Isolate CGO build output from package discovery
+- Restore SDK device NAT memory profiles
+- Keep generated Direct Sockets bindings current
+- Document and validate the Direct Sockets client API
+- Replace WebTransport bindings with direct sockets
+- Set up and validate the C# build toolchain with make init
+- Gofmt: reconcile device memory test
+- Stop the mobile receive cap from advertising less than the attached pool
+- Size the mobile memory policy from the target instead of gating on it
+- Add Device sockets, WebTransport, and language SDK packages
+- Reclaim under settled pool ownership and accept host trim levels
+- Notify a throughput series' presence change inside an idle window
+- Extender: make the provider extender tests prove the paths they name
+- Extender: arm the status watches before their goroutines start
+- Sdk: regenerate the cgo exports
+- Extender: tell an activation refusal from a failed request in the provide status
+- Extender: the extender throughput series in the contract view controller
+- Extender: the extender stats on the Device interface and over the rpc
+- Extender: keep the role-dependent push test in the desktop test file
+- Extender: close the provider extender test gaps
+- Extender: report the provider extender role unsupported on a missing method
+- Extender: guard the local provider extender setter on a hosted device
+- Extender: read the provider extender setting from its file once
+- Extender: queue the provider extender setting while the device is unreachable
+- Extender: a provider extender role that cannot start reports why
+- Extender: the provider extender status names its error case
+- Extender: the provider extender status and setting on the Device interface
+- Extender: the provider extender state rule, derived once in the sdk
+- Pace H1 delivery window bursts

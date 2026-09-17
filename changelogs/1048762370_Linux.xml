@@ -1,0 +1,41 @@
+        <ul>
+          <li>Regenerate string catalogs for the USDC chain wording</li>
+          <li>Notify pacing of Linux network quality changes</li>
+          <li>Lower the Linux daemon large-host bar to 7 GiB so every 8 GiB machine qualifies</li>
+          <li>Set the Linux daemon large-host bar to more than 8 GiB</li>
+          <li>Record why urnetworkd keeps a 16 GiB bar while the desktop apps take 32</li>
+          <li>Give the Linux daemon a 256 MiB device target on hosts with 16 GiB or more</li>
+          <li>Take the Linux device target to 128 MiB inside a 384 MiB process budget</li>
+          <li>Size the Linux daemon device at the 64 MiB memory target</li>
+          <li>Regenerate localized strings for the Seeker confirmation title</li>
+          <li>Open the remove confirmation in the preview and label its item Remove wallet</li>
+          <li>Title a legacy Polygon payout wallet "Wallet"</li>
+          <li>Name the wallet overflow on the button that takes focus</li>
+          <li>List the Solana wallet sheet in POTFILES.in</li>
+          <li>Show address verdicts in their state colour on note and key lines</li>
+          <li>Decide the payout switch on a fresh read and hold the sheet during writes</li>
+          <li>Keep manual entry live while the wallet browser is out</li>
+        </ul>
+        <!-- Shared with the other URnetwork apps. To publish a note about the Linux app alone, delete from here to the end comment below. -->
+        <p>Under the hood</p>
+        <ul>
+          <li>Expose carrier handoff memory telemetry</li>
+          <li>Expose network quality changes through SDK</li>
+          <li>Fix browser-safe WASM teardown</li>
+          <li>Expose peer subprotocol messaging to JavaScript</li>
+          <li>Serialize SDK package smoke checks</li>
+          <li>Expose explicit SDK smoke make targets</li>
+          <li>Run the Go SDK smoke without test caching</li>
+          <li>Add per-variant SDK smoke test entry points</li>
+          <li>Discover SDK test modules by active target</li>
+          <li>Log device RPC failures once per outage</li>
+          <li>Isolate CGO build output from package discovery</li>
+          <li>Restore SDK device NAT memory profiles</li>
+          <li>Keep generated Direct Sockets bindings current</li>
+          <li>Document and validate the Direct Sockets client API</li>
+          <li>Replace WebTransport bindings with direct sockets</li>
+          <li>Set up and validate the C# build toolchain with make init</li>
+          <li>Gofmt: reconcile device memory test</li>
+          <li>Stop the mobile receive cap from advertising less than the attached pool</li>
+        </ul>
+        <!-- end of the shared section -->
