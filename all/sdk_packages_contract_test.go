@@ -46,4 +46,10 @@ func TestSDKMissingNpmCredentialsKeepResolvableExtensionDependencies(t *testing.
 	if !strings.Contains(s, `error_trap 'npm SDK publishing credential check'`) {
 		t.Fatal("credential probe errors must not become missing-credential skips")
 	}
+	if !strings.Contains(s, `npm_edit_module @urnetwork/sdk`) {
+		t.Fatal("extension release dependency must use the canonical npm SDK package")
+	}
+	if strings.Contains(s, `npm_edit_module @urnetwork/sdk-js`) {
+		t.Fatal("extension release dependency still uses the legacy npm SDK alias")
+	}
 }

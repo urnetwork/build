@@ -31,14 +31,14 @@ name: Extension build + test (Chrome + Firefox)
 #     toolchain over the same node_modules — `npm run build` and
 #     `npm run build:firefox` (extension/package.json:12 and :20, both driven
 #     by the Makefile's `build` target). Splitting them across two runners
-#     would pay for a second ~1 min `npm ci` and a second 17.9 MB sdk-js
-#     download to save a couple of minutes of vite.
+#     would pay for a second ~1 min `npm ci` and a second SDK download to save
+#     a couple of minutes of vite.
 #
 #   * THERE IS NO GO SDK TO BUILD. Unlike every other platform in this repo,
 #     the extension does not consume a locally built SDK. It depends on the
-#     PUBLISHED `@urnetwork/sdk-js` npm package (extension/package.json:27),
+#     PUBLISHED `@urnetwork/sdk` npm package (extension/package.json:27),
 #     wasm included: extension/vite.config.ts:115-120 copies
-#     `node_modules/@urnetwork/sdk-js/wasm/*` into the bundle, and
+#     `node_modules/@urnetwork/sdk/wasm/*` into the bundle, and
 #     package-lock.json resolves that dependency to a registry.npmjs.org
 #     tarball with an integrity hash. So this leg needs no Go toolchain, no
 #     gomobile, and not the 253 MB `sdk` submodule — which is why it is the
@@ -150,7 +150,7 @@ jobs:
   build-test:
     name: Build + test the extension
     runs-on: ubuntu-24.04
-    # Generous against a cold npm cache and the 17.9 MB sdk-js tarball; the
+    # Generous against a cold npm cache and the SDK tarball; the
     # job itself is ~6-8 min.
     timeout-minutes: 30
     env:
@@ -281,7 +281,7 @@ jobs:
             # manifest.config.ts declares wasm/sdk.wasm as a web-accessible
             # resource; a bundle without it loads and then cannot connect.
             if ! unzip -l "$zipname" | grep -q 'wasm/sdk.wasm'; then
-              echo "::error::$zipname is missing wasm/sdk.wasm — the @urnetwork/sdk-js static copy did not run"
+              echo "::error::$zipname is missing wasm/sdk.wasm — the @urnetwork/sdk static copy did not run"
               fail=1
             fi
           done

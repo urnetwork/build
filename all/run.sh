@@ -1577,7 +1577,7 @@ error_trap 'localizations push branch'
         "$BUILD_HOME/all/npm-package-ready.zsh" \
             @urnetwork/sdk-js "$EXTERNAL_WARP_VERSION" &&
         npm_edit_module @urnetwork/localizations &&
-        npm_edit_module @urnetwork/sdk-js || exit $?
+        npm_edit_module @urnetwork/sdk || exit $?
     else
         builder_message "npm publication skipped; extension retains its current registry dependencies"
     fi &&
