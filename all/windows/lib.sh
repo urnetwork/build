@@ -131,6 +131,64 @@ win_sdk_go_version() {
   printf '%s\n' "$version"
 }
 
+# Fingerprint every source-controlled input that defines whether a reusable
+# image has the complete toolchain expected by setup's smoke test.
+win_provision_contract_fingerprint() {
+  local expected_go_version="$1" relative filename source_digest manifest=""
+  for relative in \
+    disable-auto-servicing.ps1 \
+    packer/scripts/provision.ps1 \
+    smoke-test.ps1; do
+    filename="$WIN_HERE/$relative"
+    [ -f "$filename" ] || {
+      echo "Windows provisioning contract input is missing: $filename" >&2
+      return 1
+    }
+    source_digest="$(shasum -a 256 "$filename" | awk '{print $1}')" || return
+    manifest="${manifest}${relative}=${source_digest}"$'\n'
+  done
+  manifest="${manifest}sdk-go=${expected_go_version}"$'\n'
+  printf '%s' "$manifest" | shasum -a 256 | awk '{print $1}'
+}
+
+# Locate the private sidecar paired with the reusable base image.
+win_image_provision_contract_path() {
+  [ -n "${IMAGE:-}" ] || {
+    echo "Windows image path is unset" >&2
+    return 1
+  }
+  printf '%s.provision.sha256\n' "$IMAGE"
+}
+
+# Accept a reusable image only when its last successful provisioning used the
+# exact current contract fingerprint.
+win_image_provision_contract_matches() {
+  local expected_fingerprint="$1" marker actual_fingerprint
+  marker="$(win_image_provision_contract_path)" || return
+  [ -f "$IMAGE" ] && [ -f "$marker" ] || return 1
+  actual_fingerprint="$(cat "$marker")" || return
+  [ "$actual_fingerprint" = "$expected_fingerprint" ]
+}
+
+# Publish the contract only after provisioning, durable base-image shutdown,
+# and the subsequent smoke test all succeed; an interrupted update stays stale.
+win_record_image_provision_contract() {
+  local fingerprint="$1" marker temporary_marker
+  [ -f "$IMAGE" ] || {
+    echo "cannot record provisioning contract for missing image: $IMAGE" >&2
+    return 1
+  }
+  marker="$(win_image_provision_contract_path)" || return
+  temporary_marker="${marker}.tmp.$$"
+  if ! (umask 077 && printf '%s\n' "$fingerprint" >"$temporary_marker"); then
+    return 1
+  fi
+  if ! mv -f "$temporary_marker" "$marker"; then
+    rm -f "$temporary_marker"
+    return 1
+  fi
+}
+
 # Validate a running guest before the expensive source sync/build. A mismatch
 # is a provisioning error, not permission to fetch a second toolchain through
 # the guest's comparatively fragile QEMU network path.

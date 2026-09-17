@@ -45,8 +45,9 @@ Required (unless --skip-build reuses an existing image):
   --virtio-iso PATH    virtio-win.iso (only the NetKVM NIC driver is used)
 
 Options:
-  --ensure             reuse and smoke-test an existing image, or build it from
-                       WINDOWS_ISO and VIRTIO_ISO when it is missing
+  --ensure             reuse and smoke-test a current image; re-provision an
+                       image whose toolchain contract is missing/stale, or build
+                       it from WINDOWS_ISO and VIRTIO_ISO when it is missing
   --skip-build         reuse the existing image; only run the smoke test
   --reprovision        reuse the installed image, re-run provisioning (no OS
                        reinstall) then smoke-test — for iterating on provision.ps1
@@ -175,10 +176,23 @@ win_ensure_ssh_key
 trap win_shutdown_vm EXIT   # tear the VM down on any exit (idempotent)
 
 # --- build the image ---------------------------------------------------------
+provision_contract_fingerprint="$(win_provision_contract_fingerprint "$expected_go_version")" \
+  || win_die "cannot fingerprint the Windows image provisioning contract"
+image_provision_contract_path="$(win_image_provision_contract_path)" \
+  || win_die "cannot locate the Windows image provisioning marker"
+publish_provision_contract=""
+if [ -n "$ENSURE" ] && [ -f "$IMAGE" ] &&
+   ! win_image_provision_contract_matches "$provision_contract_fingerprint"; then
+  echo ">>> existing image has a missing or stale provisioning contract; re-provisioning it"
+  REPROVISION=1
+fi
+
 if [ -n "$REPROVISION" ]; then
   # Re-run provisioning on an already-installed image (no OS reinstall). The
   # provision script is idempotent, so this is safe to repeat while iterating.
   [ -f "$IMAGE" ] || win_die "no image to reprovision ($IMAGE) — run without --reprovision to build it first"
+  rm -f "$image_provision_contract_path"
+  publish_provision_contract=1
   echo ">>> re-provisioning the existing image in place (watch: open vnc://127.0.0.1:5901  pw 'windows')"
   win_boot_image_rw
   # 90 min: this boots the BASE image, which — unlike a hermetic post-provision
@@ -204,6 +218,8 @@ else
   # cost the operator the image they already had.
   check_windows_iso "$WINDOWS_ISO"
   [ -n "$FORCE" ] && rm -f "$IMAGE"
+  rm -f "$image_provision_contract_path"
+  publish_provision_contract=1
 
   # 1. unattended Windows install (leaves the VM running).
   win_install_image "$WINDOWS_ISO" "$VIRTIO_ISO" \
@@ -242,7 +258,12 @@ if [ -n "$KEEP_UP" ]; then
 fi
 
 if [ "$smoke_rc" -eq 0 ]; then
+  if [ -n "$publish_provision_contract" ]; then
+    win_record_image_provision_contract "$provision_contract_fingerprint" \
+      || win_die "could not record the smoke-verified image contract"
+  fi
   echo ">>> SMOKE TEST PASSED — the Windows build environment is ready for build.sh."
 else
+  rm -f "$image_provision_contract_path"
   win_die "SMOKE TEST FAILED (rc=$smoke_rc) — see the output above."
 fi

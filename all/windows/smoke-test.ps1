@@ -34,6 +34,17 @@ if (Test-Path $goExe) {
   else { Bad 'go' "expected '$expectedGo', got '$actualGo'" }
 } else { Bad 'go' "missing $goExe; expected '$expectedGo'" }
 
+# llvm-mingw target wrappers used by windows/build-sdk.ps1 for both SDK DLLs --
+foreach ($compiler in @('x86_64-w64-mingw32-clang', 'aarch64-w64-mingw32-clang')) {
+  $clang = Get-Command $compiler -ErrorAction SilentlyContinue
+  if ($clang) {
+    $v = (& $clang.Source --version) 2>&1 | Select-Object -First 1
+    if ($LASTEXITCODE -eq 0 -and $v -match '^clang version ') {
+      Ok $compiler "$v ($($clang.Source))"
+    } else { Bad $compiler "failed to run $($clang.Source): $v" }
+  } else { Bad $compiler "$compiler not on PATH (cgo SDK build requires it)" }
+}
+
 # Visual Studio + MSVC cross toolsets (ARM64 native + x64 cross) via vswhere --
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (Test-Path $vswhere) {

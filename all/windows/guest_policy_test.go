@@ -176,6 +176,163 @@ func TestProvisioningInstallsAndExportsCMake(t *testing.T) {
 	}
 }
 
+// Every provisioned cgo compiler required by the release script must be
+// executable during image smoke testing, before a release build can start.
+func TestWindowsImageSmokeCoversSdkCompilers(t *testing.T) {
+	provision := readBuildFile(t, "packer/scripts/provision.ps1")
+	smoke := readBuildFile(t, "smoke-test.ps1")
+	buildSdk, err := os.ReadFile(filepath.Join(windowsBuildRoot(t), "..", "..", "..", "windows", "build-sdk.ps1"))
+	if err != nil {
+		t.Fatalf("read Windows SDK build script: %v", err)
+	}
+	for _, compiler := range []string{
+		"x86_64-w64-mingw32-clang",
+		"aarch64-w64-mingw32-clang",
+	} {
+		if !strings.Contains(string(buildSdk), compiler) {
+			t.Errorf("Windows SDK build does not expose expected compiler %q", compiler)
+		}
+		if !strings.Contains(smoke, compiler) {
+			t.Errorf("Windows image smoke test does not verify required compiler %q", compiler)
+		}
+	}
+	for _, required := range []string{
+		`$llvmDir = "C:\llvm-mingw"`,
+		`Test-Path "$llvmDir\bin\clang.exe"`,
+		`$env:PATH = "$goRoot\bin;$llvmDir\bin;$env:PATH"`,
+	} {
+		if !strings.Contains(provision, required) {
+			t.Errorf("Windows provisioning is missing compiler contract %q", required)
+		}
+	}
+	for _, required := range []string{
+		`Get-Command $compiler -ErrorAction SilentlyContinue`,
+		`& $clang.Source --version`,
+		`$v -match '^clang version '`,
+		`$compiler not on PATH (cgo SDK build requires it)`,
+	} {
+		if !strings.Contains(smoke, required) {
+			t.Errorf("Windows image smoke test is missing compiler check %q", required)
+		}
+	}
+}
+
+// A reusable image is current only for the exact provisioning, guest-policy,
+// smoke-test, and SDK Go-version contract that produced its sidecar marker.
+func TestImageProvisionContractRejectsMissingAndChangedInputs(t *testing.T) {
+	root := windowsBuildRoot(t)
+	contractRoot := t.TempDir()
+	for relative, content := range map[string]string{
+		"disable-auto-servicing.ps1":   "synthetic guest policy\n",
+		"packer/scripts/provision.ps1": "synthetic provisioning\n",
+		"smoke-test.ps1":               "synthetic smoke contract\n",
+	} {
+		filename := filepath.Join(contractRoot, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(filename), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	image := filepath.Join(contractRoot, "windows.qcow2")
+	if err := os.WriteFile(image, []byte("synthetic image\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `
+set -euo pipefail
+source "$1"
+WIN_HERE="$2"
+IMAGE="$3"
+
+fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+if win_image_provision_contract_matches "$fingerprint"; then
+  echo "missing marker was accepted" >&2
+  exit 10
+fi
+win_record_image_provision_contract "$fingerprint"
+win_image_provision_contract_matches "$fingerprint"
+
+for relative in disable-auto-servicing.ps1 packer/scripts/provision.ps1 smoke-test.ps1; do
+  fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+  win_record_image_provision_contract "$fingerprint"
+  printf 'changed\n' >>"$WIN_HERE/$relative"
+  changed_fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+  [ "$fingerprint" != "$changed_fingerprint" ]
+  if win_image_provision_contract_matches "$changed_fingerprint"; then
+    echo "changed $relative was accepted" >&2
+    exit 11
+  fi
+done
+
+fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+win_record_image_provision_contract "$fingerprint"
+changed_go_fingerprint="$(win_provision_contract_fingerprint 1.26.6)"
+[ "$fingerprint" != "$changed_go_fingerprint" ]
+if win_image_provision_contract_matches "$changed_go_fingerprint"; then
+  echo "changed SDK Go version was accepted" >&2
+  exit 12
+fi
+`
+	command := exec.Command("bash", "-c", script, "image-provision-contract-test",
+		filepath.Join(root, "lib.sh"), contractRoot, image)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("image provision contract: %v\n%s", err, output)
+	}
+}
+
+// The canonical ensure path repairs an existing image whose marker is absent
+// or stale, and publishes a replacement only after its smoke test succeeds.
+func TestEnsureReprovisionsStaleImageContract(t *testing.T) {
+	setup := readBuildFile(t, "setup.sh")
+	for _, required := range []string{
+		`provision_contract_fingerprint="$(win_provision_contract_fingerprint "$expected_go_version")"`,
+		`if [ -n "$ENSURE" ] && [ -f "$IMAGE" ] &&`,
+		`! win_image_provision_contract_matches "$provision_contract_fingerprint"; then`,
+		`REPROVISION=1`,
+		`publish_provision_contract=1`,
+	} {
+		if !strings.Contains(setup, required) {
+			t.Errorf("Windows --ensure provisioning contract is missing %q", required)
+		}
+	}
+	contractCheck := strings.Index(setup, `! win_image_provision_contract_matches "$provision_contract_fingerprint"; then`)
+	reprovisionBranch := strings.Index(setup, `if [ -n "$REPROVISION" ]; then`)
+	reuseBranch := strings.Index(setup, `elif { [ -n "$SKIP_BUILD" ] || [ -n "$ENSURE" ]; } && [ -f "$IMAGE" ]; then`)
+	smokeSection := strings.Index(setup, `# --- smoke test`)
+	if contractCheck < 0 || reprovisionBranch < 0 || reuseBranch < 0 || smokeSection < 0 ||
+		!(contractCheck < reprovisionBranch && reprovisionBranch < reuseBranch && reuseBranch < smokeSection) {
+		t.Fatalf("stale-image selection must precede the reprovision branch: check=%d branch=%d", contractCheck, reprovisionBranch)
+	}
+	if count := strings.Count(setup, `publish_provision_contract=1`); count != 2 {
+		t.Fatalf("reprovision and fresh install must each arm contract publication, found %d sites", count)
+	}
+	reprovisionArm := strings.Index(setup, `publish_provision_contract=1`)
+	freshArm := strings.LastIndex(setup, `publish_provision_contract=1`)
+	if !(reprovisionBranch < reprovisionArm && reprovisionArm < reuseBranch && reuseBranch < freshArm && freshArm < smokeSection) {
+		t.Fatalf("only repair paths may arm contract publication: reprovision=%d first=%d reuse=%d second=%d smoke=%d",
+			reprovisionBranch, reprovisionArm, reuseBranch, freshArm, smokeSection)
+	}
+	if count := strings.Count(setup, `rm -f "$image_provision_contract_path"`); count != 3 {
+		t.Fatalf("repair paths and terminal smoke failure must invalidate the old contract, found %d sites", count)
+	}
+	smokeSuccess := strings.Index(setup, `if [ "$smoke_rc" -eq 0 ]; then`)
+	recordContract := strings.Index(setup, `win_record_image_provision_contract "$provision_contract_fingerprint"`)
+	if smokeSuccess < 0 || recordContract < 0 || recordContract < smokeSuccess {
+		t.Fatalf("contract publication must follow smoke success: smoke=%d record=%d", smokeSuccess, recordContract)
+	}
+	if count := strings.Count(setup, `win_record_image_provision_contract "$provision_contract_fingerprint"`); count != 1 {
+		t.Fatalf("only terminal smoke success may record the image contract, found %d record sites", count)
+	}
+	smokeFailure := strings.Index(setup, `else
+  rm -f "$image_provision_contract_path"
+  win_die "SMOKE TEST FAILED`)
+	if smokeFailure < smokeSuccess {
+		t.Fatalf("terminal smoke failure must invalidate the image contract: success=%d failure=%d", smokeSuccess, smokeFailure)
+	}
+}
+
 func TestProvisioningRetriesTransientGoToolchainRemoval(t *testing.T) {
 	provision := readBuildFile(t, "packer/scripts/provision.ps1")
 	for _, required := range []string{

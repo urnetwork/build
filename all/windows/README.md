@@ -92,7 +92,7 @@ explicitly, so they're unaffected.
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
 | `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), enforce the hermetic guest policy, **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
 | `disable-auto-servicing.ps1` | shared provisioning/runtime guard: blocks Windows Update sources and verifies `UsoSvc` + `wuauserv` are disabled and stopped before a build starts |
-| `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, CMake, WiX, git, **rsync + the `cmd` ssh shell** |
+| `smoke-test.ps1` | run in the VM by `setup.sh`: checks MSVC (ARM64+x64), Windows SDK, WDK, CMake, Go, llvm-mingw (amd64+arm64), WiX, git, **rsync + the `cmd` ssh shell** |
 | `packer/http/Autounattend.pkrtpl.xml` | unattended install; bakes the stable ssh key, sets locale, enables OpenSSH, installs NetKVM at first logon |
 | `packer/scripts/provision.ps1` | installs VS Build Tools (ARM64+x64, including CMake) + WDK + WiX + git + a pinned cwRsync; sets the `cmd` ssh shell |
 
@@ -111,12 +111,19 @@ brew install qemu
   --windows-iso ~/isos/Win11_24H2_English_Arm64.iso \
   --virtio-iso  ~/isos/virtio-win.iso
 # re-run just the smoke test on an existing image:   ./setup.sh --skip-build
+# reuse a current image or repair a stale one:       ./setup.sh --ensure
 # re-provision without reinstalling Windows:         ./setup.sh --reprovision
 # leave the VM up to debug over ssh:                 ./setup.sh --skip-build --keep-up
 ```
 
 `setup.sh` and `build.sh` share `lib.sh`, so a green smoke test means `build.sh`
 boots the same working VM.
+
+`--ensure` pairs the reusable image with a private provisioning fingerprint of
+the guest policy, provisioning script, smoke contract, and SDK Go version. It
+reuses a matching image, but automatically re-provisions an existing image
+whose marker is missing or stale. `--skip-build` deliberately performs only the
+smoke test; use it when repair is not intended.
 
 Every active QEMU path uses the CPU count resolved by `win_init`. `CPUS`
 controls the Windows guest topology and defaults to six; a malformed explicit

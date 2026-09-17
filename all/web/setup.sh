@@ -16,6 +16,7 @@ site="$root/mmm/ur.io"
 react="$site/react"
 astro="$site/astro"
 extension="$root/extension"
+localizations="$root/localizations"
 no_sudo=0
 
 for arg in "$@"; do
@@ -54,7 +55,7 @@ node -e '
   if (major < 22 || (major === 22 && minor < 12)) process.exit(1);
 ' || die "Node 22.12 or newer is required"
 
-for directory in "$react" "$astro" "$extension"; do
+for directory in "$react" "$astro" "$extension" "$localizations"; do
   [ -f "$directory/package.json" ] || die "missing package at $directory"
   [ -f "$directory/package-lock.json" ] || die "missing package lock at $directory"
 done
@@ -78,6 +79,7 @@ install_dependencies() {
 install_dependencies "$react"
 install_dependencies "$astro"
 install_dependencies "$extension"
+install_dependencies "$localizations"
 
 case "$(uname -s)" in
   Darwin) default_firefox=/Applications/Firefox.app/Contents/MacOS/firefox ;;
