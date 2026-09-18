@@ -3,7 +3,8 @@
 # Wait until one exact npm package version is usable by a fresh registry
 # client. `npm publish` can exit while npmjs is still processing the version;
 # metadata visibility alone is insufficient because the tarball can propagate
-# separately. A dry-run pack with an isolated cache fetches and inspects both.
+# separately. A dry-run pack with a new empty cache for every attempt fetches
+# and inspects both without retaining an earlier ETARGET/E404 response.
 # Only an exact-version ETARGET or an exact-version/tarball E404 is considered
 # an expected propagation miss. Authentication, transport, server, and all
 # other failures are fatal immediately.
@@ -70,11 +71,14 @@ integer attempt=1
 while (( attempt <= max_attempts )); do
     : > "$probe_stdout"
     : > "$probe_stderr"
+    attempt_cache="$probe_temp/cache-$attempt"
 
-    # The isolated cache prevents a tarball left by publication or another
-    # build from proving readiness. npm pack must retrieve the exact version's
-    # registry metadata and tarball, while --dry-run leaves no package behind.
-    npm --cache "$probe_temp/cache" pack "$exact_spec" \
+    # A distinct empty cache on every attempt prevents npm from replaying a
+    # negative packument response after the version has reached the registry.
+    # It also prevents a tarball left by publication or another build from
+    # proving readiness. npm pack must retrieve the exact version's registry
+    # metadata and tarball, while --dry-run leaves no package behind.
+    npm --cache "$attempt_cache" pack "$exact_spec" \
         --dry-run --json --ignore-scripts \
         >"$probe_stdout" 2>"$probe_stderr"
     probe_status=$?

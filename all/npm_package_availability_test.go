@@ -147,7 +147,7 @@ printf '%s\n' "$1" >> "$NPM_SLEEP_LOG"
 }
 
 func TestNPMPackageReadinessWaitsForMetadataAndTarballPropagation(t *testing.T) {
-	result := runNPMReadiness(t, "delayed", "@urnetwork/localizations", "2026.9.17-1048721260", 5)
+	result := runNPMReadiness(t, "delayed", "@urnetwork/localizations", "2026.9.17-1048721260", 3)
 	if result.exitCode != 0 {
 		t.Fatalf("delayed readiness exit = %d\nstdout=%s\nstderr=%s", result.exitCode, result.stdout, result.stderr)
 	}
@@ -156,6 +156,24 @@ func TestNPMPackageReadinessWaitsForMetadataAndTarballPropagation(t *testing.T) 
 	}
 	if !strings.Contains(result.stdout, "metadata and tarball verified") {
 		t.Fatalf("success diagnostic does not confirm tarball: %s", result.stdout)
+	}
+	cachePaths := make(map[string]struct{}, len(result.calls))
+	for callNumber, call := range result.calls {
+		fields := strings.Fields(call)
+		cachePath := ""
+		for index := 0; index+1 < len(fields); index++ {
+			if fields[index] == "--cache" {
+				cachePath = fields[index+1]
+				break
+			}
+		}
+		if cachePath == "" {
+			t.Fatalf("npm call %d has no explicit cache: %q", callNumber+1, call)
+		}
+		if _, reused := cachePaths[cachePath]; reused {
+			t.Fatalf("npm readiness reused cache %q across attempts: %v", cachePath, result.calls)
+		}
+		cachePaths[cachePath] = struct{}{}
 	}
 }
 

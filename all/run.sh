@@ -8,8 +8,9 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
-# (optional) BUILD_URIO_CHANGELOG=0 skips only the GitHub-API-backed ur.io
-#            changelog source refresh; unset or 1 runs the strict refresh
+# (optional) BUILD_URIO_CHANGELOG=0 skips both GitHub-API-backed changelog
+#            paths: the ur.io source refresh and release-body/store notes;
+#            unset or 1 runs both generators
 # (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
 #            TWINE_PASSWORD/PYPI_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY,
 #            CARGO_REGISTRY_TOKEN, MAVEN_CENTRAL_USERNAME/PASSWORD plus

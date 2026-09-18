@@ -19,11 +19,13 @@ Notifications and best-effort VirusTotal observations are not build components.
 opt-in/skip behavior; commented-out build targets remain disabled.
 
 The extension consumes the exact localizations and JavaScript SDK versions
-published by the same release. Before editing its lockfile, `run.sh` uses a
-fresh npm cache to fetch and inspect each exact package tarball. Expected
-ETARGET/exact-tarball E404 propagation misses retry for at most 60 attempts at
-10-second intervals; authentication, transport, and other registry failures
-remain immediately fatal. The bounds can be changed for controlled testing via
+published by the same release. Before editing its lockfile, `run.sh` uses a new
+empty npm cache on every readiness attempt to fetch and inspect each exact
+package tarball. This prevents an early cached ETARGET/E404 response from
+hiding a version after it reaches the registry. Expected ETARGET/exact-tarball
+E404 propagation misses retry for at most 60 attempts at 10-second intervals;
+authentication, transport, and other registry failures remain immediately
+fatal. The bounds can be changed for controlled testing via
 `NPM_PACKAGE_READY_MAX_ATTEMPTS` and
 `NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`.
 
