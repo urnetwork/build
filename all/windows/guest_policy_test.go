@@ -181,7 +181,7 @@ func TestProvisioningInstallsAndExportsCMake(t *testing.T) {
 func TestWindowsImageSmokeCoversSdkCompilers(t *testing.T) {
 	provision := readBuildFile(t, "packer/scripts/provision.ps1")
 	smoke := readBuildFile(t, "smoke-test.ps1")
-	buildSdk, err := os.ReadFile(filepath.Join(windowsBuildRoot(t), "..", "..", "..", "windows", "build-sdk.ps1"))
+	buildSdk, err := os.ReadFile(filepath.Join(windowsBuildRoot(t), "..", "..", "windows", "build-sdk.ps1"))
 	if err != nil {
 		t.Fatalf("read Windows SDK build script: %v", err)
 	}
