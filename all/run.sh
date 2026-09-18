@@ -2350,9 +2350,9 @@ builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build web'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV web/app/Makefile)
-error_trap 'warpctl build web/app'
-builder_message "service web/app \`${EXTERNAL_WARP_VERSION}\` available"
+(cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)
+error_trap 'warpctl build web/manager'
+builder_message "service web/manager \`${EXTERNAL_WARP_VERSION}\` available"
 
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
