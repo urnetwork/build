@@ -1242,13 +1242,18 @@ npm_fork_update () {
 
 # note npm publishing requires a build unlike go publishing, which just requires the git tag
 npm_publish () {
+    local package_name="$1"
+    local package_version="$2"
+
     if [ -e "Makefile" ]; then
         make || return $?
     else
         npm ci && npm run build --if-present || return $?
     fi
     if [ "$SDK_NPM_PUBLISH" = yes ]; then
-        npm publish --tag nightly
+        "$BUILD_HOME/all/npm-publish-ready.zsh" \
+            "$package_name" "$package_version" \
+            npm publish --tag nightly
     else
         builder_message "skipping npm publication: no publishing credentials"
     fi
@@ -1561,7 +1566,7 @@ error_trap 'warp push branch'
 error_trap 'localizations edit'
 
 (cd $BUILD_HOME/localizations &&
-    npm_publish)
+    npm_publish @urnetwork/localizations "$EXTERNAL_WARP_VERSION")
 error_trap 'localizations push branch'
 
 

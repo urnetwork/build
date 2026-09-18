@@ -7,7 +7,9 @@
 # and inspects both without retaining an earlier ETARGET/E404 response.
 # Only an exact-version ETARGET or an exact-version/tarball E404 is considered
 # an expected propagation miss. Authentication, transport, server, and all
-# other failures are fatal immediately.
+# other failures are fatal immediately. Exhausting the bounded propagation
+# window exits with EX_TEMPFAIL (75), so a publisher can distinguish a dropped
+# asynchronous publish job from a hard registry failure.
 
 setopt localoptions nounset
 
@@ -106,7 +108,7 @@ while (( attempt <= max_attempts )); do
     if (( attempt >= max_attempts )); then
         print -u2 -- "npm package readiness for $exact_spec: still unavailable after $attempt attempts"
         cat "$probe_stderr" >&2
-        exit $probe_status
+        exit 75
     fi
 
     print -u2 -- "npm package readiness for $exact_spec: registry propagation incomplete; retrying in ${retry_delay_seconds}s ($attempt/$max_attempts)"

@@ -27,7 +27,12 @@ E404 propagation misses retry for at most 60 attempts at 10-second intervals;
 authentication, transport, and other registry failures remain immediately
 fatal. The bounds can be changed for controlled testing via
 `NPM_PACKAGE_READY_MAX_ATTEMPTS` and
-`NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`.
+`NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`. npm acknowledges a publish with HTTP
+202 before asynchronous processing finishes, so the localizations publisher
+also owns this readiness proof. If an accepted job is still absent after the
+full window, it resubmits the same immutable version once and proves readiness
+again. Hard failures are not resubmitted; `NPM_PUBLISH_READY_MAX_ATTEMPTS`
+changes the accepted-publication bound only for controlled testing.
 
 ## Passwordless sudo (required when tests are enabled)
 

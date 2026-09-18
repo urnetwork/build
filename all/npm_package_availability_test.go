@@ -179,11 +179,231 @@ func TestNPMPackageReadinessWaitsForMetadataAndTarballPropagation(t *testing.T) 
 
 func TestNPMPackageReadinessPersistentETARGETFailsAtBound(t *testing.T) {
 	result := runNPMReadiness(t, "persistent", "@urnetwork/localizations", "2026.9.17-1048721260", 3)
-	if result.exitCode != 1 || len(result.calls) != 3 || len(result.sleeps) != 2 {
-		t.Fatalf("persistent ETARGET result = %+v, want exit 1 after 3 attempts", result)
+	if result.exitCode != 75 || len(result.calls) != 3 || len(result.sleeps) != 2 {
+		t.Fatalf("persistent ETARGET result = %+v, want EX_TEMPFAIL after 3 attempts", result)
 	}
 	if !strings.Contains(result.stderr, "still unavailable after 3 attempts") {
 		t.Fatalf("persistent ETARGET diagnostic missing bound: %s", result.stderr)
+	}
+}
+
+type npmPublishReadinessResult struct {
+	exitCode int
+	stdout   string
+	stderr   string
+	calls    []string
+}
+
+func runNPMPublishReadiness(t *testing.T, mode string, publishAttempts, readinessAttempts int) npmPublishReadinessResult {
+	t.Helper()
+	tempDir := t.TempDir()
+	fakeBin := filepath.Join(tempDir, "bin")
+	if err := os.Mkdir(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeNPM := `#!/bin/sh
+set -u
+printf '%s\n' "$*" >> "$NPM_CALL_LOG"
+case "$1" in
+    publish)
+        count=0
+        if [ -f "$NPM_PUBLISH_COUNT_FILE" ]; then
+            IFS= read -r count < "$NPM_PUBLISH_COUNT_FILE"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$NPM_PUBLISH_COUNT_FILE"
+        case "$NPM_TEST_MODE" in
+            initial-publish-failure)
+                printf 'npm error code E401\n' >&2
+                exit 17
+                ;;
+            resubmit-conflict)
+                if [ "$count" -eq 2 ]; then
+                    printf 'npm error code EPUBLISHCONFLICT\n' >&2
+                    exit 23
+                fi
+                ;;
+        esac
+        exit 0
+        ;;
+    --cache)
+        count=0
+        if [ -f "$NPM_PACK_COUNT_FILE" ]; then
+            IFS= read -r count < "$NPM_PACK_COUNT_FILE"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$NPM_PACK_COUNT_FILE"
+        publish_count=0
+        if [ -f "$NPM_PUBLISH_COUNT_FILE" ]; then
+            IFS= read -r publish_count < "$NPM_PUBLISH_COUNT_FILE"
+        fi
+        case "$NPM_TEST_MODE" in
+            dropped-then-ready|resubmit-conflict)
+                if [ "$publish_count" -lt 2 ]; then
+                    printf 'npm error code ETARGET\nnpm error notarget No matching version found for %s.\n' "$NPM_EXPECTED_SPEC" >&2
+                    exit 1
+                fi
+                ;;
+            dropped-both)
+                printf 'npm error code ETARGET\nnpm error notarget No matching version found for %s.\n' "$NPM_EXPECTED_SPEC" >&2
+                exit 1
+                ;;
+            readiness-auth)
+                printf 'npm error code E401\nnpm error Incorrect or missing password.\n' >&2
+                exit 19
+                ;;
+        esac
+        printf '[{"name":"%s","version":"%s","filename":"package-%s.tgz"}]\n' \
+            "$NPM_EXPECTED_PACKAGE" "$NPM_EXPECTED_VERSION" "$NPM_EXPECTED_VERSION"
+        exit 0
+        ;;
+esac
+exit 91
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "npm"), []byte(fakeNPM), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeSleep := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "sleep"), []byte(fakeSleep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const packageName = "@urnetwork/localizations"
+	const version = "2026.9.18-1049683510"
+	callLog := filepath.Join(tempDir, "npm-calls")
+	command := exec.Command(
+		filepath.Join(rolloutRoot(t), "npm-publish-ready.zsh"),
+		packageName, version, "npm", "publish", "--tag", "nightly",
+	)
+	environment := make([]string, 0, len(os.Environ())+12)
+	for _, value := range os.Environ() {
+		name := strings.SplitN(value, "=", 2)[0]
+		switch name {
+		case "NPM_CALL_LOG", "NPM_EXPECTED_PACKAGE", "NPM_EXPECTED_SPEC", "NPM_EXPECTED_VERSION", "NPM_PACK_COUNT_FILE", "NPM_PACKAGE_READY_MAX_ATTEMPTS", "NPM_PACKAGE_READY_RETRY_DELAY_SECONDS", "NPM_PUBLISH_COUNT_FILE", "NPM_PUBLISH_READY_MAX_ATTEMPTS", "NPM_TEST_MODE", "PATH":
+			continue
+		}
+		environment = append(environment, value)
+	}
+	command.Env = append(environment,
+		"NPM_CALL_LOG="+callLog,
+		"NPM_EXPECTED_PACKAGE="+packageName,
+		"NPM_EXPECTED_SPEC="+packageName+"@"+version,
+		"NPM_EXPECTED_VERSION="+version,
+		"NPM_PACK_COUNT_FILE="+filepath.Join(tempDir, "pack-count"),
+		fmt.Sprintf("NPM_PACKAGE_READY_MAX_ATTEMPTS=%d", readinessAttempts),
+		"NPM_PACKAGE_READY_RETRY_DELAY_SECONDS=0",
+		"NPM_PUBLISH_COUNT_FILE="+filepath.Join(tempDir, "publish-count"),
+		fmt.Sprintf("NPM_PUBLISH_READY_MAX_ATTEMPTS=%d", publishAttempts),
+		"NPM_TEST_MODE="+mode,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	exitCode := 0
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) {
+			t.Fatal(err)
+		}
+		exitCode = exitError.ExitCode()
+	}
+	data, readErr := os.ReadFile(callLog)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		t.Fatal(readErr)
+	}
+	var calls []string
+	if trimmed := strings.TrimSuffix(string(data), "\n"); trimmed != "" {
+		calls = strings.Split(trimmed, "\n")
+	}
+	return npmPublishReadinessResult{
+		exitCode: exitCode,
+		stdout:   stdout.String(),
+		stderr:   stderr.String(),
+		calls:    calls,
+	}
+}
+
+func countNPMCallsWithPrefix(calls []string, prefix string) int {
+	count := 0
+	for _, call := range calls {
+		if strings.HasPrefix(call, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestNPMPublishReadinessResubmitsDroppedAcceptedPublish(t *testing.T) {
+	result := runNPMPublishReadiness(t, "dropped-then-ready", 2, 2)
+	if result.exitCode != 0 {
+		t.Fatalf("dropped publish exit = %d\nstdout=%s\nstderr=%s", result.exitCode, result.stdout, result.stderr)
+	}
+	if got := countNPMCallsWithPrefix(result.calls, "publish "); got != 2 {
+		t.Fatalf("publish calls = %d, want 2: %v", got, result.calls)
+	}
+	if got := countNPMCallsWithPrefix(result.calls, "--cache "); got != 3 {
+		t.Fatalf("readiness calls = %d, want 3: %v", got, result.calls)
+	}
+	if !strings.Contains(result.stderr, "accepted publish did not complete; resubmitting (2/2)") {
+		t.Fatalf("resubmission diagnostic missing: %s", result.stderr)
+	}
+}
+
+func TestNPMPublishReadinessDoesNotRetryHardFailures(t *testing.T) {
+	for _, testCase := range []struct {
+		mode       string
+		exitCode   int
+		packCalls  int
+		wantStderr string
+	}{
+		{mode: "initial-publish-failure", exitCode: 17, packCalls: 0, wantStderr: "initial publish failed"},
+		{mode: "readiness-auth", exitCode: 19, packCalls: 1, wantStderr: "not resubmitting"},
+	} {
+		t.Run(testCase.mode, func(t *testing.T) {
+			result := runNPMPublishReadiness(t, testCase.mode, 2, 2)
+			if result.exitCode != testCase.exitCode {
+				t.Fatalf("exit = %d, want %d\n%s", result.exitCode, testCase.exitCode, result.stderr)
+			}
+			if got := countNPMCallsWithPrefix(result.calls, "publish "); got != 1 {
+				t.Fatalf("publish calls = %d, want 1: %v", got, result.calls)
+			}
+			if got := countNPMCallsWithPrefix(result.calls, "--cache "); got != testCase.packCalls {
+				t.Fatalf("readiness calls = %d, want %d: %v", got, testCase.packCalls, result.calls)
+			}
+			if !strings.Contains(result.stderr, testCase.wantStderr) {
+				t.Fatalf("diagnostic lacks %q: %s", testCase.wantStderr, result.stderr)
+			}
+		})
+	}
+}
+
+func TestNPMPublishReadinessAcceptsOriginalAfterResubmitRace(t *testing.T) {
+	result := runNPMPublishReadiness(t, "resubmit-conflict", 2, 2)
+	if result.exitCode != 0 {
+		t.Fatalf("resubmit race exit = %d\nstdout=%s\nstderr=%s", result.exitCode, result.stdout, result.stderr)
+	}
+	if got := countNPMCallsWithPrefix(result.calls, "publish "); got != 2 {
+		t.Fatalf("publish calls = %d, want 2: %v", got, result.calls)
+	}
+	if !strings.Contains(result.stderr, "checking whether the accepted publish completed") {
+		t.Fatalf("race diagnostic missing: %s", result.stderr)
+	}
+}
+
+func TestNPMPublishReadinessBoundsAcceptedPublishAttempts(t *testing.T) {
+	result := runNPMPublishReadiness(t, "dropped-both", 2, 2)
+	if result.exitCode != 75 {
+		t.Fatalf("persistent dropped publish exit = %d, want EX_TEMPFAIL\n%s", result.exitCode, result.stderr)
+	}
+	if got := countNPMCallsWithPrefix(result.calls, "publish "); got != 2 {
+		t.Fatalf("publish calls = %d, want 2: %v", got, result.calls)
+	}
+	if got := countNPMCallsWithPrefix(result.calls, "--cache "); got != 4 {
+		t.Fatalf("readiness calls = %d, want 4: %v", got, result.calls)
 	}
 }
 
@@ -251,5 +471,11 @@ func TestRunWaitsForBothExactNPMDependenciesBeforeExtensionEdit(t *testing.T) {
 	}
 	if strings.Contains(runSource, "sleep 30\n\n\n(cd $BUILD_HOME/extension") {
 		t.Fatal("run.sh still relies on the fixed npm propagation sleep")
+	}
+	if !strings.Contains(runSource, `npm_publish @urnetwork/localizations "$EXTERNAL_WARP_VERSION"`) {
+		t.Fatal("run.sh does not publish and verify the exact localizations release")
+	}
+	if !strings.Contains(runSource, `"$BUILD_HOME/all/npm-publish-ready.zsh"`) {
+		t.Fatal("run.sh does not use the tested accepted-publish recovery helper")
 	}
 }
