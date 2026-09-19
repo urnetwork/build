@@ -2359,6 +2359,14 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build web/manager'
 builder_message "service web/manager \`${EXTERNAL_WARP_VERSION}\` available"
 
+# The manager source directory supplies the deployed `app` service.  warpctl
+# derives an image name from the Makefile directory, so explicitly publish the
+# same verified multi-architecture image under the service name used by the
+# rollout configuration.
+(cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-manager:${EXTERNAL_WARP_VERSION}" --service_name=app)
+error_trap 'warpctl import manager image as app'
+builder_message "service app \`${EXTERNAL_WARP_VERSION}\` available"
+
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 

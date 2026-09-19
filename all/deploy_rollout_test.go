@@ -314,6 +314,36 @@ func TestRunBuildsAltAndGossipContainersBeforeRollout(t *testing.T) {
 	}
 }
 
+// The manager Makefile is intentionally named after its source directory,
+// while the deployment configuration calls that service `app`.  Keep the
+// versioned image alias explicit and before rollout so app can never be
+// promoted from a nonexistent repository tag.
+func TestRunPublishesManagerImageUnderAppServiceNameBeforeRollout(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSource := string(runData)
+	rolloutAt := strings.Index(runSource, `source "$BUILD_HOME/all/deploy-rollout.zsh"`)
+	if rolloutAt < 0 {
+		t.Fatal("run.sh does not enter the canonical rollout")
+	}
+
+	managerBuild := `(cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)`
+	alias := `(cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-manager:${EXTERNAL_WARP_VERSION}" --service_name=app)`
+	managerBuildAt := strings.Index(runSource, managerBuild)
+	aliasAt := strings.Index(runSource, alias)
+	if managerBuildAt < 0 || aliasAt < 0 {
+		t.Fatalf("run.sh is missing manager build or app image alias")
+	}
+	if aliasAt <= managerBuildAt {
+		t.Fatal("run.sh aliases the app image before building manager")
+	}
+	if aliasAt > rolloutAt {
+		t.Fatal("run.sh aliases the app image after rollout starts")
+	}
+}
+
 // Keep new rollout services fail closed until their observation capability is
 // classified explicitly.
 func TestRolloutRejectsUnknownServiceBeforeWarpctl(t *testing.T) {
