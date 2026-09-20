@@ -18,15 +18,34 @@ func fail(format string, args ...any) {
 func main() {
 	flags := flag.NewFlagSet("test-config", flag.ContinueOnError)
 	configPath := flags.String("config", "", "path to vault/main/tests.yml")
+	schema := flags.String("schema", "data-plane-account", "data-plane-account (acceptance vault) or user-pass (physical credentials only)")
 	ready := flags.Bool("ready", false, "require every acceptance fixture to be configured")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
 	}
 	if *configPath == "" || flags.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: test-config --config FILE [--ready] validate|get PATH|write-json FILE")
+		fmt.Fprintln(os.Stderr, "usage: test-config --config FILE [--schema data-plane-account|user-pass] [--ready] validate|get PATH|write-json FILE")
 		os.Exit(2)
 	}
 
+	if *schema == "user-pass" {
+		if *ready || flags.Arg(0) != "get" || flags.NArg() != 2 {
+			fail("user-pass schema only supports get user or get pass without --ready")
+		}
+		config, err := testconfig.LoadUserPass(*configPath)
+		if err != nil {
+			fail("%v", err)
+		}
+		value, err := config.Get(flags.Arg(1))
+		if err != nil {
+			fail("%v", err)
+		}
+		fmt.Print(value)
+		return
+	}
+	if *schema != "data-plane-account" {
+		fail("unsupported config schema")
+	}
 	config, err := testconfig.Load(*configPath)
 	if err != nil {
 		fail("%v", err)
