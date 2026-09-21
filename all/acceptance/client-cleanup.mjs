@@ -5,9 +5,11 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const defaultApiURL = "https://api.bringyour.com";
+const cleanupReports = new WeakMap();
 
 async function post(apiURL, route, body, jwt, fetchImpl) {
-  const response = await fetchImpl(`${apiURL}${route}`, {
+  let response;
+  try { response = await fetchImpl(`${apiURL}${route}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -16,7 +18,13 @@ async function post(apiURL, route, body, jwt, fetchImpl) {
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
-  });
+  }); } catch (cause) {
+    // Retain the fixed operation, not the URL, payload or arbitrary fetch text.
+    const error = new Error("cleanup network request failed", { cause });
+    error.route = route;
+    error.name = ["AbortError", "TimeoutError", "TypeError"].includes(cause?.name) ? cause.name : "Error";
+    throw error;
+  }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(`main API ${route} returned HTTP ${response.status}`);
@@ -25,6 +33,29 @@ async function post(apiURL, route, body, jwt, fetchImpl) {
     throw error;
   }
   return result;
+}
+
+function safeCleanupFailure(error) {
+  const stage = error?.route === "/auth/login-with-password" ? "login" :
+    error?.route === "/network/remove-client" ? "remove-client" :
+      String(error?.message).startsWith("cleanup login") ? "login" :
+        String(error?.message).startsWith("network-client cleanup") ? "remove-client" : "unknown";
+  const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : null;
+  const knownCodes = ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH",
+    "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"];
+  const causes = [error, error?.cause, error?.cause?.cause];
+  const networkCode = causes.map(value => value?.code).find(code => knownCodes.includes(code)) ?? null;
+  const kind = status !== null ? "http-status" : ["AbortError", "TimeoutError"].includes(error?.name) ? "timeout" :
+    error?.name === "TypeError" || networkCode !== null ? "network" : stage !== "unknown" ? "rejected" : "unclassified";
+  return { stage, kind, status, networkCode };
+}
+
+// The report is formed from allowlisted values at the cleanup boundary. It
+// contains no raw exception text, response body, credentials or client IDs.
+export function cleanupFailureReport(error) {
+  return cleanupReports.get(error) ?? { type: "retained-client-cleanup", schemaVersion: 1, eligible: false,
+    releasedClients: 0, removedMarkers: 0, failedGroups: null, remainingMarkers: null,
+    failures: [safeCleanupFailure(error)] };
 }
 
 export async function releaseClient({
@@ -120,6 +151,7 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
   const { user, password } = readCredentials(environment);
   let releasedClients = 0;
   let removedMarkers = 0;
+  let remainingMarkers = 0;
   const failures = [];
   for (const [clientId, aliases] of markerGroups) {
     try {
@@ -133,15 +165,20 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
       // Continue with independent client groups, but retain every alias for
       // this group so a later cleanup can retry it explicitly.
       failures.push(error);
+      remainingMarkers += aliases.length;
     }
   }
 
   if (failures.length > 0) {
     const summaries = [...new Set(failures.map(cleanupFailureSummary))];
-    throw new AggregateError(
+    const error = new AggregateError(
       failures,
       `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup: ${summaries.join("; ")}`,
     );
+    cleanupReports.set(error, { type: "retained-client-cleanup", schemaVersion: 1, eligible: false,
+      releasedClients, removedMarkers, failedGroups: failures.length, remainingMarkers,
+      failures: failures.map(safeCleanupFailure) });
+    throw error;
   }
   return { releasedClients, removedMarkers };
 }

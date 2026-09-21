@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   cleanupClientFile,
   cleanupClientFiles,
+  cleanupFailureReport,
   readCredentials,
   releaseClient,
   runCleanupCLI,
@@ -181,4 +182,35 @@ test("CLI summary reports only counts and never retained client IDs", async () =
   assert.match(output, /released 1 retained network client from 1 marker/);
   assert.doesNotMatch(output, /private-client-id/);
   fs.rmSync(directory, { recursive: true });
+});
+
+test("failed cleanup retains deterministic safe stage, counts and transport cause without private exception text", async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ur-cleanup-receipt-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const files = ["a", "b", "c"].map(name => path.join(directory, name));
+  files.forEach((file, index) => fs.writeFileSync(file, `secret-client-${index}\n`));
+  let logins = 0;
+  let report;
+  try {
+    await cleanupClientFiles(files, { UR_ACCEPT_USER: "private-user", UR_ACCEPT_PASS: "private-password" }, async url => {
+      if (url.endsWith("login-with-password")) {
+        logins++;
+        if (logins === 1) throw new TypeError("private-user private-password secret-jwt", { cause: Object.assign(new Error("secret-endpoint"), { code: "ECONNRESET" }) });
+        return response({ network: { by_jwt: "private-jwt" } });
+      }
+      if (logins === 2) return response({ error: { message: "private-response" } }, 503);
+      return response({});
+    });
+    assert.fail("cleanup must fail");
+  } catch (error) { report = cleanupFailureReport(error); }
+  assert.deepEqual(report, { type: "retained-client-cleanup", schemaVersion: 1, eligible: false,
+    releasedClients: 1, removedMarkers: 1, failedGroups: 2, remainingMarkers: 2,
+    failures: [{ stage: "login", kind: "network", status: null, networkCode: "ECONNRESET" },
+      { stage: "remove-client", kind: "http-status", status: 503, networkCode: null }] });
+  assert.doesNotMatch(JSON.stringify(report), /private|secret|https|jwt/);
+  assert.deepEqual(files.map(file => fs.existsSync(file)), [true, true, false]);
+  const forged = Object.assign(new Error("private-password"), { cleanupReport: { leaked: "private-password" },
+    route: "/private-url", status: 999, cause: { code: "private-token" } });
+  assert.deepEqual(cleanupFailureReport(forged).failures, [{ stage: "unknown", kind: "unclassified", status: null, networkCode: null }]);
+  assert.doesNotMatch(JSON.stringify(cleanupFailureReport(forged)), /private/);
 });
