@@ -21,6 +21,10 @@
 # (optional) NPM_PACKAGE_READY_MAX_ATTEMPTS and
 #            NPM_PACKAGE_READY_RETRY_DELAY_SECONDS override the bounded exact
 #            package/tarball propagation wait (defaults: 60 attempts, 10s).
+# (optional) NPM_INSTALL_READY_MAX_ATTEMPTS and
+#            NPM_INSTALL_READY_RETRY_DELAY_SECONDS override the bounded install
+#            retry for exact, freshly published dependencies (defaults: 6
+#            attempts, 10s).
 # (optional) CONNECT_IP_UPDATE set (non-empty) to regenerate the connect IP
 #            tables (security + blocker) from the live feeds before the tests
 #            run, then push them to connect main (commit message stamped with
@@ -1239,13 +1243,25 @@ npm_edit_module () {
 # Set this fork's own package version. Defaults to EXTERNAL_WARP_VERSION (a valid
 # npm pre-release version). Pass an explicit version for targets like the browser
 # extension whose manifest must use the bare, store-compatible EXTENSION_VERSION.
+# Optional package/version pairs use the fresh-cache install helper for exact
+# dependencies that this release just published and proved ready.
 npm_fork_version () {
-    local v="${1:-$EXTERNAL_WARP_VERSION}"
+    local v
+    if [ "$#" -gt 0 ]; then
+        v="$1"
+        shift
+    else
+        v="$EXTERNAL_WARP_VERSION"
+    fi
     jq --arg v "$v" '.version = $v' package.json > package.json.2 && mv package.json.2 package.json
     jq --arg v "$v" '.version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     jq --arg v "$v" '.packages.[""].version = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
     # update package-lock.json
-    npm install
+    if [ "$#" -gt 0 ]; then
+        "$BUILD_HOME/all/npm-install-ready.zsh" "$@"
+    else
+        npm install
+    fi
 }
 
 npm_fork () {
@@ -1600,18 +1616,23 @@ error_trap 'localizations push branch'
     if [ "$SDK_NPM_PUBLISH" = yes ]; then
         # npm acknowledges a publish before registry metadata and its tarball
         # are necessarily available. Prove both exact dependencies with fresh
-        # caches before npm install resolves the extension lock; the helper
-        # retries only the expected bounded ETARGET/E404 propagation window.
+        # caches before npm install resolves the extension lock; the readiness
+        # helper retries only the expected bounded ETARGET/E404 propagation
+        # window. npm_fork_version then uses separate fresh caches and retries
+        # only an ETARGET naming one of these exact dependencies.
         "$BUILD_HOME/all/npm-package-ready.zsh" \
             @urnetwork/localizations "$EXTERNAL_WARP_VERSION" &&
         "$BUILD_HOME/all/npm-package-ready.zsh" \
-            @urnetwork/sdk-js "$EXTERNAL_WARP_VERSION" &&
+            @urnetwork/sdk "$EXTERNAL_WARP_VERSION" &&
         npm_edit_module @urnetwork/localizations &&
-        npm_edit_module @urnetwork/sdk || exit $?
+        npm_edit_module @urnetwork/sdk &&
+        npm_fork_version "$EXTENSION_VERSION" \
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION" \
+            @urnetwork/sdk "$EXTERNAL_WARP_VERSION"
     else
-        builder_message "npm publication skipped; extension retains its current registry dependencies"
-    fi &&
-    npm_fork_version "$EXTENSION_VERSION")
+        builder_message "npm publication skipped; extension retains its current registry dependencies" &&
+        npm_fork_version "$EXTENSION_VERSION"
+    fi)
 error_trap 'extension edit'
 
 (cd $BUILD_HOME/extension && 

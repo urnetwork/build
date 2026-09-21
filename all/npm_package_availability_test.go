@@ -454,6 +454,181 @@ func TestNPMPackageReadinessRequestsAndValidatesExactVersion(t *testing.T) {
 	}
 }
 
+type npmInstallReadinessResult struct {
+	exitCode int
+	stdout   string
+	stderr   string
+	calls    []string
+	sleeps   []string
+}
+
+func runNPMInstallReadiness(t *testing.T, mode string, attempts int) npmInstallReadinessResult {
+	t.Helper()
+	tempDir := t.TempDir()
+	fakeBin := filepath.Join(tempDir, "bin")
+	if err := os.Mkdir(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeNPM := `#!/bin/sh
+set -u
+printf '%s\n' "$*" >> "$NPM_INSTALL_CALL_LOG"
+count=0
+if [ -f "$NPM_INSTALL_COUNT_FILE" ]; then
+    IFS= read -r count < "$NPM_INSTALL_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$NPM_INSTALL_COUNT_FILE"
+case "$NPM_INSTALL_TEST_MODE" in
+    delayed-exact)
+        if [ "$count" -eq 1 ]; then
+            printf 'npm error code ETARGET\nnpm error notarget No matching version found for %s.\n' "$NPM_INSTALL_EXPECTED_SPEC" >&2
+            exit 1
+        fi
+        ;;
+    persistent-exact)
+        printf 'npm error code ETARGET\nnpm error notarget No matching version found for %s.\n' "$NPM_INSTALL_EXPECTED_SPEC" >&2
+        exit 1
+        ;;
+    unrelated-etarget)
+        printf 'npm error code ETARGET\nnpm error notarget No matching version found for @urnetwork/unrelated@0.0.0.\n' >&2
+        exit 41
+        ;;
+    auth)
+        printf 'npm error code E401\nnpm error Incorrect or missing password.\n' >&2
+        exit 42
+        ;;
+esac
+printf 'install complete\n'
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "npm"), []byte(fakeNPM), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeSleep := `#!/bin/sh
+printf '%s\n' "$1" >> "$NPM_INSTALL_SLEEP_LOG"
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "sleep"), []byte(fakeSleep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const localizations = "@urnetwork/localizations"
+	const sdk = "@urnetwork/sdk"
+	const version = "2026.9.21-1051760150"
+	callLog := filepath.Join(tempDir, "npm-install-calls")
+	sleepLog := filepath.Join(tempDir, "npm-install-sleeps")
+	command := exec.Command(
+		filepath.Join(rolloutRoot(t), "npm-install-ready.zsh"),
+		localizations, version, sdk, version,
+	)
+	command.Dir = tempDir
+	environment := make([]string, 0, len(os.Environ())+8)
+	for _, value := range os.Environ() {
+		name := strings.SplitN(value, "=", 2)[0]
+		switch name {
+		case "NPM_INSTALL_CALL_LOG", "NPM_INSTALL_COUNT_FILE", "NPM_INSTALL_EXPECTED_SPEC", "NPM_INSTALL_READY_MAX_ATTEMPTS", "NPM_INSTALL_READY_RETRY_DELAY_SECONDS", "NPM_INSTALL_SLEEP_LOG", "NPM_INSTALL_TEST_MODE", "PATH":
+			continue
+		}
+		environment = append(environment, value)
+	}
+	command.Env = append(environment,
+		"NPM_INSTALL_CALL_LOG="+callLog,
+		"NPM_INSTALL_COUNT_FILE="+filepath.Join(tempDir, "npm-install-count"),
+		"NPM_INSTALL_EXPECTED_SPEC="+localizations+"@"+version,
+		fmt.Sprintf("NPM_INSTALL_READY_MAX_ATTEMPTS=%d", attempts),
+		"NPM_INSTALL_READY_RETRY_DELAY_SECONDS=0",
+		"NPM_INSTALL_SLEEP_LOG="+sleepLog,
+		"NPM_INSTALL_TEST_MODE="+mode,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	exitCode := 0
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) {
+			t.Fatal(err)
+		}
+		exitCode = exitError.ExitCode()
+	}
+
+	readLines := func(path string) []string {
+		data, readErr := os.ReadFile(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			return nil
+		}
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		trimmed := strings.TrimSuffix(string(data), "\n")
+		if trimmed == "" {
+			return nil
+		}
+		return strings.Split(trimmed, "\n")
+	}
+
+	return npmInstallReadinessResult{
+		exitCode: exitCode,
+		stdout:   stdout.String(),
+		stderr:   stderr.String(),
+		calls:    readLines(callLog),
+		sleeps:   readLines(sleepLog),
+	}
+}
+
+func TestNPMInstallReadinessRetriesExactReleaseETARGETWithFreshCaches(t *testing.T) {
+	result := runNPMInstallReadiness(t, "delayed-exact", 3)
+	if result.exitCode != 0 || len(result.calls) != 2 || len(result.sleeps) != 1 {
+		t.Fatalf("delayed install result = %+v, want success after one retry", result)
+	}
+	if !strings.Contains(result.stderr, "exact release dependency not yet resolvable") {
+		t.Fatalf("retry diagnostic missing: %s", result.stderr)
+	}
+	cachePaths := make(map[string]struct{}, len(result.calls))
+	for callNumber, call := range result.calls {
+		fields := strings.Fields(call)
+		if len(fields) != 3 || fields[0] != "--cache" || fields[2] != "install" {
+			t.Fatalf("npm call %d = %q, want --cache <path> install", callNumber+1, call)
+		}
+		if _, reused := cachePaths[fields[1]]; reused {
+			t.Fatalf("npm install reused cache %q across attempts: %v", fields[1], result.calls)
+		}
+		cachePaths[fields[1]] = struct{}{}
+	}
+}
+
+func TestNPMInstallReadinessBoundsPersistentExactETARGET(t *testing.T) {
+	result := runNPMInstallReadiness(t, "persistent-exact", 3)
+	if result.exitCode != 1 || len(result.calls) != 3 || len(result.sleeps) != 2 {
+		t.Fatalf("persistent install result = %+v, want original failure after 3 attempts", result)
+	}
+	if !strings.Contains(result.stderr, "remained unavailable after 3 attempts") {
+		t.Fatalf("bounded failure diagnostic missing: %s", result.stderr)
+	}
+}
+
+func TestNPMInstallReadinessDoesNotRetryUnrelatedFailures(t *testing.T) {
+	for _, testCase := range []struct {
+		mode     string
+		exitCode int
+	}{
+		{mode: "unrelated-etarget", exitCode: 41},
+		{mode: "auth", exitCode: 42},
+	} {
+		t.Run(testCase.mode, func(t *testing.T) {
+			result := runNPMInstallReadiness(t, testCase.mode, 3)
+			if result.exitCode != testCase.exitCode || len(result.calls) != 1 || len(result.sleeps) != 0 {
+				t.Fatalf("unrelated install result = %+v, want immediate exit %d", result, testCase.exitCode)
+			}
+			if !strings.Contains(result.stderr, "not retrying a non-propagation error") {
+				t.Fatalf("immediate failure diagnostic missing: %s", result.stderr)
+			}
+		})
+	}
+}
+
 func TestRunWaitsForBothExactNPMDependenciesBeforeExtensionEdit(t *testing.T) {
 	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
@@ -464,10 +639,22 @@ func TestRunWaitsForBothExactNPMDependenciesBeforeExtensionEdit(t *testing.T) {
 		t.Fatal("run.sh must use the tested npm readiness helper for both extension dependencies")
 	}
 	waitStart := strings.Index(runSource, `@urnetwork/localizations "$EXTERNAL_WARP_VERSION"`)
-	sdkWait := strings.Index(runSource, `@urnetwork/sdk-js "$EXTERNAL_WARP_VERSION"`)
+	sdkWait := strings.Index(runSource, `@urnetwork/sdk "$EXTERNAL_WARP_VERSION"`)
 	extensionEdit := strings.Index(runSource, "npm_edit_module @urnetwork/localizations")
 	if waitStart < 0 || sdkWait <= waitStart || extensionEdit <= sdkWait {
 		t.Fatalf("run.sh does not wait for both exact npm packages before extension edit")
+	}
+	if strings.Contains(runSource, `@urnetwork/sdk-js "$EXTERNAL_WARP_VERSION"`) {
+		t.Fatal("run.sh probes the compatibility package instead of the extension's @urnetwork/sdk dependency")
+	}
+	installCall := `npm_fork_version "$EXTENSION_VERSION" \
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION" \
+            @urnetwork/sdk "$EXTERNAL_WARP_VERSION"`
+	if !strings.Contains(runSource, installCall) {
+		t.Fatal("run.sh does not install the exact verified extension dependencies through npm_fork_version")
+	}
+	if !strings.Contains(runSource, `"$BUILD_HOME/all/npm-install-ready.zsh" "$@"`) {
+		t.Fatal("npm_fork_version does not use the tested install retry helper when exact dependencies are supplied")
 	}
 	if strings.Contains(runSource, "sleep 30\n\n\n(cd $BUILD_HOME/extension") {
 		t.Fatal("run.sh still relies on the fixed npm propagation sleep")

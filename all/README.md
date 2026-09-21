@@ -27,7 +27,14 @@ E404 propagation misses retry for at most 60 attempts at 10-second intervals;
 authentication, transport, and other registry failures remain immediately
 fatal. The bounds can be changed for controlled testing via
 `NPM_PACKAGE_READY_MAX_ATTEMPTS` and
-`NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`. npm acknowledges a publish with HTTP
+`NPM_PACKAGE_READY_RETRY_DELAY_SECONDS`. The subsequent dependency install also
+uses a new empty cache on every attempt, because npm's normal cache or another
+registry edge can still replay an earlier ETARGET after the independent
+readiness probe succeeds. Only an ETARGET naming one of these exact release
+dependencies is retried, for at most 6 attempts at 10-second intervals; all
+other install failures are immediately fatal. Its controlled-test bounds are
+`NPM_INSTALL_READY_MAX_ATTEMPTS` and
+`NPM_INSTALL_READY_RETRY_DELAY_SECONDS`. npm acknowledges a publish with HTTP
 202 before asynchronous processing finishes, so the localizations publisher
 also owns this readiness proof. If an accepted job is still absent after the
 full window, it resubmits the same immutable version once and proves readiness
