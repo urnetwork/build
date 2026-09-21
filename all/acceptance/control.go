@@ -9,7 +9,7 @@ import (
 
 const (
 	linuxControlProtocolVersion   = 1
-	windowsControlProtocolVersion = 3
+	windowsControlProtocolVersion = 4
 )
 
 // Requires the exact protocol implemented by each platform service. The
@@ -63,12 +63,33 @@ func pinnedStartTunnelPayload(config tunnelConfig) map[string]any {
 // Normalizes the platform-specific service reply used by acceptance checks.
 type tunnelStatus struct {
 	State            string
+	Mode             string
+	RoutesInstalled  bool
+	DnsApplied       bool
 	RpcPort          int
 	RpcListenAddress string
 	ServiceVersion   string
 	ProtocolVersion  int
 	SdkVersion       string
 	Error            string
+}
+
+// Keeps Windows readiness decoding testable without opening a named pipe.
+// Missing capture facts remain false and cannot authorize an egress assertion.
+func windowsStatus(reply map[string]any) tunnelStatus {
+	status, _ := reply["status"].(map[string]any)
+	routesInstalled, _ := status["routes_installed"].(bool)
+	dnsApplied, _ := status["dns_applied"].(bool)
+	return tunnelStatus{
+		State:            stringValue(status["state"], "stopped"),
+		Mode:             stringValue(status["mode"], ""),
+		RoutesInstalled:  routesInstalled,
+		DnsApplied:       dnsApplied,
+		RpcListenAddress: stringValue(status["rpc_listen_hostport"], ""),
+		ServiceVersion:   stringValue(status["service_version"], ""),
+		ProtocolVersion:  int(numberValue(status["protocol_version"])),
+		Error:            stringValue(status["error"], ""),
+	}
 }
 
 // Exposes the common lifecycle supported by each desktop service.

@@ -81,18 +81,6 @@ func (self *windowsControl) call(ctx context.Context, messageType string, payloa
 	}
 }
 
-// Converts the Windows wire fields into the shared status shape.
-func windowsStatus(reply map[string]any) tunnelStatus {
-	status, _ := reply["status"].(map[string]any)
-	return tunnelStatus{
-		State:            stringValue(status["state"], "stopped"),
-		RpcListenAddress: stringValue(status["rpc_listen_hostport"], ""),
-		ServiceVersion:   stringValue(status["service_version"], ""),
-		ProtocolVersion:  int(numberValue(status["protocol_version"])),
-		Error:            stringValue(status["error"], ""),
-	}
-}
-
 // Reads the installed service version and control protocol.
 func (self *windowsControl) Hello(ctx context.Context, _ string) (tunnelStatus, error) {
 	reply, err := self.call(ctx, "hello", map[string]any{})

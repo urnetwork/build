@@ -333,47 +333,44 @@ func runTunnelIteration(opts options, user, password, peerProviderClientId strin
 	config.RpcClientCertPem = rpcMaterial.GetClientCertPem()
 	config.RpcListenHostPort = "127.0.0.1:12042"
 
-	callCtx, callCancel = context.WithTimeout(context.Background(), 90*time.Second)
-	started, err := control.Start(callCtx, config)
-	callCancel()
-	if err != nil {
-		return "", "", fmt.Errorf("start tunnel: %w", err)
-	}
-	if started.State != "up" {
-		started, err = waitForTunnelState(control, "up", 30*time.Second)
-		if err != nil {
-			return "", "", fmt.Errorf("tunnel did not reach up: state=%s error=%s: %w", started.State, started.Error, err)
+	var device *sdk.DeviceRemote
+	var controller *sdk.ConnectViewController
+	defer func() {
+		if controller != nil {
+			device.CloseConnectViewController(controller)
 		}
-	}
+		if device != nil {
+			device.Close()
+		}
+	}()
+	afterIp, err = startTunnelAndCheckEgress(context.Background(), runtime.GOOS, control, config, func() error {
+		var err error
+		device, err = sdk.NewDeviceRemoteWithDefaults(networkSpace, clientJwt, instanceId)
+		if err != nil {
+			return fmt.Errorf("create device remote: %w", err)
+		}
+		if err := device.SetRpcServer(
+			rpcMaterial.GetClientPem(),
+			rpcMaterial.GetServerCertPem(),
+			config.RpcListenHostPort,
+		); err != nil {
+			return fmt.Errorf("configure device RPC: %w", err)
+		}
+		if err := waitUntil(60*time.Second, func() bool { return device.GetRemoteConnected() }); err != nil {
+			return errors.New("device RPC did not connect")
+		}
 
-	device, err := sdk.NewDeviceRemoteWithDefaults(networkSpace, clientJwt, instanceId)
+		controller = device.OpenConnectViewController()
+		controller.ConnectBestAvailable()
+		if err := waitUntil(120*time.Second, func() bool {
+			return controller.GetConnectionStatus() == sdk.Connected
+		}); err != nil {
+			return fmt.Errorf("provider connection: last status %s", controller.GetConnectionStatus())
+		}
+		return nil
+	}, publicIp)
 	if err != nil {
-		return "", "", fmt.Errorf("create device remote: %w", err)
-	}
-	defer device.Close()
-	if err := device.SetRpcServer(
-		rpcMaterial.GetClientPem(),
-		rpcMaterial.GetServerCertPem(),
-		config.RpcListenHostPort,
-	); err != nil {
-		return "", "", fmt.Errorf("configure device RPC: %w", err)
-	}
-	if err := waitUntil(60*time.Second, func() bool { return device.GetRemoteConnected() }); err != nil {
-		return "", "", errors.New("device RPC did not connect")
-	}
-
-	controller := device.OpenConnectViewController()
-	defer device.CloseConnectViewController(controller)
-	controller.ConnectBestAvailable()
-	if err := waitUntil(120*time.Second, func() bool {
-		return controller.GetConnectionStatus() == sdk.Connected
-	}); err != nil {
-		return "", "", fmt.Errorf("provider connection: last status %s", controller.GetConnectionStatus())
-	}
-
-	afterIp, err = publicIp()
-	if err != nil {
-		return "", "", fmt.Errorf("network egress: %w", err)
+		return "", "", err
 	}
 	fmt.Fprintf(os.Stderr, "acceptance: network egress %s\n", afterIp)
 	if beforeIp == afterIp {

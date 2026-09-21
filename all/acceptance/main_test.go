@@ -143,22 +143,24 @@ func TestRemoveClientAcceptsAnAlreadyRemovedClient(t *testing.T) {
 // Linux version as a universal constant rejects a correctly packaged MSI.
 func TestValidateControlProtocolUsesPlatformContract(t *testing.T) {
 	for _, test := range []struct {
-		name     string
 		platform string
 		version  int
 	}{
-		{name: "linux", platform: "linux", version: 1},
-		{name: "windows", platform: "windows", version: 3},
+		{platform: "linux", version: 1},
+		{platform: "windows", version: 4},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			if err := validateControlProtocol(test.platform, test.version); err != nil {
-				t.Fatalf("valid %s protocol rejected: %v", test.platform, err)
-			}
-		})
+		if err := validateControlProtocol(test.platform, test.version); err != nil {
+			t.Fatalf("valid %s protocol rejected: %v", test.platform, err)
+		}
 	}
 
-	if err := validateControlProtocol("windows", 1); err == nil {
-		t.Fatal("Windows accepted the Linux control protocol")
+	for _, version := range []int{0, 1, 3, 5} {
+		if err := validateControlProtocol("windows", version); err == nil {
+			t.Fatalf("Windows accepted incompatible control protocol %d", version)
+		}
+	}
+	if err := validateControlProtocol("linux", 4); err == nil {
+		t.Fatal("Linux accepted the Windows control protocol")
 	}
 	if err := validateControlProtocol("darwin", 1); err == nil {
 		t.Fatal("unsupported platform accepted a control protocol")
