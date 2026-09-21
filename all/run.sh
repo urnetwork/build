@@ -1119,23 +1119,30 @@ go_edit_require_subpackages () {
     find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "/\/v[0-9]\+/! s|\"$1\([^\"]*\)\"|\"$1${GO_MOD_SUFFIX}\1\"|g" {} \;
 }
 
-go_mod_fork_rebase_parent_replaces () {
+go_mod_fork_rebase_local_replaces () {
     local module_dir="v${GO_MOD_VERSION}"
     local go_mod_json
     go_mod_json=$(cd "$module_dir" && go mod edit -json) || return $?
 
-    # The fork moves go.mod one directory deeper. A surviving local replacement
-    # that reached a sibling through ../ must therefore climb one extra level;
-    # replacements within the moved module and replacements to module versions
-    # retain their original meaning.
-    local parent_replaces
-    parent_replaces=$(printf '%s\n' "$go_mod_json" | jq -r '
+    # The fork moves go.mod one directory deeper. Parent-relative replacements
+    # always need to climb one more level. A child-relative replacement only
+    # needs rebasing when its target stayed at the repository root, as happens
+    # for a nested module or an explicitly preserved release tree. Targets that
+    # moved into the versioned module and replacements to module versions retain
+    # their original meaning.
+    local local_replaces
+    local_replaces=$(printf '%s\n' "$go_mod_json" | jq -r '
         .Replace[]?
         | select(.New.Version == null)
-        | select(.New.Path | startswith("../"))
+        | select(
+            .New.Path == "." or
+            .New.Path == ".." or
+            (.New.Path | startswith("./")) or
+            (.New.Path | startswith("../"))
+          )
         | [
             (.Old.Path + (if .Old.Version == null then "" else "@" + .Old.Version end)),
-            ("../" + .New.Path)
+            .New.Path
           ]
         | @tsv
     ') || return $?
@@ -1143,9 +1150,26 @@ go_mod_fork_rebase_parent_replaces () {
     local old_module new_path
     while IFS=$'\t' read -r old_module new_path; do
         if [ -n "$old_module" ]; then
+            if [[ "$new_path" == "." || "$new_path" == ./* ]]; then
+                # A child target that is still below the versioned module moved
+                # with it. Only a target left beside vNNNN needs a new ../.
+                if [ -e "$module_dir/$new_path" ] || [ -L "$module_dir/$new_path" ]; then
+                    continue
+                fi
+                if [ ! -e "$new_path" ] && [ ! -L "$new_path" ]; then
+                    continue
+                fi
+                if [ "$new_path" = "." ]; then
+                    new_path=".."
+                else
+                    new_path="../${new_path#./}"
+                fi
+            else
+                new_path="../$new_path"
+            fi
             (cd "$module_dir" && go mod edit "-replace=${old_module}=${new_path}") || return $?
         fi
-    done <<< "$parent_replaces"
+    done <<< "$local_replaces"
 }
 
 go_mod_fork_prepare () {
@@ -1167,7 +1191,6 @@ go_mod_fork_prepare () {
         done
         $BUILD_SED -i '/^retract/d' "$temp/go.mod" || return $?
         mv "$temp" v${GO_MOD_VERSION} || return $?
-        go_mod_fork_rebase_parent_replaces || return $?
         # Arguments naming a top-level tree leave that tree beside the versioned
         # module (the original behavior above). Arguments containing a slash are
         # paths within a moved tree; carve those back out after the fork. This is
@@ -1179,6 +1202,7 @@ go_mod_fork_prepare () {
                 mv "v${GO_MOD_VERSION}/$t" "$t" || return $?
             fi
         done
+        go_mod_fork_rebase_local_replaces || return $?
     fi
 }
 

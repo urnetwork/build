@@ -217,7 +217,7 @@ go_mod_fork sim-testnet
 	command := exec.Command(
 		"zsh", "-c", harness, "go-module-cycle-test",
 		runFunction(t, "go_mod_drop_require"),
-		runFunction(t, "go_mod_fork_rebase_parent_replaces"),
+		runFunction(t, "go_mod_fork_rebase_local_replaces"),
 		runFunction(t, "go_mod_fork_prepare"),
 		runFunction(t, "go_mod_fork_tidy"),
 		runFunction(t, "go_mod_fork"),
@@ -244,15 +244,17 @@ go_mod_fork sim-testnet
 	}
 }
 
-// The release fork moves go.mod into vNNNN. Parent-relative replacements that
-// correctly found sibling repositories before that move must climb one more
-// level afterward, while paths inside the module and module-version
-// replacements must not be rewritten.
-func TestGoModForkRebasesSurvivingParentReplacements(t *testing.T) {
+// The release fork moves go.mod into vNNNN. Replacements whose targets remain
+// outside that directory must climb one more level afterward. This includes a
+// child-relative root nested module (the Connect/SCTP layout), while paths that
+// move inside the versioned module and module-version replacements stay intact.
+func TestGoModForkRebasesLocalReplacementsLeftOutsideVersionedModule(t *testing.T) {
 	outer := t.TempDir()
 	root := filepath.Join(outer, "server")
 	for _, directory := range []string{
 		root,
+		filepath.Join(root, "release", "local"),
+		filepath.Join(root, "sctp"),
 		filepath.Join(root, "third_party", "local"),
 		filepath.Join(outer, "warp"),
 		filepath.Join(outer, "shared"),
@@ -269,6 +271,8 @@ go 1.26.7
 require (
 	example.invalid/local v0.0.0
 	example.invalid/obsolete v0.0.0
+	example.invalid/preserved v0.0.0
+	example.invalid/sctp v0.0.0
 	example.invalid/shared v0.0.0
 	example.invalid/warp v0.0.0
 )
@@ -276,6 +280,10 @@ require (
 replace example.invalid/local => ./third_party/local
 
 replace example.invalid/obsolete => ../obsolete
+
+replace example.invalid/preserved => ./release/local
+
+replace example.invalid/sctp => ./sctp
 
 replace example.invalid/shared v0.0.0 => ../shared
 
@@ -287,12 +295,18 @@ replace example.invalid/warp => ../warp
 
 import (
 	"example.invalid/local"
+	"example.invalid/preserved"
+	"example.invalid/sctp"
 	"example.invalid/shared"
 	"example.invalid/warp"
 )
 
-const Value = local.Value + shared.Value + warp.Value
+const Value = local.Value + preserved.Value + sctp.Value + shared.Value + warp.Value
 `,
+		filepath.Join(root, "release", "local", "go.mod"):       "module example.invalid/preserved\n\ngo 1.26.7\n",
+		filepath.Join(root, "release", "local", "preserved.go"): "package preserved\n\nconst Value = 5\n",
+		filepath.Join(root, "sctp", "go.mod"):                   "module example.invalid/sctp\n\ngo 1.26.7\n",
+		filepath.Join(root, "sctp", "sctp.go"):                  "package sctp\n\nconst Value = 4\n",
 		filepath.Join(root, "third_party", "local", "go.mod"):   "module example.invalid/local\n\ngo 1.26.7\n",
 		filepath.Join(root, "third_party", "local", "local.go"): "package local\n\nconst Value = 1\n",
 		filepath.Join(outer, "warp", "go.mod"):                  "module example.invalid/warp\n\ngo 1.26.7\n",
@@ -316,12 +330,12 @@ eval "$3"
 eval "$4"
 eval "$5"
 go_mod_drop_require example.invalid/obsolete
-go_mod_fork
+go_mod_fork 'release/local'
 `
 	command := exec.Command(
 		"zsh", "-c", harness, "go-module-relative-replace-test",
 		runFunction(t, "go_mod_drop_require"),
-		runFunction(t, "go_mod_fork_rebase_parent_replaces"),
+		runFunction(t, "go_mod_fork_rebase_local_replaces"),
 		runFunction(t, "go_mod_fork_prepare"),
 		runFunction(t, "go_mod_fork_tidy"),
 		runFunction(t, "go_mod_fork"),
@@ -338,6 +352,8 @@ go_mod_fork
 	}
 	wantDirectives := []string{
 		"replace example.invalid/local => ./third_party/local",
+		"replace example.invalid/preserved => ../release/local",
+		"replace example.invalid/sctp => ../sctp",
 		"replace example.invalid/shared v0.0.0 => ../../shared",
 		"replace example.invalid/versioned => example.invalid/versioned-fork v1.2.3",
 		"replace example.invalid/warp => ../../warp",
