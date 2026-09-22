@@ -84,9 +84,10 @@ docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not running — star
 rc=0
 for arch in ${ARCHES}; do
   for role in ${roles}; do
-    echo ">>> building the Linux ${role} builder image for ${arch} (deps baked in; layer-cached)"
+    echo ">>> building the Linux ${role} builder image for ${arch}"
     timeout --signal=TERM --kill-after=60s 3600 \
       docker build --platform "linux/${arch}" \
+      --no-cache \
       -f "${here}/Dockerfile.${role}" \
       -t "${image_base}-${role}:${arch}" "${here}"
 

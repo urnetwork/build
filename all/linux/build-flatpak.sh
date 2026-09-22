@@ -127,8 +127,9 @@ else
   image="urnetwork-linux-builder-flatpak:${ARCH}"
   runtime_volume="urnetwork-flatpak-runtime-${ARCH}"
 
-  echo ">>> [${ARCH}/flatpak] building dependency-complete Linux image (layer-cached)"
+  echo ">>> [${ARCH}/flatpak] building dependency-complete Linux image"
   docker build --platform "linux/${ARCH}" \
+    --no-cache \
     -f "${here}/Dockerfile.flatpak" \
     -t "${image}" "${here}"
 

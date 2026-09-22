@@ -126,8 +126,9 @@ rm -f "${OUT_DIR}/"*.deb "${OUT_DIR}/"*.install.tar.gz "${OUT_DIR}/"*.rpm \
 for arch in ${ARCHES}; do
   for role in ${roles}; do
     echo ">>> building linux ${role} artifacts for ${arch}"
-    # Per-arch, per-role builder image (deps baked in; layer-cached across runs).
+    # Per-arch, per-role builder image, rebuilt from source for every run.
     docker build --platform "linux/${arch}" \
+      --no-cache \
       -f "${here}/Dockerfile.${role}" \
       -t "${image_base}-${role}:${arch}" "${here}"
 
