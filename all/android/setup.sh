@@ -99,8 +99,9 @@ for tool in aapt2 apksigner zipalign; do
     exit 1
   }
 done
-ndk_objcopy="$(find "$sdk_root/ndk/$ndk_version" -type f -name llvm-objcopy -perm -111 -print -quit)"
-[ -n "$ndk_objcopy" ] || {
+# SDK tools may be owner-executable without group/other execute permission.
+ndk_objcopy="$(find "$sdk_root/ndk/$ndk_version" -type f -name llvm-objcopy -perm -100 -print -quit)"
+[ -x "$ndk_objcopy" ] || {
   echo "ERROR: Android NDK $ndk_version has no llvm-objcopy" >&2
   exit 1
   }
