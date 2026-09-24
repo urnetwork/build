@@ -37,13 +37,38 @@ Root extension install lifecycle hooks or additional local/link dependencies
 fail closed: they would require a fuller source-aware installation strategy.
 The extension's type checks, complete unit suite, and Chrome/Firefox builds
 remain required by their existing acceptance runner. Browser provisioning and
-mobile touch/geometry checks are unchanged.
+mobile touch/geometry checks remain mandatory.
+
+`firefox-smoke.mjs` must create and delete a real geckodriver session. It reuses
+the site's `tests/firefox-process.mjs` exact-profile owner, including a bounded
+15-second late-registration window after failed startup or a detected browser
+replacement. This covers a pending macOS Firefox update that exits its original
+process with status 0 and later relaunches the same temporary profile under
+another parent. Cleanup never targets ordinary Firefox profiles or similarly
+prefixed temporary profiles. Missing ownership, surviving owned processes, or
+session deletion failures stop setup.
+
+The smoke snapshots executable identity before launch and after cleanup. An
+application update during the check is an explicit failure, not a retry or a
+passed browser gate. Once the host update and owned-process cleanup have
+finished, run setup again under its normal suite lock to test the stable new
+browser. Setup does not disable host updates or change Firefox preferences.
 
 Offline regression (real npm, loopback registry, no browsers):
 
 ```sh
 node --test --test-concurrency=1 all/web/install-local-extension-sdk.test.mjs
+node --test --test-concurrency=1 all/web/firefox-smoke.test.mjs
 GOMAXPROCS=2 go -C all test -run '^TestWebSetup' -count=1
+```
+
+The Firefox regression uses virtual WebDriver/process I/O and a source-pinned
+copy of the existing profile owner, so it never starts a browser. To reproduce
+the pre-fix failure against the exact inline source in an ancestor commit:
+
+```sh
+UR_FIREFOX_SMOKE_BASELINE_COMMIT=cfa1b727893e1ed08754e27a0117b97c4aaee356 \
+  node --test --test-concurrency=1 all/web/firefox-smoke.test.mjs
 ```
 
 Public registry installation and the extension's standalone registry-based
