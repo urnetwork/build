@@ -17,6 +17,7 @@ react="$site/react"
 astro="$site/astro"
 extension="$root/extension"
 localizations="$root/localizations"
+sdk="$root/sdk/js"
 no_sudo=0
 
 for arg in "$@"; do
@@ -47,7 +48,7 @@ trap cleanup EXIT
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-for command_name in timeout node npm go openssl curl tar zip lsof shasum install; do
+for command_name in timeout node npm go git make openssl curl tar zip lsof shasum install; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required"
 done
 node -e '
@@ -55,7 +56,7 @@ node -e '
   if (major < 22 || (major === 22 && minor < 12)) process.exit(1);
 ' || die "Node 22.12 or newer is required"
 
-for directory in "$react" "$astro" "$extension" "$localizations"; do
+for directory in "$sdk" "$react" "$astro" "$extension" "$localizations"; do
   [ -f "$directory/package.json" ] || die "missing package at $directory"
   [ -f "$directory/package-lock.json" ] || die "missing package lock at $directory"
 done
@@ -78,7 +79,20 @@ install_dependencies() {
 
 install_dependencies "$react"
 install_dependencies "$astro"
-install_dependencies "$extension"
+# ur.io acceptance uses the sibling SDK, whose canonical package may not yet
+# be published. Build and check that artifact before a private locked install;
+# never populate npm's registry cache with unrelated locally built bytes.
+echo ">>> building and checking the canonical local SDK package"
+(
+  if [ "$(uname -s)" = Darwin ] && [ -z "${DEVELOPER_DIR:-}" ] &&
+      [ -x /Library/Developer/CommandLineTools/usr/bin/make ]; then
+    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+  fi
+  cd "$sdk"
+  # Make recipes contain multiple commands: propagate an early build failure.
+  timeout 1200 make SHELL='bash -e' package check-package
+)
+timeout 1200 node "$here/install-local-extension-sdk.mjs" "$extension" "$sdk"
 install_dependencies "$localizations"
 
 case "$(uname -s)" in
