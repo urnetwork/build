@@ -171,16 +171,12 @@ func TestGoModForkUpdateRejectsMissingModule(t *testing.T) {
 	}
 }
 
-// sim-testnet imports server, while server imports the published SN libraries.
-// Keeping sim-testnet in the SN module therefore makes each module zip contain
-// the checksum of the other, which cannot be finalized without moving a public
-// tag. Exercise the production fork helpers and prove the operator harness is
-// preserved in Git but omitted from the versioned SN module graph.
-func TestGoModForkCanPreserveSimulatorOutsidePublishedModule(t *testing.T) {
+// The simulator and server fixture need the server under development, whose
+// release tag follows SN. Exercise the production fork command with real tidy
+// and test dependency resolution: both integration tools must stay in the Git
+// release without pulling unpublished server packages into the SN module.
+func TestGoModForkPreservesIntegrationToolsOutsidePublishedSNModule(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "sim-testnet"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	files := map[string]string{
 		"go.mod": `module example.invalid/sn
 
@@ -190,14 +186,26 @@ require example.invalid/server v0.0.0
 
 replace example.invalid/server => ./missing-server
 `,
-		"sn.go":                    "package sn\n",
-		"sim-testnet/main.go":      "package main\nfunc main() {}\n",
-		"sim-testnet/evidence.txt": "preserved release evidence\n",
+		"sn.go":                                "package sn\n",
+		"sim-testnet/main.go":                  "package main\nimport _ \"example.invalid/server\"\nfunc main() {}\n",
+		"sim-testnet/evidence.txt":             "preserved release evidence\n",
+		"scripts/server-fixture/main.go":       "package main\nfunc main() {}\n",
+		"scripts/server-fixture/suite_test.go": "package main\nimport _ \"example.invalid/server/geo\"\n",
+		"scripts/server-fixture/README.md":     "preserved integration fixture instructions\n",
+		"scripts/qualification/main.go":        "package main\nfunc main() {}\n",
 	}
 	for name, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	snEdit := componentRegion(t, "(cd $BUILD_HOME/sn &&\n    go_mod_edit_module", "error_trap 'sn edit'")
+	forkCommand := regexp.MustCompile(`(?m)^    (go_mod_fork [^\n]+)\)$`).FindStringSubmatch(snEdit)
+	if len(forkCommand) != 2 {
+		t.Fatal("SN release module fork command is missing")
 	}
 
 	harness := `
@@ -212,7 +220,7 @@ eval "$3"
 eval "$4"
 eval "$5"
 go_mod_drop_require example.invalid/server
-go_mod_fork sim-testnet
+eval "$6"
 `
 	command := exec.Command(
 		"zsh", "-c", harness, "go-module-cycle-test",
@@ -221,19 +229,30 @@ go_mod_fork sim-testnet
 		runFunction(t, "go_mod_fork_prepare"),
 		runFunction(t, "go_mod_fork_tidy"),
 		runFunction(t, "go_mod_fork"),
+		forkCommand[1],
 	)
 	command.Dir = root
-	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off")
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("SN module fork failed: %v\n%s", err, output)
 	}
-	for _, name := range []string{"sim-testnet/main.go", "sim-testnet/evidence.txt", "v2026/sn.go", "v2026/go.mod"} {
-		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+	for _, name := range []string{"sn.go", "scripts/qualification/main.go"} {
+		if _, err := os.Stat(filepath.Join(root, "v2026", name)); err != nil {
 			t.Fatalf("forked release lacks %s: %v", name, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "v2026", "sim-testnet")); !os.IsNotExist(err) {
-		t.Fatalf("sim-testnet entered the published SN module: %v", err)
+	for _, name := range []string{"sim-testnet", "scripts/server-fixture"} {
+		if _, err := os.Stat(filepath.Join(root, "v2026", name)); !os.IsNotExist(err) {
+			t.Fatalf("%s entered the published SN module: %v", name, err)
+		}
+		for path, contents := range files {
+			if strings.HasPrefix(path, name+"/") {
+				preserved, err := os.ReadFile(filepath.Join(root, path))
+				if err != nil || string(preserved) != contents {
+					t.Fatalf("release did not preserve %s: %v", path, err)
+				}
+			}
+		}
 	}
 	goMod, err := os.ReadFile(filepath.Join(root, "v2026", "go.mod"))
 	if err != nil {

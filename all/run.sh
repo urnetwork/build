@@ -1494,9 +1494,9 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/operator-proxy &&
-    # Only sim-testnet imports server. It is deliberately kept outside the
-    # published SN module below, so carrying this development-only requirement
-    # into v20xx would make tidy resolve the server tag before it can exist.
+    # Drop the local-development server requirement. Integration tools that
+    # need unpublished server packages stay outside the versioned module below;
+    # remaining library tests can resolve an already-published server version.
     go_mod_drop_require github.com/urnetwork/server &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
@@ -1509,12 +1509,11 @@ error_trap 'js-sdk publish'
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
-    # sim-testnet is an operator/integration harness that imports server, while
-    # server imports the published sn libraries. Preserve its source beside the
-    # versioned module in the Git release, but keep it out of the sn module zip.
-    # This removes the cryptographic sn <-> server go.sum cycle and lets both
-    # public module tags remain immutable.
-    go_mod_fork 'sim-testnet')
+    # These integration tools exercise server source changes before its tag
+    # exists. Preserve their source and tests beside the versioned SN module in
+    # the Git release so tidy does not require unpublished server APIs. Server
+    # can then depend on the immutable SN tag.
+    go_mod_fork 'sim-testnet' 'scripts/server-fixture')
 error_trap 'sn edit'
 
 (cd $BUILD_HOME/sn &&
