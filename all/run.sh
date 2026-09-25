@@ -2371,9 +2371,28 @@ error_trap 'android github arm64-v8a reproducible pre-release'
 
 
 # Warp services
-(cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile)
-error_trap 'warpctl build config-updater'
-builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
+
+# The config-updater image carries this release's config, so on the deploy
+# path it is built after the Brevo template export below has written its
+# template ids into config/main/onboarding.yml, not here with the other
+# services (built here, the release's config predated that commit).
+#
+# --config_restart=no: the rollout redeploys every block, so each block takes
+# the new config together with its new service version instead of restarting
+# for the config first. warp/config-updater/Makefile writes config-updater.yml
+# into the config version and warpctl's run worker (holdConfigVersion, run.go)
+# holds a block only while its service version is older than the config's; a
+# block whose deploy landed before the config reached its host restarts for it
+# as usual. A run that skips deployment builds the image now, for a rollout
+# run later by hand.
+build_config_updater () {
+    (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile --config_restart=no)
+    error_trap 'warpctl build config-updater'
+    builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
+}
+if [ "$WARP_SKIP_DEPLOY" != "" ]; then
+    build_config_updater
+fi
 
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/grafana/Makefile)
 error_trap 'warpctl build grafana'
@@ -2472,6 +2491,9 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
             git_push_with_rebase_retry
         fi)
     error_trap 'onboarding templates config push'
+
+    # the release's config, template ids included (see build_config_updater)
+    build_config_updater
 
     # BUILD_HOME is the build repository root (set from this script's parent
     # above), so the rollout implementation is directly under all/.
