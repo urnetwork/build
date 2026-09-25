@@ -569,6 +569,19 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# license list gate: sdk/license.yml is embedded in the SDK and shown under
+# Account -> Settings -> Licenses in every app, so it must list every dependency
+# each app ships. -check recollects each app's dependencies offline (gradle
+# runtime classpaths, Package.resolved, the npm lockfiles, the SDK's Go modules)
+# from the sibling checkouts and fails on anything missing or stale. The fix is
+# `go run ./licenses` in the sdk repo and a commit of license.yml.
+builder_message "checking the license list against every app's dependencies"
+(cd $BUILD_HOME/sdk &&
+    for target in sdk android apple web extension; do
+        go run ./licenses -check $target || exit $?
+    done)
+error_trap 'license list check'
+
 # Dependency vulnerability gate. osv-scanner reports what the OSV database knows
 # about every module in the dependency graph; this fails the build on CRITICAL or
 # HIGH findings and reports the rest.
@@ -1610,24 +1623,24 @@ error_trap 'localizations push branch'
 
 
 (cd $BUILD_HOME/extension &&
+    # The extension does not depend on the @urnetwork/sdk npm package: it
+    # builds against the sibling $BUILD_HOME/sdk/js checkout of this run (its
+    # TS source, and the wasm `make package` built above; see the extension's
+    # sdk-source.ts), so only localizations is pinned here.
     # No registry version was created when npm credentials were absent. Keep
     # the extension's existing registry pins in that case, so it can still build.
     if [ "$SDK_NPM_PUBLISH" = yes ]; then
         # npm acknowledges a publish before registry metadata and its tarball
-        # are necessarily available. Prove both exact dependencies with fresh
+        # are necessarily available. Prove the exact dependency with fresh
         # caches before npm install resolves the extension lock; the readiness
         # helper retries only the expected bounded ETARGET/E404 propagation
         # window. npm_fork_version then uses separate fresh caches and retries
-        # only an ETARGET naming one of these exact dependencies.
+        # only an ETARGET naming this exact dependency.
         "$BUILD_HOME/all/npm-package-ready.zsh" \
             @urnetwork/localizations "$EXTERNAL_WARP_VERSION" &&
-        "$BUILD_HOME/all/npm-package-ready.zsh" \
-            @urnetwork/sdk "$EXTERNAL_WARP_VERSION" &&
         npm_edit_module @urnetwork/localizations &&
-        npm_edit_module @urnetwork/sdk &&
         npm_fork_version "$EXTENSION_VERSION" \
-            @urnetwork/localizations "$EXTERNAL_WARP_VERSION" \
-            @urnetwork/sdk "$EXTERNAL_WARP_VERSION"
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION"
     else
         builder_message "npm publication skipped; extension retains its current registry dependencies" &&
         npm_fork_version "$EXTENSION_VERSION"
@@ -2000,7 +2013,10 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 # builder_message "proxy wg \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
-(cd $BUILD_HOME/extension && make)
+# UR_SKIP_SDK_BUILD: the extension's sync-sdk step uses the sdk wasm `make
+# package` built in $BUILD_HOME/sdk/js above instead of rebuilding it, and
+# fails if there is none
+(cd $BUILD_HOME/extension && UR_SKIP_SDK_BUILD=1 make)
 error_trap 'build extension'
 
 github_release_upload "crx-@urnetwork-extension-${EXTENSION_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTENSION_VERSION}.zip"
