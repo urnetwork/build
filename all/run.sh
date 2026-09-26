@@ -8,9 +8,13 @@
 # (optional) BUILD_OUT
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
-# (optional) BUILD_URIO_CHANGELOG=0 skips both GitHub-API-backed changelog
-#            paths: the ur.io source refresh and release-body/store notes;
-#            unset or 1 runs both generators
+# (optional) BUILD_URIO_CHANGELOG=0 skips the GitHub-API-backed release-body
+#            and store notes; unset or 1 generates them
+# (optional) BUILD_URIO_SITE_CHANGELOG=0 skips the ur.io /changelog source
+#            refresh (its own GitHub API walk). The site's freshness gate then
+#            fails unless ALLOW_STALE_CHANGELOG=1 is also set: a stale
+#            /changelog must be an explicit decision, never a side effect of
+#            turning the release notes off (which froze it at 2026.9.14)
 # (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
 #            TWINE_PASSWORD/PYPI_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY,
 #            CARGO_REGISTRY_TOKEN, MAVEN_CENTRAL_USERNAME/PASSWORD plus
@@ -433,7 +437,6 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf warp)
     (cd $BUILD_HOME && rm -rf glog)
     (cd $BUILD_HOME && rm -rf proxy)
-    (cd $BUILD_HOME && rm -rf operator-proxy)
     (cd $BUILD_HOME && rm -rf userwireguard)
     (cd $BUILD_HOME && rm -rf goidenticons)
     (cd $BUILD_HOME && rm -rf extension)
@@ -498,8 +501,6 @@ error_trap 'pull warp'
 error_trap 'pull glog'
 (cd $BUILD_HOME/proxy && git_main)
 error_trap 'pull proxy'
-(cd $BUILD_HOME/operator-proxy && git_main)
-error_trap 'pull operator-proxy'
 (cd $BUILD_HOME/userwireguard && git_main master)
 error_trap 'pull userwireguard'
 (cd $BUILD_HOME/goidenticons && git_main)
@@ -529,9 +530,11 @@ fi
 # This is release synchronization, not site compilation: doing it here makes
 # the generated source part of repository history before the web build consumes
 # it. GITHUB_API_KEY raises the GitHub API limit for the release walk. The stage
-# remains strict and default-enabled; BUILD_URIO_CHANGELOG=0 is an explicit host
-# override for builds that must avoid this GitHub API walk.
-if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
+# remains strict and default-enabled; BUILD_URIO_SITE_CHANGELOG=0 is an explicit
+# host override for builds that must avoid this GitHub API walk. It is a separate
+# switch from BUILD_URIO_CHANGELOG (the release-body/store notes): sharing one
+# flag froze the public /changelog at 2026.9.14 while the notes were off.
+if [ "${BUILD_URIO_SITE_CHANGELOG:-1}" = 1 ]; then
     builder_message "updating the generated ur.io changelog"
     (cd $WARP_HOME/mmm/ur.io &&
         CHANGELOG_STRICT=1 \
@@ -539,7 +542,7 @@ if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
         node react/scripts/generate-changelog.mjs)
     error_trap 'ur.io changelog update'
 else
-    builder_message "skipping the generated ur.io changelog update (BUILD_URIO_CHANGELOG disabled)"
+    builder_message "skipping the generated ur.io changelog update (BUILD_URIO_SITE_CHANGELOG disabled)"
 fi
 
 # The install page's desktop downloads: the newest complete GitHub release
@@ -552,6 +555,20 @@ builder_message "updating the generated ur.io desktop releases"
     GITHUB_TOKEN="$GITHUB_API_KEY" \
     node react/scripts/generate-releases.mjs)
 error_trap 'ur.io releases update'
+
+# The site must not ship a /changelog older than the desktop release it
+# advertises: the gate fails when LATEST_VERSION trails DESKTOP_RELEASE or the
+# newest entry is more than 14 days behind it (ALLOW_STALE_CHANGELOG=1 overrides).
+(cd $WARP_HOME/mmm/ur.io && node react/scripts/check-changelog-fresh.mjs)
+error_trap 'ur.io changelog freshness'
+
+# The per-URL content-date record (sitemap lastmod + dateModified) is derived
+# from the docs, country data and API spec and committed with them; regenerate
+# it here so the release commit below carries the record its build checks.
+(cd $WARP_HOME/mmm/ur.io &&
+    node react/scripts/generate-docs.mjs &&
+    node react/scripts/content-dates.mjs)
+error_trap 'ur.io content dates update'
 
 # regenerate every app's strings from the shared localization store:
 # localizations/keys/*.yaml -> android res/values*, apple Localizable.xcstrings,
@@ -829,9 +846,10 @@ fi
     git add \
         ur.io/react/src/data/changelog.js \
         ur.io/react/src/data/changelog-version.js \
-        ur.io/react/src/data/releases.js &&
+        ur.io/react/src/data/releases.js \
+        ur.io/react/src/data/content-dates.js &&
     if ! git diff --cached --quiet; then
-        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog and releases update" &&
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog, releases and content dates update" &&
         git push
     fi)
 error_trap 'ur.io changelog update push'
@@ -899,8 +917,6 @@ error_trap 'warp prepare branch'
 error_trap 'glog prepare branch'
 (cd $BUILD_HOME/proxy && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'proxy prepare branch'
-(cd $BUILD_HOME/operator-proxy && git checkout -b v${EXTERNAL_WARP_VERSION})
-error_trap 'operator-proxy prepare branch'
 (cd $BUILD_HOME/userwireguard && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'userwireguard prepare branch'
 (cd $BUILD_HOME/goidenticons && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -951,8 +967,8 @@ error_trap 'android edit settings'
 #
 # When enabled, the attempted generator and its requested release inputs are
 # required. Failed generation must not silently substitute pending.txt or earlier
-# generated notes. BUILD_URIO_CHANGELOG=0 skips this generator together with the
-# ur.io changelog refresh above. GITHUB_API_KEY raises the API limit here too;
+# generated notes. BUILD_URIO_CHANGELOG=0 skips this generator only; the ur.io
+# /changelog refresh above has its own switch. GITHUB_API_KEY raises the API limit here too;
 # every repo walked is public, so that token is optional.
 #
 # THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
@@ -1410,22 +1426,6 @@ error_trap 'proxy edit'
 error_trap 'proxy push branch'
 
 
-(cd $BUILD_HOME/operator-proxy &&
-    go_mod_edit_module github.com/urnetwork/operator-proxy &&
-    go_mod_edit_require github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/glog &&
-    go_edit_require_subpackages github.com/urnetwork/operator-proxy &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_edit_require_subpackages github.com/urnetwork/glog &&
-    go_mod_fork)
-error_trap 'operator-proxy edit'
-
-(cd $BUILD_HOME/operator-proxy &&
-    git_commit &&
-    git_tag)
-error_trap 'operator-proxy push branch'
-
-
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
@@ -1506,7 +1506,6 @@ error_trap 'js-sdk publish'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
-    go_mod_edit_require github.com/urnetwork/operator-proxy &&
     # Drop the local-development server requirement. Integration tools that
     # need unpublished server packages stay outside the versioned module below;
     # remaining library tests can resolve an already-published server version.
@@ -1518,7 +1517,6 @@ error_trap 'js-sdk publish'
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
-    go_edit_require_subpackages github.com/urnetwork/operator-proxy &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
@@ -1540,7 +1538,6 @@ error_trap 'sn push branch'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
-    go_mod_edit_require github.com/urnetwork/operator-proxy &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk &&
@@ -1549,7 +1546,6 @@ error_trap 'sn push branch'
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
-    go_edit_require_subpackages github.com/urnetwork/operator-proxy &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
@@ -1834,7 +1830,8 @@ $a"
     # this re-checks against what the header and the VirusTotal table actually
     # took, and drops the section with a warning rather than risking the release.
     #
-    # BUILD_URIO_CHANGELOG=0 disables changelog generation globally. With
+    # BUILD_URIO_CHANGELOG=0 disables the release-body/store notes (the ur.io
+    # /changelog refresh is switched separately). With
     # generation enabled, BUILD_RELEASE_BODY_CHANGELOG= remains the narrower
     # switch that omits only this release-body section (see README).
     if [ ! "$1" ] && [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ "${BUILD_RELEASE_BODY_CHANGELOG:-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then

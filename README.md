@@ -40,11 +40,16 @@ redundancy: fdroiddata's recipe declares `VercodeOperation: ['%c + 2', '%c + 3']
 for the ABI-split APKs and fdroidserver matches changelog files by exact
 filename, so a base-code-only file means F-Droid shows no changelog at all.
 
-Set `BUILD_URIO_CHANGELOG=0` to skip both this release-body/store-note generator
-and the ur.io website changelog refresh. This does not skip the ur.io desktop
-release metadata refresh. When generation remains enabled, set
-`BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full changelog from the GitHub
-release body while retaining the generated store notes.
+Set `BUILD_URIO_CHANGELOG=0` to skip this release-body/store-note generator.
+The ur.io website `/changelog` refresh has its own switch,
+`BUILD_URIO_SITE_CHANGELOG=0`, because sharing one flag froze the public
+changelog at 2026.9.14 while the notes were off: with the site refresh skipped,
+the `check-changelog-fresh` gate that runs after the desktop release refresh
+fails unless `ALLOW_STALE_CHANGELOG=1` is set as well. Neither flag skips the
+ur.io desktop release metadata refresh or the content-date record
+(`content-dates.mjs`), which the same release commit carries. When generation
+remains enabled, set `BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full
+changelog from the GitHub release body while retaining the generated store notes.
 
 Run it by hand for any pair of releases -- it is deterministic, and it needs no
 token for these repos because they are all public:
