@@ -586,16 +586,28 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# Gradle evaluates Android's version fields even for dependency reports and
+# reads them through the sibling warpctl binary. Bootstrap that fresh checkout
+# before the license gate; allocate the new release only after all gates pass.
+(cd $BUILD_HOME/warp/warpctl && make)
+error_trap 'build bootstrap warpctl'
+export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
+if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
+    builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
+    exit 1
+fi
+
 # license list gate: sdk/license.yml is embedded in the SDK and shown under
 # Account -> Settings -> Licenses in every app, so it must list every dependency
 # each app ships. -check recollects each app's dependencies offline (gradle
 # runtime classpaths, Package.resolved, the npm lockfiles, the SDK's Go modules)
 # from the sibling checkouts and fails on anything missing or stale. The fix is
-# `go run ./licenses` in the sdk repo and a commit of license.yml.
+# `go run ./licenses` in the sdk repo and a commit of license.yml. The site
+# checkout lives under WARP_HOME, outside the build repository's siblings.
 builder_message "checking the license list against every app's dependencies"
 (cd $BUILD_HOME/sdk &&
     for target in sdk android apple web extension; do
-        go run ./licenses -check $target || exit $?
+        go run ./licenses -check "$target" -mmm-dir "$WARP_HOME/mmm" || exit $?
     done)
 error_trap 'license list check'
 
@@ -773,14 +785,6 @@ if [ "$BUILD_TEST" ]; then
     builder_message "Build all test candidate passed. A version number can now be assigned."
 fi
 
-
-(cd $BUILD_HOME/warp/warpctl && make)
-error_trap 'build bootstrap warpctl'
-export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
-if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
-    builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
-    exit 1
-fi
 
 warpctl stage version next release --message="$HOST build all"
 error_trap 'warpctl stage version'
