@@ -1,5 +1,5 @@
 // Command acceptance drives the locally built Linux or Windows service against
-// main and emits one machine-readable result after every check succeeds.
+// main and preserves completed checks in a machine-readable result on failure.
 package main
 
 import (
@@ -55,13 +55,15 @@ type options struct {
 
 // Records the changed-egress proof from every requested repetition.
 type acceptanceResult struct {
-	Ok          bool               `json:"ok"`
-	Platform    string             `json:"platform"`
-	Repetitions int                `json:"repetitions"`
-	BeforeIps   []string           `json:"before_ips"`
-	AfterIps    []string           `json:"after_ips"`
-	PeerToPeer  []peerToPeerResult `json:"peer_to_peer"`
-	AuthCases   []authcases.Result `json:"auth_cases"`
+	Ok                   bool               `json:"ok"`
+	Complete             bool               `json:"complete"`
+	Platform             string             `json:"platform"`
+	Repetitions          int                `json:"repetitions"`
+	CompletedRepetitions int                `json:"completed_repetitions"`
+	BeforeIps            []string           `json:"before_ips"`
+	AfterIps             []string           `json:"after_ips"`
+	PeerToPeer           []peerToPeerResult `json:"peer_to_peer"`
+	AuthCases            []authcases.Result `json:"auth_cases"`
 }
 
 // Decodes the common error payload returned by direct cleanup calls.
@@ -104,13 +106,8 @@ func main() {
 	}
 
 	result, err := run(opts)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "acceptance: %v\n", err)
-		os.Exit(1)
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
-		fmt.Fprintf(os.Stderr, "acceptance: encode result: %v\n", err)
-		os.Exit(1)
+	if code := writeAcceptanceResult(os.Stdout, os.Stderr, result, err); code != 0 {
+		os.Exit(code)
 	}
 }
 
@@ -144,27 +141,26 @@ func run(opts options) (*acceptanceResult, error) {
 	result.AuthCases = (&authcases.Runner{APIURL: apiUrl, Config: testsConfig}).Run(
 		context.Background(), []string{"email", "phone", "solana", "bittensor"},
 	)
-	for _, authCase := range result.AuthCases {
-		fmt.Fprintf(os.Stderr, "acceptance: auth case %s: %s\n", authCase.Case, authCase.Status)
-		if authCase.Status != "PASS" {
-			return nil, fmt.Errorf("auth case %s: %s", authCase.Case, authCase.Detail)
-		}
+	if err := reportAuthCases(os.Stderr, result.AuthCases); err != nil {
+		return result, err
 	}
 	for i := 1; i <= opts.Repeat; i++ {
 		fmt.Fprintf(os.Stderr, "acceptance: repetition %d/%d: guest login/logout/secret-key login\n", i, opts.Repeat)
 		if err := guestCredentialLifecycle(opts.Fixture, filepath.Join(opts.StateDir, "guest")); err != nil {
-			return nil, fmt.Errorf("guest credential lifecycle: %w", err)
+			return result, fmt.Errorf("guest credential lifecycle: %w", err)
 		}
 		var peerResult peerToPeerResult
 		before, after, err := runTunnelIteration(opts, user, password, peerProviderClientId, i, &peerResult)
 		if err != nil {
-			return nil, fmt.Errorf("repetition %d: %w", i, err)
+			return result, fmt.Errorf("repetition %d: %w", i, err)
 		}
 		result.BeforeIps = append(result.BeforeIps, before)
 		result.AfterIps = append(result.AfterIps, after)
 		result.PeerToPeer = append(result.PeerToPeer, peerResult)
+		result.CompletedRepetitions++
 	}
 	result.Ok = true
+	result.Complete = true
 	return result, nil
 }
 

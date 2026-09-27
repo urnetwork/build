@@ -6,6 +6,26 @@ import { pathToFileURL } from "node:url";
 
 const defaultApiURL = "https://api.bringyour.com";
 const cleanupReports = new WeakMap();
+const cleanupRetryHints = new WeakMap();
+
+function retryAfterSeconds(response) {
+  const header = response.headers?.get?.("retry-after");
+  if (typeof header !== "string") return undefined;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : undefined;
+  }
+  // Accept only a canonical HTTP date, not Date.parse's permissive numeric or
+  // arbitrary-text forms. Retain the derived duration, never the raw header.
+  if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value)) {
+    return undefined;
+  }
+  const at = Date.parse(value);
+  if (!Number.isFinite(at) || new Date(at).toUTCString() !== value) return undefined;
+  const seconds = Math.max(0, Math.ceil((at - Date.now()) / 1000));
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
 
 async function post(apiURL, route, body, jwt, fetchImpl) {
   let response;
@@ -30,6 +50,10 @@ async function post(apiURL, route, body, jwt, fetchImpl) {
     const error = new Error(`main API ${route} returned HTTP ${response.status}`);
     error.route = route;
     error.status = response.status;
+    if (response.status === 429) {
+      const seconds = retryAfterSeconds(response);
+      if (seconds !== undefined) cleanupRetryHints.set(error, seconds);
+    }
     throw error;
   }
   return result;
@@ -47,7 +71,9 @@ function safeCleanupFailure(error) {
   const networkCode = causes.map(value => value?.code).find(code => knownCodes.includes(code)) ?? null;
   const kind = status !== null ? "http-status" : ["AbortError", "TimeoutError"].includes(error?.name) ? "timeout" :
     error?.name === "TypeError" || networkCode !== null ? "network" : stage !== "unknown" ? "rejected" : "unclassified";
-  return { stage, kind, status, networkCode };
+  const seconds = cleanupRetryHints.get(error);
+  return { stage, kind, status, networkCode,
+    ...(seconds !== undefined ? { retryAfterSeconds: seconds } : {}) };
 }
 
 // The report is formed from allowlisted values at the cleanup boundary. It
@@ -115,7 +141,9 @@ function cleanupFailureSummary(error) {
     /^\/[a-z0-9/-]+$/.test(error.route) &&
     Number.isInteger(error?.status)
   ) {
-    return `main API ${error.route} returned HTTP ${error.status}`;
+    const seconds = cleanupRetryHints.get(error);
+    return `main API ${error.route} returned HTTP ${error.status}` +
+      (seconds !== undefined ? `; retry after at least ${seconds} seconds` : "");
   }
   if (error?.message === "cleanup login returned no network session") {
     return error.message;
@@ -152,8 +180,15 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
   let releasedClients = 0;
   let removedMarkers = 0;
   let remainingMarkers = 0;
+  let deferredGroups = 0;
+  let loginRateLimited = false;
   const failures = [];
   for (const [clientId, aliases] of markerGroups) {
+    if (loginRateLimited) {
+      deferredGroups += 1;
+      remainingMarkers += aliases.length;
+      continue;
+    }
     try {
       await releaseClient({ clientId, user, password, fetchImpl });
       for (const file of aliases) {
@@ -162,10 +197,12 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
       }
       releasedClients += 1;
     } catch (error) {
-      // Continue with independent client groups, but retain every alias for
-      // this group so a later cleanup can retry it explicitly.
+      // Every group uses the same credentials. After an auth rate limit, do
+      // not issue another login; retain all remaining aliases for an explicit
+      // later cleanup. Other failures still allow independent group cleanup.
       failures.push(error);
       remainingMarkers += aliases.length;
+      loginRateLimited = error?.route === "/auth/login-with-password" && error?.status === 429;
     }
   }
 
@@ -173,10 +210,12 @@ export async function cleanupClientFiles(files, environment = process.env, fetch
     const summaries = [...new Set(failures.map(cleanupFailureSummary))];
     const error = new AggregateError(
       failures,
-      `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup: ${summaries.join("; ")}`,
+      `${failures.length === 1 ? "one" : failures.length} retained network client group${failures.length === 1 ? "" : "s"} failed cleanup: ${summaries.join("; ")}` +
+        (deferredGroups > 0 ? `; ${deferredGroups} remaining group${deferredGroups === 1 ? "" : "s"} deferred after login rate limit` : ""),
     );
     cleanupReports.set(error, { type: "retained-client-cleanup", schemaVersion: 1, eligible: false,
-      releasedClients, removedMarkers, failedGroups: failures.length, remainingMarkers,
+      releasedClients, removedMarkers, failedGroups: failures.length,
+      ...(deferredGroups > 0 ? { deferredGroups } : {}), remainingMarkers,
       failures: failures.map(safeCleanupFailure) });
     throw error;
   }
