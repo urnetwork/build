@@ -6,6 +6,10 @@
 # APPLE_API_ISSUER
 # GITHUB_API_KEY
 # (optional) BUILD_OUT
+# The all-release IP refresh requires geoipupdate and these readable inputs:
+# GEOIP_CONF_FILE defaults to $WARP_HOME/vault/mm-geoip.yml (MaxMind YAML)
+# ARIN_CREDENTIALS_FILE defaults to $WARP_HOME/vault/arin.yml (replacement key)
+# ARIN_RULES_FILE defaults to $WARP_HOME/config/$BUILD_ENV/arindb.yml (reviewed rules)
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the GitHub-API-backed release-body
@@ -79,6 +83,7 @@ required_build_tools=(
     curl
     docker
     ffprobe
+    geoipupdate
     git
     go
     gsed
@@ -2372,6 +2377,71 @@ error_trap 'android github arm64-v8a reproducible pre-release'
 
 
 # Warp services
+
+# Generate both databases from the selected versioned Server before packaging
+# config. Ordinary local builds may keep using their existing cache; this is
+# the explicit all-release refresh workflow, not a service startup gate.
+refresh_ip_databases () {
+    local geoip_config="${GEOIP_CONF_FILE:-$WARP_HOME/vault/mm-geoip.yml}"
+    local arin_credentials="${ARIN_CREDENTIALS_FILE:-$WARP_HOME/vault/arin.yml}"
+    local arin_rules="${ARIN_RULES_FILE:-$WARP_HOME/config/$BUILD_ENV/arindb.yml}"
+    if [ ! -f "$geoip_config" ] || [ ! -r "$geoip_config" ]; then
+        print -u2 -- "IP refresh requires readable GEOIP_CONF_FILE: $geoip_config"
+        return 1
+    fi
+    if [ ! -f "$arin_credentials" ] || [ ! -r "$arin_credentials" ]; then
+        print -u2 -- "IP refresh requires readable ARIN_CREDENTIALS_FILE: $arin_credentials"
+        return 1
+    fi
+    if [ ! -f "$arin_rules" ] || [ ! -r "$arin_rules" ]; then
+        print -u2 -- "IP refresh requires readable ARIN_RULES_FILE with reviewed classifier rules: $arin_rules"
+        return 1
+    fi
+    local config_root="$WARP_HOME/config"
+    local geoip_target="$config_root/all/mmdb/$WARP_VERSION"
+    local arin_target="$config_root/all/arindb/$WARP_VERSION"
+    if [ -e "$geoip_target" ] || [ -L "$geoip_target" ] || [ -e "$arin_target" ] || [ -L "$arin_target" ]; then
+        print -u2 -- "IP refresh version already exists; existing cache versions are never replaced"
+        return 1
+    fi
+    local ipdb_out="${BUILD_OUT:-$BUILD_HOME/out}/ip-databases"
+    mkdir -p -- "$ipdb_out" || return $?
+    ipdb_out=$(cd "$ipdb_out" && pwd -P) || return $?
+    local ipdb_work
+    ipdb_work=$(mktemp -d "$ipdb_out/refresh.XXXXXXXX") || return $?
+    (cd "$BUILD_HOME/server${GO_MOD_SUFFIX}" &&
+        go build -ldflags "-X main.Version=$WARP_VERSION" -o "$ipdb_work/arindbctl" ./arindbctl) || return $?
+    # The refresh command downloads GeoLite2 first, then ARIN orgs+nets, and
+    # only publishes the bundle after both databases and manifests validate.
+    "$ipdb_work/arindbctl" refresh \
+        --geoip-config "$geoip_config" \
+        --credentials "$arin_credentials" \
+        --rules "$arin_rules" \
+        --output "$ipdb_work/bundle" \
+        --timeout 1h || return $?
+    if [ -e "$geoip_target" ] || [ -L "$geoip_target" ] || [ -e "$arin_target" ] || [ -L "$arin_target" ]; then
+        print -u2 -- "IP refresh version appeared during generation; nothing published"
+        return 1
+    fi
+    mkdir -p -- "$config_root/all/mmdb" "$config_root/all/arindb" || return $?
+    mv -- "$ipdb_work/bundle/mmdb" "$geoip_target" || return $?
+    if ! mv -- "$ipdb_work/bundle/arindb" "$arin_target"; then
+        # Restore the still-private first half if the second rename failed.
+        mv -- "$geoip_target" "$ipdb_work/bundle/mmdb" || return $?
+        return 1
+    fi
+    (cd "$config_root" &&
+        git add -- "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
+        if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION"; then
+            git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 and ARIN databases" -- \
+                "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
+            git_push_with_rebase_retry
+        fi) || return $?
+    builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`"
+}
+
+refresh_ip_databases
+error_trap 'GeoLite2 then ARIN release refresh'
 
 # The config-updater image carries this release's config, so on the deploy
 # path it is built after the Brevo template export below has written its

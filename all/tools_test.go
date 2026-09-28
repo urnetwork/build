@@ -36,7 +36,7 @@ func TestSDKBuildToolsPreflight(t *testing.T) {
 			}
 			// Keep an independent inventory: omitting a newly required command from
 			// the fixture should fail the successful preflight tests.
-			for _, name := range strings.Fields("bash cargo clang++ codesign curl docker ffprobe gem git go gobind gomobile gsed hdiutil install_name_tool java jq make mktemp mvn nc node npm npx openssl otool pandoc pip pkill productbuild productsign python python3 qemu-img qemu-system-aarch64 realpath rsync ruby scp sdkmanager security shasum ssh ssh-keygen sudo swift tar timeout unzip xcodebuild xcrun zip zig") {
+			for _, name := range strings.Fields("bash cargo clang++ codesign curl docker ffprobe gem geoipupdate git go gobind gomobile gsed hdiutil install_name_tool java jq make mktemp mvn nc node npm npx openssl otool pandoc pip pkill productbuild productsign python python3 qemu-img qemu-system-aarch64 realpath rsync ruby scp sdkmanager security shasum ssh ssh-keygen sudo swift tar timeout unzip xcodebuild xcrun zip zig") {
 				if name == test.missing {
 					continue
 				}
