@@ -235,6 +235,20 @@ require_build_artifacts () {
     done
 }
 
+# The "Developer ID Application" identity that signs the macOS direct-download
+# DMG, printed as its SHA-1 so codesign never sees an ambiguous name. Fails with
+# a clear message when the signing keychains have none (the smoke expectation:
+# `security find-identity -v -p codesigning | grep -q "Developer ID Application"`).
+macos_developer_id_identity () {
+    local identity
+    identity=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -n 1 | awk '{ print $2 }')
+    if [ ! "$identity" ]; then
+        builder_message "error: no 'Developer ID Application' identity in the signing keychains, so the macOS direct-download DMG cannot be signed. Assemble ~/.identity-devid.p12 with all/make-apple-dist-identity.sh developer-id <developer-id-application.cer> (Account Holder creates the certificate) and rerun (REMOTEBUILD.md)" >&2
+        return 1
+    fi
+    echo "$identity"
+}
+
 # Mirror the existing Windows architecture plan, not a nullglob-derived subset.
 require_windows_artifacts () {
     local output_directory="$1" version="$2" suffix
@@ -375,11 +389,14 @@ if [ "$BUILD_APPLE_IDENTITY" ]; then
         security unlock-keychain -p "$APPLE_IDENTITY_KC_PW" "$APPLE_IDENTITY_KC"
     error_trap 'apple identity keychain create'
     # import every identity on the box (~/.identity.p12 plus optional extras
-    # like ~/.identity-dist.p12 / ~/.identity-installer.p12 — all share the
-    # ~/.p12-pw passphrase; see all/make-apple-dist-identity.sh). The archive
-    # signs with Apple Development; the store export additionally needs Apple
-    # Distribution (and Mac Installer Distribution for the macOS .pkg) when
-    # cloud signing is unavailable.
+    # like ~/.identity-dist.p12 / ~/.identity-installer.p12 /
+    # ~/.identity-devid.p12 — all share the ~/.p12-pw passphrase; see
+    # all/make-apple-dist-identity.sh). The archive signs with Apple
+    # Development; the store export additionally needs Apple Distribution (and
+    # Mac Installer Distribution for the macOS .pkg) when cloud signing is
+    # unavailable; the macOS direct-download DMG needs Developer ID
+    # Application (find-identity below must list it, see
+    # macos_developer_id_identity).
     for identity_p12 in "$HOME"/.identity*.p12; do
         security import "$identity_p12" -P "$(cat ~/.p12-pw)" -f pkcs12 \
             -T /usr/bin/codesign -T /usr/bin/security \
@@ -403,6 +420,13 @@ if [ "$BUILD_APPLE_IDENTITY" ]; then
     error_trap 'apple identity codesign smoke test'
     rm -f /tmp/apple-identity-smoke
 fi
+
+# The macOS direct-download DMG (Apple section below) is signed with a
+# "Developer ID Application" identity: ~/.identity-devid.p12 imported above,
+# or one already in the login keychain. Prove it is present before spending
+# hours on the builds ahead of it.
+MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
+error_trap 'macos direct: Developer ID Application identity'
 
 
 git_main () {
@@ -2067,16 +2091,50 @@ bug_fix_clean_ipa () {
     fi
 }
 
+# macos_notarize_and_staple <path> — submit an .app (zipped for the upload) or
+# a .dmg to Apple's notary service with the App Store Connect API key, wait for
+# the verdict, require "Accepted" (a non-accepted verdict is a failure even
+# when notarytool exits 0), then staple the ticket to the path.
+macos_notarize_and_staple () {
+    local target="$1" submission="$1" verdict verdict_status
+    if [ ! -f "$APPLE_API_KEY_P8" ]; then
+        builder_message "error: notarytool needs the App Store Connect API key AuthKey_${APPLE_API_KEY}.p8 in ~/.private_keys, ~/private_keys or ~/.appstoreconnect/private_keys"
+        return 1
+    fi
+    if [ -d "$target" ]; then
+        submission="${target%.app}-notarize.zip"
+        rm -f "$submission"
+        ditto -c -k --keepParent "$target" "$submission" || return $?
+    fi
+    verdict=$(xcrun notarytool submit "$submission" --key "$APPLE_API_KEY_P8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait 2>&1)
+    verdict_status=$?
+    echo "$verdict"
+    if [ $verdict_status != 0 ]; then
+        return $verdict_status
+    fi
+    if ! echo "$verdict" | grep -q 'status: Accepted'; then
+        builder_message "error: notarization of $target was not accepted"
+        return 1
+    fi
+    if [ "$submission" != "$target" ]; then
+        rm -f "$submission"
+    fi
+    xcrun stapler staple "$target"
+}
+
 # Headless provisioning auth (REMOTEBUILD.md): hand -allowProvisioningUpdates the
 # App Store Connect API key explicitly (Xcode 13+) so profile downloads never
 # depend on Xcode-account GUI state. altool below discovers the same .p8 by key
 # id from these standard directories; when none is found the array stays empty
-# and xcodebuild behaves exactly as before.
+# and xcodebuild behaves exactly as before. APPLE_API_KEY_P8 keeps the path for
+# notarytool (macOS direct download below), which takes the key file explicitly.
 XCODEBUILD_AUTH=()
+APPLE_API_KEY_P8=""
 for d in "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"; do
     if [ -f "$d/AuthKey_${APPLE_API_KEY}.p8" ]; then
+        APPLE_API_KEY_P8="$d/AuthKey_${APPLE_API_KEY}.p8"
         XCODEBUILD_AUTH=(
-            -authenticationKeyPath "$d/AuthKey_${APPLE_API_KEY}.p8"
+            -authenticationKeyPath "$APPLE_API_KEY_P8"
             -authenticationKeyID "$APPLE_API_KEY"
             -authenticationKeyIssuerID "$APPLE_API_ISSUER"
         )
@@ -2116,10 +2174,51 @@ error_trap 'macos build and deploy'
 
 # The macOS pkg is the Mac App Store export (app-store-connect ExportOptions.plist).
 # It is signed for the store only and does not launch when installed directly,
-# so it is NOT attached to the GitHub release. macOS ships through the Mac App
-# Store until a Developer ID signed + notarized export exists
-# (all/macos-release-asset.test.sh).
+# so it is NOT attached to the GitHub release; the direct download is the
+# Developer ID signed + notarized DMG built next (all/macos-release-asset.test.sh).
 builder_message "macos \`${EXTERNAL_WARP_VERSION}\` uploaded to App Store Connect"
+
+
+# =============================================================================
+# macOS direct download: the URnetworkDirect scheme (system-extension tunnel,
+# Stripe billing; apple/app/ExportOptions-DeveloperID.plist) exported with
+# Developer ID, notarized and stapled, wrapped in a DMG that is itself signed,
+# notarized and stapled, then Gatekeeper-assessed before it becomes the macOS
+# asset of the GitHub release and the ur.io install page. The App Store build
+# above is untouched. Requires the "Developer ID Application" identity proved
+# at startup (macos_developer_id_identity) and the App Store Connect API key
+# .p8 (APPLE_API_KEY_P8) for notarytool. Covered by
+# all/macos-direct-release.test.sh and component_required_test.go.
+
+MACOS_DIRECT_DMG="URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg"
+MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
+error_trap 'macos direct: Developer ID Application identity'
+
+(cd $BUILD_HOME/apple/app &&
+    rm -rf build-direct.xcarchive build/direct build/direct-dmg "build/$MACOS_DIRECT_DMG" &&
+    xcodebuild -scheme URnetworkDirect clean &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetworkDirect -archivePath build-direct.xcarchive -destination generic/platform=macOS &&
+    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions-DeveloperID.plist -archivePath build-direct.xcarchive -exportPath build/direct -destination generic/platform=macOS &&
+    require_build_artifacts build/direct/URnetwork.app/Contents/MacOS/URnetwork &&
+    macos_notarize_and_staple build/direct/URnetwork.app)
+error_trap 'macos direct build and notarize'
+
+# DMG: the stapled app plus an Applications symlink (drag to install; the app
+# must run from /Applications to activate its system extension)
+(cd $BUILD_HOME/apple/app &&
+    mkdir -p build/direct-dmg &&
+    ditto build/direct/URnetwork.app build/direct-dmg/URnetwork.app &&
+    ln -s /Applications build/direct-dmg/Applications &&
+    hdiutil create -volname URnetwork -srcfolder build/direct-dmg -ov -format UDZO "build/$MACOS_DIRECT_DMG" &&
+    require_build_artifacts "build/$MACOS_DIRECT_DMG" &&
+    codesign --force --timestamp --sign "$MACOS_DIRECT_IDENTITY" "build/$MACOS_DIRECT_DMG" &&
+    macos_notarize_and_staple "build/$MACOS_DIRECT_DMG" &&
+    spctl --assess --type open --context context:primary-signature -vv "build/$MACOS_DIRECT_DMG" &&
+    spctl --assess --type execute -vv build/direct/URnetwork.app)
+error_trap 'macos direct dmg'
+
+github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_DMG"
+builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 # =============================================================================
