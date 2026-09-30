@@ -1367,6 +1367,27 @@ git_tag () {
     fi
 }
 
+# Create and push the F-Droid tag, v<version>-fdroid, on the degoogled commit
+# that v<version>-ungoogle records.
+#
+# F-Droid picks up tags from this repo and verifies its build against the
+# github-flavor APKs in the v<version>, v<version+2> and v<version+3> releases.
+# Those tags and the -ungoogle tag are all pushed BEFORE the builds, so a run
+# that fails part way leaves tags whose releases have no APK. This tag is the
+# stable marker: it is pushed only after every one of those APKs is published,
+# so fdroiddata can track `UpdateCheckMode: Tags .+-fdroid$` and skip the rest.
+git_tag_fdroid () {
+    local tag="v${EXTERNAL_WARP_VERSION}-fdroid"
+    local source_tag="v${EXTERNAL_WARP_VERSION}-ungoogle"
+    if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once)."
+        return 1
+    else
+        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}-fdroid" "${source_tag}^{commit}" &&
+        git push origin "refs/tags/$tag"
+    fi
+}
+
 
 (cd $BUILD_HOME/glog &&
     go_mod_edit_module github.com/urnetwork/glog &&
@@ -2232,7 +2253,8 @@ builder_message "android \`${EXTERNAL_WARP_VERSION}\` available - https://github
 
 
 # Github / Ungoogle
-# note for F-Droid, the -ungoogle tag should be aliased to -fdroid to trigger their build
+# note for F-Droid, the -ungoogle tag is aliased to -fdroid to trigger their build,
+# but only after the APKs are published (see git_tag_fdroid below)
 #
 # REMEMBER WHERE THE RELEASE COMMIT IS, because everything below moves the
 # android submodule off it and onto a degoogled branch, and the build repo has
@@ -2374,6 +2396,13 @@ error_trap 'android github armeabi-v7a reproducible pre-release'
     echo "[2/2]Monitor the F-Droid build here: https://monitor.f-droid.org/builds/log/com.bringyour.network/$WARP_VERSION_CODE"
 )
 error_trap 'android github arm64-v8a reproducible pre-release'
+
+# Every APK F-Droid verifies against is now published (each upload and release
+# above exits the run on failure), so mark this version as ready for F-Droid.
+(cd $BUILD_HOME &&
+    git_tag_fdroid)
+error_trap 'push fdroid tag'
+builder_message "android fdroid tag \`v${EXTERNAL_WARP_VERSION}-fdroid\` pushed"
 
 
 # Warp services
