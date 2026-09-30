@@ -2114,8 +2114,12 @@ builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com
     xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 error_trap 'macos build and deploy'
 
-github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.pkg" "$BUILD_HOME/apple/app/build/URnetwork.pkg"
-builder_message "macos \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+# The macOS pkg is the Mac App Store export (app-store-connect ExportOptions.plist).
+# It is signed for the store only and does not launch when installed directly,
+# so it is NOT attached to the GitHub release. macOS ships through the Mac App
+# Store until a Developer ID signed + notarized export exists
+# (all/macos-release-asset.test.sh).
+builder_message "macos \`${EXTERNAL_WARP_VERSION}\` uploaded to App Store Connect"
 
 
 # =============================================================================
