@@ -186,7 +186,8 @@ func TestRunAppleComponentFailuresAreFatal(t *testing.T) {
 		steps     []string
 	}{
 		{name: "ios", extension: "ipa", source: ios, steps: []string{"clean", "archive", "size-check", "export", "ipa-clean", "validate", "store-upload", "publish"}},
-		{name: "macos", extension: "pkg", source: macos, steps: []string{"clean", "archive", "export", "validate", "store-upload", "publish"}},
+		// the macOS pkg is the App Store export and is never published to GitHub
+		{name: "macos", extension: "pkg", source: macos, steps: []string{"clean", "archive", "export", "validate", "store-upload"}},
 	} {
 		for _, step := range testCase.steps {
 			result := runComponent(t, testCase.source, "", "ARTIFACT_EXTENSION="+testCase.extension, "FAIL_STEP="+step)
@@ -223,7 +224,9 @@ func TestRunAppleRejectsMissingEmptyAndStaleArtifacts(t *testing.T) {
 	}
 }
 
-// Healthy Apple artifacts still validate, upload to the store, and publish exactly once.
+// Healthy Apple artifacts still validate and upload to the store. The ipa publishes
+// exactly once; the macOS pkg is the Mac App Store export, which does not launch
+// when installed directly, so it is never attached to the GitHub release.
 func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
 	appleStart := "(cd $BUILD_HOME/apple/app &&"
 	ios := componentRegion(t, appleStart, appleStart)
@@ -231,13 +234,14 @@ func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
 	for _, testCase := range []struct {
 		extension string
 		source    string
+		publishes int
 	}{
-		{extension: "ipa", source: ios},
-		{extension: "pkg", source: macos},
+		{extension: "ipa", source: ios, publishes: 1},
+		{extension: "pkg", source: macos, publishes: 0},
 	} {
 		result := runComponent(t, testCase.source, "", "ARTIFACT_EXTENSION="+testCase.extension)
-		if result.exitCode != 0 || strings.Count(result.events, "validate\n") != 1 || strings.Count(result.events, "store-upload\n") != 1 || strings.Count(result.events, "publish\n") != 1 || !strings.Contains(result.events, "release-continued") {
-			t.Fatalf("healthy %s component did not publish exactly once: %+v", testCase.extension, result)
+		if result.exitCode != 0 || strings.Count(result.events, "validate\n") != 1 || strings.Count(result.events, "store-upload\n") != 1 || strings.Count(result.events, "publish\n") != testCase.publishes || !strings.Contains(result.events, "release-continued") {
+			t.Fatalf("healthy %s component did not publish %d time(s): %+v", testCase.extension, testCase.publishes, result)
 		}
 	}
 }

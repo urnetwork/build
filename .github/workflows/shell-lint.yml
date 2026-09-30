@@ -107,6 +107,9 @@ jobs:
       - name: Source-closure regression
         run: bash all/source-closure.test.sh
 
+      - name: macOS release asset regression
+        run: bash all/macos-release-asset.test.sh
+
       - name: shellcheck (style + info — advisory, never fails)
         if: always()
         run: |
