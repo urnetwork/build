@@ -20,6 +20,14 @@
 #       Writes ~/.identity-dist.p12 (and ~/.identity-installer.p12), then
 #       verifies each by importing into a throwaway keychain.
 #
+#   ./make-apple-dist-identity.sh developer-id <developer-id-application.cer>
+#       developer-id-application.cer = the "Developer ID Application" cert
+#                          (Account Holder only) from the portal, issued for
+#                          the SAME csr. Signs the macOS direct-download app
+#                          and DMG (notarized, outside the Mac App Store).
+#       Writes ~/.identity-devid.p12 (friendly name "Developer ID
+#       Application") and verifies it the same way.
+#
 # Alternative: if a Mac with the identity already in Xcode exists, skip this
 # script — export the identity there (Xcode > Settings > Accounts > Manage
 # Certificates > right-click > Export) with the passphrase from ~/.p12-pw and
@@ -63,6 +71,9 @@ make_csr () {
     echo "     certificate of that type first."
     echo "  4. copy them back here, then:"
     echo "       ./make-apple-dist-identity.sh assemble distribution.cer mac_installer.cer"
+    echo "  5. for the macOS direct-download DMG, an Account Holder creates a"
+    echo "     'Developer ID Application' cert from the SAME csr, then:"
+    echo "       ./make-apple-dist-identity.sh developer-id developerID_application.cer"
 }
 
 # cer_to_pem <in.cer> <out.pem> — portal certs are DER; accept PEM too
@@ -128,6 +139,14 @@ verify_p12s () {
     }
 }
 
+assembled_note () {
+    echo ""
+    echo "done. build/all/run.sh imports every ~/.identity*.p12 into the per-run"
+    echo "build keychain automatically; the next build's 'find-identity' log line"
+    echo "should list the identities above. The portal .cer files and ~/identity-dist.csr"
+    echo "are safe to delete; keep ~/.identity-dist.key (0600)."
+}
+
 case "${1:-}" in
 csr)
     make_csr
@@ -148,14 +167,23 @@ assemble)
         outputs+=("$HOME/.identity-installer.p12")
     fi
     verify_p12s "${outputs[@]}"
-    echo ""
-    echo "done. build/all/run.sh imports every ~/.identity*.p12 into the per-run"
-    echo "build keychain automatically; the next build's 'find-identity' log line"
-    echo "should list the identities above. The portal .cer files and ~/identity-dist.csr"
-    echo "are safe to delete; keep ~/.identity-dist.key (0600)."
+    assembled_note
+    ;;
+developer-id)
+    [ $# -ge 2 ] || die "usage: $0 developer-id <developer-id-application.cer>"
+    require_pw_file
+    [ -f "$KEY" ] || die "$KEY is missing; run '$0 csr' first"
+    WORK=`mktemp -d` || die "mktemp failed"
+    trap 'rm -rf "$WORK"' EXIT
+
+    fetch_wwdr_chain "$WORK/wwdr-chain.pem"
+
+    assemble_p12 "$2" "Developer ID Application" "$HOME/.identity-devid.p12"
+    verify_p12s "$HOME/.identity-devid.p12"
+    assembled_note
     ;;
 *)
-    sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

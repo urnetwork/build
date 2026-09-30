@@ -127,7 +127,7 @@ func runComponent(t *testing.T, source, setup string, overrides ...string) compo
 	}
 	commands := map[string]string{
 		"sdk/build/check_apple_size.sh": "#!/bin/sh\nprintf 'size-check\\n' >> \"$BUILD_HOME/events\"\nif [ \"$FAIL_STEP\" = size-check ]; then exit 37; fi\n",
-		"all/github-release-upload.zsh": "#!/bin/sh\nprintf 'publish\\n' >> \"$BUILD_HOME/events\"\nif [ \"$FAIL_STEP\" = publish ]; then exit 37; fi\nprintf '{\"id\":1}'\n",
+		"all/github-release-upload.zsh": "#!/bin/sh\nprintf 'publish\\n' >> \"$BUILD_HOME/events\"\nif [ \"$FAIL_STEP\" = publish ]; then exit 37; fi\nprintf 'asset:%s\\n' \"$2\" >> \"$BUILD_HOME/events\"\nprintf '{\"id\":1}'\n",
 	}
 	for name, contents := range commands {
 		if err := os.WriteFile(filepath.Join(fixture, name), []byte(contents), 0o700); err != nil {
@@ -624,6 +624,189 @@ func TestRunHasNoOptionalReleaseComponents(t *testing.T) {
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("run.sh changed a strict-package or existing opt-in boundary %q", required)
+		}
+	}
+}
+
+// =============================================================================
+// macos-direct: the Developer ID DMG region (run.sh, after the App Store macOS
+// block). Every seam is a recorded stub; nothing reaches Xcode, the notary
+// service, the keychain or GitHub.
+
+const macosDirectStart = `MACOS_DIRECT_DMG="URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg"`
+
+func macosDirectRegion(t *testing.T) string {
+	t.Helper()
+	return componentRegion(t, macosDirectStart, "# =============================================================================")
+}
+
+// The healthy chain, in order, with builder messages filtered out.
+var macosDirectSteps = []string{"identity", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "assess-app", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
+
+const macosDirectSetup = `
+APPLE_API_KEY_P8="$BUILD_HOME/AuthKey_synthetic-key.p8"
+printf 'synthetic p8\n' > "$APPLE_API_KEY_P8"
+NOTARY_STATUS="${NOTARY_STATUS:-Accepted}"
+security() {
+    record_component_step identity || return $?
+    printf '  1) 0123456789ABCDEF0123456789ABCDEF01234567 "Developer ID Application: Synthetic (6BGU69Q742)"\n'
+}
+xcodebuild() {
+    local step=archive
+    case "$*" in
+        *clean*) step=clean ;;
+        *-exportArchive*) step=export ;;
+    esac
+    record_component_step "$step" || return $?
+    if [[ "$step" == export ]]; then
+        mkdir -p build/direct/URnetwork.app/Contents/MacOS
+        case "$DIRECT_APP_MODE" in
+            complete) printf 'new app\n' > build/direct/URnetwork.app/Contents/MacOS/URnetwork ;;
+            empty) : > build/direct/URnetwork.app/Contents/MacOS/URnetwork ;;
+        esac
+    fi
+}
+ditto() {
+    if [[ "$1" == -c ]]; then
+        record_component_step zip || return $?
+        printf 'zip\n' > "${@: -1}"
+    else
+        record_component_step stage || return $?
+        command cp -R "$1" "$2"
+    fi
+}
+xcrun() {
+    local step=unexpected-xcrun
+    case "$*" in
+        "notarytool submit "*-notarize.zip*) step=notarize-app ;;
+        "notarytool submit "*.dmg*) step=notarize-dmg ;;
+        "stapler staple "*.app) step=staple-app ;;
+        "stapler staple "*.dmg) step=staple-dmg ;;
+    esac
+    record_component_step "$step" || return $?
+    if [[ "$step" == notarize-* ]]; then printf '  id: synthetic\n  status: %s\n' "$NOTARY_STATUS"; fi
+}
+hdiutil() {
+    record_component_step dmg || return $?
+    case "$DIRECT_DMG_MODE" in
+        complete) printf 'new dmg\n' > "${@: -1}" ;;
+        empty) : > "${@: -1}" ;;
+    esac
+}
+codesign() {
+    if [[ "$2" != --timestamp || "$3" != --sign || "$4" != 0123456789ABCDEF0123456789ABCDEF01234567 ]]; then
+        printf 'unexpected-codesign\n' >> "$event_log"
+        return 41
+    fi
+    record_component_step sign-dmg
+}
+spctl() {
+    case "$*" in
+        "--assess --type open --context context:primary-signature -vv "*.dmg) record_component_step assess-dmg ;;
+        "--assess --type execute -vv "*.app) record_component_step assess-app ;;
+        *) printf 'unexpected-spctl\n' >> "$event_log"; return 41 ;;
+    esac
+}
+`
+
+func runMacosDirect(t *testing.T, setup string, overrides ...string) componentResult {
+	t.Helper()
+	helpers := componentFunctions(t, "macos_developer_id_identity", "macos_notarize_and_staple")
+	if !strings.Contains(helpers, "macos_developer_id_identity () {") || !strings.Contains(helpers, "macos_notarize_and_staple () {") {
+		t.Fatal("missing required production macOS direct download helpers")
+	}
+	return runComponent(t, macosDirectRegion(t), helpers+macosDirectSetup+setup, append([]string{"DIRECT_APP_MODE=complete", "DIRECT_DMG_MODE=complete"}, overrides...)...)
+}
+
+func macosDirectEvents(result componentResult) []string {
+	events := []string{}
+	for _, event := range strings.Split(strings.TrimSpace(result.events), "\n") {
+		if event != "message" && event != "" {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
+// A healthy direct build runs every step once, in order, and publishes only the DMG.
+func TestRunMacosDirectRequiredComponentsSucceed(t *testing.T) {
+	result := runMacosDirect(t, "")
+	if result.exitCode != 0 || strings.Join(macosDirectEvents(result), " ") != strings.Join(macosDirectSteps, " ") {
+		t.Fatalf("healthy macOS direct download did not run the whole chain once: %+v", result)
+	}
+	if strings.Count(result.events, "publish\n") != 1 || strings.Contains(result.events, "asset:URnetwork.pkg") {
+		t.Fatalf("macOS direct download must publish exactly the DMG: %+v", result)
+	}
+}
+
+// Every build, notarization, packaging, assessment and publication step is fatal.
+func TestRunMacosDirectComponentFailuresAreFatal(t *testing.T) {
+	for index, step := range macosDirectSteps {
+		if step == "scan" || strings.HasPrefix(step, "asset:") || step == "release-continued" {
+			continue
+		}
+		result := runMacosDirect(t, "", "FAIL_STEP="+step)
+		if result.exitCode == 0 || strings.Contains(result.events, "release-continued") {
+			t.Fatalf("%s failure was masked: %+v", step, result)
+		}
+		if step != "identity" && result.exitCode != 37 {
+			t.Fatalf("%s failure status was rewritten: %+v", step, result)
+		}
+		if step != "publish" && strings.Contains(result.events, "publish\n") {
+			t.Fatalf("%s failure still published: %+v", step, result)
+		}
+		for _, later := range macosDirectSteps[index+1:] {
+			if strings.Contains(result.events, later+"\n") {
+				t.Fatalf("%s failure did not stop before %s: %+v", step, later, result)
+			}
+		}
+	}
+}
+
+// A notary verdict other than Accepted fails even when notarytool exits 0, before stapling.
+func TestRunMacosDirectRejectsUnacceptedNotarization(t *testing.T) {
+	result := runMacosDirect(t, "", "NOTARY_STATUS=Invalid")
+	if result.exitCode == 0 || strings.Contains(result.events, "staple-app\n") || strings.Contains(result.events, "publish\n") || strings.Contains(result.events, "release-continued") {
+		t.Fatalf("unaccepted notarization was treated as success: %+v", result)
+	}
+}
+
+// Without the App Store Connect API key file, nothing is submitted for notarization.
+func TestRunMacosDirectRequiresNotaryApiKey(t *testing.T) {
+	result := runMacosDirect(t, `APPLE_API_KEY_P8=""`+"\n")
+	if result.exitCode == 0 || strings.Contains(result.events, "notarize-app\n") || strings.Contains(result.events, "publish\n") || strings.Contains(result.events, "release-continued") {
+		t.Fatalf("missing notary API key was masked: %+v", result)
+	}
+}
+
+// Without a Developer ID Application identity, nothing is built.
+func TestRunMacosDirectRequiresDeveloperIdIdentity(t *testing.T) {
+	result := runMacosDirect(t, `security() { record_component_step identity; printf '  1) FFFF "Apple Distribution: Synthetic (6BGU69Q742)"\n'; }`+"\n")
+	if result.exitCode == 0 || strings.Contains(result.events, "clean\n") || strings.Contains(result.events, "release-continued") {
+		t.Fatalf("missing Developer ID Application identity was masked: %+v", result)
+	}
+}
+
+// A zero-exit export or DMG step without a new nonempty output must not notarize,
+// package or publish an old artifact.
+func TestRunMacosDirectRejectsMissingEmptyAndStaleArtifacts(t *testing.T) {
+	for _, mode := range []string{"missing", "empty", "stale"} {
+		appMode, dmgMode := mode, mode
+		setup := ""
+		if mode == "stale" {
+			appMode, dmgMode = "missing", "missing"
+			setup = `mkdir -p "$BUILD_HOME/apple/app/build/direct/URnetwork.app/Contents/MacOS"
+printf 'old app\n' > "$BUILD_HOME/apple/app/build/direct/URnetwork.app/Contents/MacOS/URnetwork"
+printf 'old dmg\n' > "$BUILD_HOME/apple/app/build/URnetwork-0.0.0-123-macos.dmg"
+`
+		}
+		app := runMacosDirect(t, setup, "DIRECT_APP_MODE="+appMode)
+		if app.exitCode == 0 || strings.Contains(app.events, "zip\n") || strings.Contains(app.events, "notarize-app\n") || strings.Contains(app.events, "publish\n") || strings.Contains(app.events, "release-continued") {
+			t.Fatalf("%s app export falsely succeeded: %+v", mode, app)
+		}
+		dmg := runMacosDirect(t, setup, "DIRECT_DMG_MODE="+dmgMode)
+		if dmg.exitCode == 0 || strings.Contains(dmg.events, "sign-dmg\n") || strings.Contains(dmg.events, "notarize-dmg\n") || strings.Contains(dmg.events, "publish\n") || strings.Contains(dmg.events, "release-continued") {
+			t.Fatalf("%s dmg creation falsely succeeded: %+v", mode, dmg)
 		}
 	}
 }
