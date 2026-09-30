@@ -300,6 +300,8 @@ require_linux_artifacts () {
 }
 
 export BUILD_HOME=`realpath ..`
+# shellcheck source=all/go-mips-env.sh
+source "$BUILD_HOME/all/go-mips-env.sh"
 export BUILD_ENV=main
 export BUILD_SED=gsed
 # -S/--fail-with-body: stay quiet on success, but on HTTP >= 400 fail with a
@@ -1944,7 +1946,7 @@ sn_cli_release () {
         os="${osarch%/*}"
         arch="${osarch#*/}"
         gomips=""
-        case "$arch" in mips*) gomips="GOMIPS=softfloat" ;; esac
+        gomips="$(go_mips_softfloat_env "$arch")"
         # `go build -o <file>` writes the name verbatim -- it only appends the
         # platform exe suffix when it derives the name itself (`-o <dir>/`). The
         # binary is renamed here (cli/miner -> provider), so the suffix has to be
