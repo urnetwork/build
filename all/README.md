@@ -109,3 +109,7 @@ flaked. Uploading to the GitHub release stays in `run.sh`.
   The script is both the host launcher and the container entrypoint (its
   `container-build` phase), and the fdroiddata recipe seds the pinned go
   version out of it — keep the recipe's prebuild path in sync if it moves.
+  run.sh pushes `v<version>-fdroid` (on the `v<version>-ungoogle` commit) only
+  after the github APKs in the `v<version>`, `+2` and `+3` releases are
+  published. F-Droid should track `UpdateCheckMode: Tags .+-fdroid$`; the plain
+  and `-ungoogle` tags are pushed before the builds and can lack APKs.
