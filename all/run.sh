@@ -765,6 +765,14 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# Build both sites with their complete check batteries before any app or
+# service release work. The final web build regenerates release artifacts but
+# does not repeat these checks. Bind the site's locale generator to this run's
+# localization checkout, including when mmm lives outside BUILD_HOME.
+builder_message "checking web builds after localization updates"
+(cd "$BUILD_HOME/web/web" && URNETWORK_ROOT="$BUILD_HOME" make check)
+error_trap 'web build checks'
+
 # Gradle evaluates Android's version fields even for dependency reports and
 # reads them through the sibling warpctl binary. Bootstrap that fresh checkout
 # before the license gate; allocate the new release only after all gates pass.
@@ -2824,7 +2832,7 @@ builder_message "service alt \`${EXTERNAL_WARP_VERSION}\` available"
 error_trap 'warpctl build proxy'
 builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 
-(cd $BUILD_HOME && warpctl build $BUILD_ENV web/web/Makefile)
+(cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 

@@ -12,7 +12,7 @@ import (
 // A clean release checkout has no warpctl binary. Gradle needs that exact
 // sibling binary even when the license collector only requests dependencies.
 func TestRunBootstrapsWarpctlBeforeLicenseGate(t *testing.T) {
-	source := componentRegion(t, "error_trap 'localizations codegen'", "# Dependency vulnerability gate.")
+	source := componentRegion(t, "error_trap 'web build checks'", "# Dependency vulnerability gate.")
 	setup := `
 WARP_HOME="$BUILD_HOME/workspace"
 mkdir -p "$BUILD_HOME/warp/warpctl"
