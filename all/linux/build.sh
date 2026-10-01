@@ -119,6 +119,8 @@ fi
 # *.flatpak is cleared here even though this script does not build one:
 # all/linux/build-flatpak.sh writes into this same OUT_DIR, it runs AFTER this,
 # and run.sh's upload glob cannot tell a fresh bundle from last release's.
+# *.AppImage.zsync is cleared too although nothing produces one any more: a
+# sidecar left by an older checkout must not ride along to the uploader.
 rm -f "${OUT_DIR}/"*.deb "${OUT_DIR}/"*.install.tar.gz "${OUT_DIR}/"*.rpm \
     "${OUT_DIR}/"*.pkg.tar.zst "${OUT_DIR}/"*.flatpak \
       "${OUT_DIR}/"*.AppImage "${OUT_DIR}/"*.AppImage.zsync
@@ -165,8 +167,9 @@ for arch in ${ARCHES}; do
     expected="${expected} urnetwork-daemon-${VERSION}-${arch}.install.tar.gz"
   fi
   if have_role gui; then
+    # No .AppImage.zsync: the AppImage embeds no update information; the GUI
+    # updates through its in-app checker (linux/README.md "Updates").
     expected="${expected} URnetwork-${VERSION}-${arch}.AppImage"
-    expected="${expected} URnetwork-${VERSION}-${arch}.AppImage.zsync"
   fi
   for f in ${expected}; do
     if [ ! -f "${OUT_DIR}/${f}" ]; then
@@ -221,6 +224,6 @@ done
 echo ">>> linux artifacts built:"
 for f in "${OUT_DIR}"/*.deb "${OUT_DIR}"/*.install.tar.gz "${OUT_DIR}"/*.rpm \
          "${OUT_DIR}"/*.pkg.tar.zst \
-         "${OUT_DIR}"/*.AppImage "${OUT_DIR}"/*.AppImage.zsync; do
+         "${OUT_DIR}"/*.AppImage; do
   if [ -f "$f" ]; then echo "    $(basename "$f")"; fi
 done

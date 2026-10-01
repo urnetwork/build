@@ -411,8 +411,7 @@ for architecture in amd64 arm64; do
         "urnetwork-daemon-${EXTERNAL_WARP_VERSION}-${architecture}.install.tar.gz" \
         "urnetwork-daemon-${EXTERNAL_WARP_VERSION}.${package_arch}.rpm" \
         "urnetwork-daemon-${EXTERNAL_WARP_VERSION}-${package_arch}.pkg.tar.zst" \
-        "URnetwork-${EXTERNAL_WARP_VERSION}-${architecture}.AppImage" \
-        "URnetwork-${EXTERNAL_WARP_VERSION}-${architecture}.AppImage.zsync"
+        "URnetwork-${EXTERNAL_WARP_VERSION}-${architecture}.AppImage"
     do
         printf 'linux artifact\n' > "$DESKTOP_OUT/linux/$name"
     done
@@ -442,8 +441,6 @@ func TestRunDesktopRejectsPartialAndEmptyArtifactMatrix(t *testing.T) {
 		{path: "linux/urnetwork-daemon-0.0.0-123-aarch64.pkg.tar.zst", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
 		{path: "linux/URnetwork-0.0.0-123-amd64.AppImage", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
 		{path: "linux/URnetwork-0.0.0-123-arm64.AppImage", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
-		{path: "linux/URnetwork-0.0.0-123-amd64.AppImage.zsync", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
-		{path: "linux/URnetwork-0.0.0-123-arm64.AppImage.zsync", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
 		{path: "linux/URnetwork-0.0.0-123-arm64.flatpak", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`},
 	} {
 		for _, operation := range []string{`rm -f "$DESKTOP_OUT/$MISSING_ARTIFACT"`, `: > "$DESKTOP_OUT/$MISSING_ARTIFACT"`} {
@@ -466,7 +463,7 @@ func TestRunDesktopSelectedPlansRemainSupported(t *testing.T) {
 		{setup: `rm "$DESKTOP_OUT/windows/URnetwork-$EXTERNAL_WARP_VERSION-x64.msi"` + "\n", source: `require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"WINDOWS_BUILD_ARCHITECTURES=arm64"}},
 		{setup: `rm "$DESKTOP_OUT/windows/URnetwork-$EXTERNAL_WARP_VERSION-arm64.msi"` + "\n", source: `require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"WINDOWS_BUILD_ARCHITECTURES=amd64"}},
 		{setup: `rm "$DESKTOP_OUT/linux/"*amd64* "$DESKTOP_OUT/linux/"*x86_64*` + "\n", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"ARCHES=arm64"}},
-		{setup: `rm "$DESKTOP_OUT/linux/"*.AppImage "$DESKTOP_OUT/linux/"*.zsync` + "\n", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"ROLES=daemon"}},
+		{setup: `rm "$DESKTOP_OUT/linux/"*.AppImage` + "\n", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"ROLES=daemon"}},
 		{setup: `rm "$DESKTOP_OUT/linux/"*.deb "$DESKTOP_OUT/linux/"*.install.tar.gz "$DESKTOP_OUT/linux/"*.rpm "$DESKTOP_OUT/linux/"*.pkg.tar.zst` + "\n", source: `require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"`, overrides: []string{"ROLES=gui"}},
 	} {
 		result := runComponent(t, testCase.source+"\nerror_trap completeness", completeDesktopSetup+testCase.setup, testCase.overrides...)
@@ -502,8 +499,34 @@ func TestRunDesktopRequiredComponentsSucceedWithStrictPackaging(t *testing.T) {
 		stageCount = 1
 	}
 	result := runComponent(t, source, completeDesktopSetup, "UR_REQUIRE_RPM=false", "UR_REQUIRE_ARCH_PKG=false")
-	if result.exitCode != 0 || strings.Count(result.events, "sdk-package-stage\n") != stageCount || strings.Count(result.events, "publish\n") != 17 || !strings.Contains(result.events, "release-continued") {
+	if result.exitCode != 0 || strings.Count(result.events, "sdk-package-stage\n") != stageCount || strings.Count(result.events, "publish\n") != 15 || !strings.Contains(result.events, "release-continued") {
 		t.Fatalf("complete desktop artifacts did not publish with strict packaging: %+v", result)
+	}
+}
+
+// The AppImage embeds no update information (linux/packaging/make-appimage.sh),
+// so no .AppImage.zsync is required -- the complete matrix above carries none
+// -- and a stray sidecar from an older checkout is never uploaded either: the
+// Linux GUI updates through its in-app checker against the stable
+// urnetwork/linux releases, and a .zsync on the release page would advertise
+// a channel that cannot work (GitHub Releases returns 501 on multi-range).
+func TestRunDesktopNeitherRequiresNorPublishesAppImageZsync(t *testing.T) {
+	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	setup := completeDesktopSetup + `for architecture in amd64 arm64; do
+    printf 'stale\n' > "$DESKTOP_OUT/linux/URnetwork-$EXTERNAL_WARP_VERSION-$architecture.AppImage.zsync"
+done
+`
+	result := runComponent(t, source, setup)
+	if result.exitCode != 0 || strings.Count(result.events, "publish\n") != 15 || !strings.Contains(result.events, "release-continued") {
+		t.Fatalf("a stray .zsync changed the desktop publication: %+v", result)
+	}
+	if strings.Contains(result.events, ".zsync") {
+		t.Fatalf("a .AppImage.zsync was uploaded: %+v", result)
+	}
+	for _, architecture := range []string{"amd64", "arm64"} {
+		if !strings.Contains(result.events, "asset:URnetwork-0.0.0-123-"+architecture+".AppImage\n") {
+			t.Fatalf("the %s AppImage itself was not uploaded: %+v", architecture, result)
+		}
 	}
 }
 

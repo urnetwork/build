@@ -538,7 +538,7 @@ else
 fi
 skip "daemon start + control-socket handshake" "needs live systemd (PID 1); the container has none"
 skip "GUI<->daemon device RPC over loopback mTLS" "needs both halves running under a real session"
-skip "AppImage self-update (appimageupdatetool -O)" "needs the self-hosted zsync endpoint; GitHub Releases returns 501 on multi-range"
+skip "AppImage self-update (in-app UpdateChecker)" "needs a published stable urnetwork/linux release newer than this build and a writable \$APPIMAGE; no zsync channel exists (GitHub Releases returns 501 on multi-range)"
 skip "desktop integration (update-desktop-database / gtk-update-icon-cache triggers)" "needs a real desktop session to observe the urnetwork:// handler"
 skip "GSK GL renderer path" "xvfb gives no GPU; the launch test exercises the Cairo/software path only"
 

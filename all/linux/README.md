@@ -10,7 +10,7 @@ Names are **normative** (`linux/MIGRATION.md` "Artifact filenames"):
 urnetwork-daemon_<version>_<arch>.deb              # daemon, apt path
 urnetwork-daemon-<version>-<arch>.install.tar.gz   # daemon, install.sh path
 urnetwork-daemon-<version>.<rpmarch>.rpm           # daemon, dnf/zypper path
-URnetwork-<version>-<arch>.AppImage                # GUI (+ .AppImage.zsync update feed)
+URnetwork-<version>-<arch>.AppImage                # GUI (no .zsync: the in-app checker updates it)
 URnetwork-<version>-<arch>.flatpak                 # GUI (one build-machine arch)
 ```
 
@@ -81,11 +81,13 @@ stays Debian-spelled everywhere else.
   repo's `assemble_daemon_root()`), so they cannot ship different daemons. That
   is why the `.rpm` gets no container of its own: `make-rpm.sh` is nfpm-based,
   and nfpm is already installed here for the `.deb`.
-- **The packaging scripts run with the CWD set to `OUT_DIR`.** This is
-  load-bearing: `appimagetool` writes its `.zsync` into the *current working
-  directory*, not next to the AppImage it was told to produce. With the cwd
-  anywhere else the AppImage lands in `OUT_DIR` and the `.zsync` silently does
-  not — and the whole update channel depends on it.
+- **The packaging scripts run with the CWD set to `OUT_DIR`.** Historically
+  load-bearing: `appimagetool` wrote its `.zsync` into the *current working
+  directory*, not next to the AppImage it was told to produce. The AppImage no
+  longer embeds update information (the Linux GUI updates through its in-app
+  checker, `linux/app/src/UpdateChecker.cpp`, against the stable
+  `urnetwork/linux` releases), so no `.zsync` is produced and `build-arch.sh`
+  fails if one appears; the cwd stays in `OUT_DIR` regardless.
 
 ## Verification
 
@@ -192,10 +194,11 @@ green. Each arch gets a runner of its own architecture (`ubuntu-24.04` /
 
 `build/all/build-linux.sh` (run.sh's linux build part) invokes this after the
 macOS app build; the resulting artifacts are uploaded to the GitHub release.
-**There is no store submission.** Publishing the `.deb` to the apt repo and
-re-hosting the AppImage + `.zsync` on the self-hosted update endpoint (GitHub
-Releases can't serve the multi-range requests zsync needs —
-`linux/APPIMAGE.md` §11f) are manual follow-ups.
+**There is no store submission.** Publishing the `.deb` to the apt repo is a
+manual follow-up, as is copying a nightly's Linux assets (same names) to the
+stable `urnetwork/linux` release the in-app updater reads. There is no zsync
+channel (GitHub Releases can't serve the multi-range requests zsync needs —
+`linux/APPIMAGE.md` §11f).
 
 ## Notes
 
