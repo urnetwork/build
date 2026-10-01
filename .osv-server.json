@@ -22,12 +22,6 @@
                 "GHSA-7f33-f4f5-xwgw",
                 "GO-2022-0635"
               ],
-              "experimental_analysis": {
-                "GO-2022-0635": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             },
             {
@@ -39,12 +33,6 @@
                 "GHSA-f5pg-7wfw-84q9",
                 "GO-2022-0646"
               ],
-              "experimental_analysis": {
-                "GO-2022-0646": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             }
           ],
@@ -241,12 +229,6 @@
                 "GHSA-5wrp-cwcj-q835",
                 "GO-2026-5158"
               ],
-              "experimental_analysis": {
-                "GO-2026-5158": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             }
           ],
@@ -344,12 +326,6 @@
               "aliases": [
                 "GO-2026-5932"
               ],
-              "experimental_analysis": {
-                "GO-2026-5932": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             },
             {
@@ -360,12 +336,6 @@
                 "CVE-2026-56854",
                 "GO-2026-6303"
               ],
-              "experimental_analysis": {
-                "GO-2026-6303": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             },
             {
@@ -376,12 +346,6 @@
                 "CVE-2026-78662",
                 "GO-2026-6354"
               ],
-              "experimental_analysis": {
-                "GO-2026-6354": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             },
             {
@@ -392,12 +356,6 @@
                 "CVE-2026-56855",
                 "GO-2026-6355"
               ],
-              "experimental_analysis": {
-                "GO-2026-6355": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             }
           ],
@@ -710,12 +668,6 @@
                 "CVE-2026-46603",
                 "GO-2026-6222"
               ],
-              "experimental_analysis": {
-                "GO-2026-6222": {
-                  "called": false,
-                  "unimportant": false
-                }
-              },
               "max_severity": ""
             }
           ],
@@ -789,6 +741,248 @@
               ],
               "schema_version": "1.9.0",
               "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/server/tools/native-storage-oracle/Cargo.lock",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "derivative",
+            "version": "2.2.0",
+            "ecosystem": "crates.io"
+          },
+          "groups": [
+            {
+              "ids": [
+                "RUSTSEC-2024-0388"
+              ],
+              "aliases": [
+                "RUSTSEC-2024-0388"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "categories": [],
+                    "cvss": null,
+                    "informational": "unmaintained",
+                    "source": "https://github.com/rustsec/advisory-db/blob/osv/crates/RUSTSEC-2024-0388.json"
+                  },
+                  "ecosystem_specific": {
+                    "affected_functions": null,
+                    "affects": {
+                      "arch": [],
+                      "functions": [],
+                      "os": []
+                    }
+                  },
+                  "package": {
+                    "ecosystem": "crates.io",
+                    "name": "derivative",
+                    "purl": "pkg:cargo/derivative"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0.0.0-0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "license": "CC0-1.0"
+              },
+              "details": "The [`derivative`](https://crates.io/crates/derivative) crate is no longer maintained.\nConsider using any alternative, for instance:\n- [derive_more](https://crates.io/crates/derive_more)\n- [derive-where](https://crates.io/crates/derive-where)\n- [educe](https://crates.io/crates/educe)",
+              "id": "RUSTSEC-2024-0388",
+              "modified": "2024-11-10T13:34:40Z",
+              "published": "2024-06-26T12:00:00Z",
+              "references": [
+                {
+                  "type": "PACKAGE",
+                  "url": "https://crates.io/crates/derivative"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://rustsec.org/advisories/RUSTSEC-2024-0388.html"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://github.com/mcarton/rust-derivative/issues/117"
+                }
+              ],
+              "schema_version": "1.7.3",
+              "summary": "`derivative` is unmaintained; consider using an alternative"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "libsecp256k1",
+            "version": "0.7.2",
+            "ecosystem": "crates.io"
+          },
+          "groups": [
+            {
+              "ids": [
+                "RUSTSEC-2025-0161"
+              ],
+              "aliases": [
+                "RUSTSEC-2025-0161"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "categories": [],
+                    "cvss": null,
+                    "informational": "unmaintained",
+                    "source": "https://github.com/rustsec/advisory-db/blob/osv/crates/RUSTSEC-2025-0161.json"
+                  },
+                  "ecosystem_specific": {
+                    "affected_functions": null,
+                    "affects": {
+                      "arch": [],
+                      "functions": [],
+                      "os": []
+                    }
+                  },
+                  "package": {
+                    "ecosystem": "crates.io",
+                    "name": "libsecp256k1",
+                    "purl": "pkg:cargo/libsecp256k1"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0.0.0-0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "license": "CC0-1.0"
+              },
+              "details": "The maintainers recommend using [k256](https://crates.io/crates/k256) instead.",
+              "id": "RUSTSEC-2025-0161",
+              "modified": "2026-04-14T11:30:08.962845Z",
+              "published": "2025-01-14T12:00:00Z",
+              "references": [
+                {
+                  "type": "PACKAGE",
+                  "url": "https://crates.io/crates/libsecp256k1"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://rustsec.org/advisories/RUSTSEC-2025-0161.html"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/paritytech/libsecp256k1/pull/159"
+                }
+              ],
+              "schema_version": "1.7.5",
+              "summary": "libsecp256k1 is unmaintained"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "paste",
+            "version": "1.0.15",
+            "ecosystem": "crates.io"
+          },
+          "groups": [
+            {
+              "ids": [
+                "RUSTSEC-2024-0436"
+              ],
+              "aliases": [
+                "RUSTSEC-2024-0436"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "categories": [],
+                    "cvss": null,
+                    "informational": "unmaintained",
+                    "source": "https://github.com/rustsec/advisory-db/blob/osv/crates/RUSTSEC-2024-0436.json"
+                  },
+                  "ecosystem_specific": {
+                    "affected_functions": null,
+                    "affects": {
+                      "arch": [],
+                      "functions": [],
+                      "os": []
+                    }
+                  },
+                  "package": {
+                    "ecosystem": "crates.io",
+                    "name": "paste",
+                    "purl": "pkg:cargo/paste"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0.0.0-0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "database_specific": {
+                "license": "CC0-1.0"
+              },
+              "details": "The creator of the crate `paste` has stated in the [`README.md`](https://github.com/dtolnay/paste/blob/master/README.md) \nthat this project is not longer maintained as well as archived the repository\n\n## Possible Alternative(s)\n\n- [`pastey`]: a fork of paste and is aimed to be a drop-in replacement with additional features for paste crate\n- [`with_builtin_macros`]: crate providing a [superset of `paste`'s functionality including general `macro_rules!` eager expansions](https://docs.rs/with_builtin_macros/0.1.0/with_builtin_macros/macro.with_eager_expansions.html)  and `concat!`/`concat_idents!` macros\n\n[`pastey`]: https://crates.io/crates/pastey\n[`with_builtin_macros`]: https://crates.io/crates/with_builtin_macros",
+              "id": "RUSTSEC-2024-0436",
+              "modified": "2026-01-27T22:03:15.694766Z",
+              "published": "2024-10-07T12:00:00Z",
+              "references": [
+                {
+                  "type": "PACKAGE",
+                  "url": "https://crates.io/crates/paste"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://rustsec.org/advisories/RUSTSEC-2024-0436.html"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/dtolnay/paste"
+                }
+              ],
+              "schema_version": "1.7.3",
+              "summary": "paste - no longer maintained"
             }
           ]
         }
