@@ -718,10 +718,15 @@ else
     builder_message "skipping the generated ur.io changelog update (BUILD_URIO_SITE_CHANGELOG disabled)"
 fi
 
-# The install page's desktop downloads: the newest complete GitHub release
-# (Windows MSI, Ubuntu daemon deb + AppImage) as of this run, i.e. the previous
-# release, since this run's own desktop bundles are attached later. This
-# attempted refresh is required, just like the changelog generator.
+# The install pages' desktop downloads: per platform, the newest STABLE
+# release of that platform's app repository (urnetwork/windows MSIs,
+# urnetwork/linux daemon deb + AppImage, urnetwork/apple DMG), the same
+# releases the in-app updaters poll. This repository's releases are nightlies;
+# a human publishes a stable one by copying a nightly's assets, under the same
+# names, to the app repository. A repository with no stable release yet is a
+# platform without a download, not a failure; strict mode fails only on API,
+# network and parse errors. This attempted refresh is required, just like the
+# changelog generator.
 builder_message "updating the generated ur.io desktop releases"
 (cd $WARP_HOME/mmm/ur.io &&
     RELEASES_STRICT=1 \
@@ -730,7 +735,8 @@ builder_message "updating the generated ur.io desktop releases"
 error_trap 'ur.io releases update'
 
 # The site must not ship a /changelog older than the desktop release it
-# advertises: the gate fails when LATEST_VERSION trails DESKTOP_RELEASE or the
+# advertises: the gate fails when LATEST_VERSION trails the newest stable
+# platform release in DESKTOP_RELEASE (skipped while there is none) or the
 # newest entry is more than 14 days behind it (ALLOW_STALE_CHANGELOG=1 overrides).
 (cd $WARP_HOME/mmm/ur.io && node react/scripts/check-changelog-fresh.mjs)
 error_trap 'ur.io changelog freshness'
