@@ -40,6 +40,9 @@
 # (optional) BUILD_APPLE_IDENTITY set (non-empty) to create a per-run apple
 #            signing keychain from ~/.identity.p12 + ~/.p12-pw (see the
 #            keychain note below and REMOTEBUILD.md option 1)
+# The macOS direct-download build (manual Developer ID signing) also needs the
+# two Developer ID provisioning profiles in ~/.provisionprofiles/ on the build
+# host (see the provisioning profile note at macos_install_provisioning_profiles).
 #
 # The Windows build image is built once, out of band, by build/all/windows/setup.sh
 # (which takes the Windows 11 ARM64 + virtio-win ISOs). run.sh only boots that image
@@ -249,6 +252,134 @@ macos_developer_id_identity () {
     echo "$identity"
 }
 
+# Developer ID provisioning profiles for the macOS direct-download build. The
+# URnetworkDirect scheme signs MANUALLY (apple/app/ExportOptions-DeveloperID.plist
+# is signingStyle manual with a provisioningProfiles map), so its xcodebuild
+# archive/export never talk to the portal (no -allowProvisioningUpdates): the
+# two Developer ID profiles must already be installed on the build host. They
+# live in ~/.provisionprofiles/ (one .provisionprofile each, chmod 600) and are
+# copied at startup (macos_install_provisioning_profiles) into Xcode's profile
+# directory under their UUID. Required profiles, by their portal Name:
+#   "URnetwork Download"           -> com.bringyour.urnetwork
+#   "URnetwork Extension Download" -> com.bringyour.urnetwork.extension
+# To (re)generate one in the Apple developer portal: Certificates, Identifiers
+# & Profiles -> Profiles -> + -> Distribution: "Developer ID" -> pick the App ID
+# above -> pick the "Developer ID Application" certificate (the one assembled
+# by all/make-apple-dist-identity.sh developer-id) -> name it exactly as above
+# -> download the .provisionprofile into ~/.provisionprofiles/ on this host.
+# Profiles expire (yearly). The gate below (macos_require_direct_profiles)
+# fails the build before anything is built when either profile is missing,
+# expired, or was not issued for the Developer ID Application identity.
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download")
+MACOS_PROFILES_SOURCE_DIR="$HOME/.provisionprofiles"
+MACOS_PROFILES_INSTALL_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+
+# macos_profile_value <plist> <key> — one value of a decoded profile (empty when
+# the key is missing; an array key prints its length)
+macos_profile_value () {
+    plutil -extract "$2" raw -o - "$1" 2>/dev/null
+}
+
+# macos_profile_problem <file> <plist-out> — decode a CMS-signed provisioning
+# profile into <plist-out> and print why it is unusable: not a profile, no
+# UUID/ExpirationDate, or expired. Prints nothing for a valid, unexpired one.
+macos_profile_problem () {
+    local profile="$1" plist="$2" uuid expires
+    if ! security cms -D -i "$profile" > "$plist" 2>/dev/null; then
+        echo "$profile is not a CMS-signed provisioning profile (security cms -D failed)"
+        return
+    fi
+    uuid=$(macos_profile_value "$plist" UUID)
+    expires=$(macos_profile_value "$plist" ExpirationDate)
+    if [ ! "$uuid" ] || [ ! "$expires" ]; then
+        echo "$profile decodes without a UUID/ExpirationDate, so it is not a provisioning profile"
+        return
+    fi
+    if [[ ! "$expires" > "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+        echo "provisioning profile $profile (\"$(macos_profile_value "$plist" Name)\") expired on $expires"
+        return
+    fi
+}
+
+# macos_profile_signs_with <plist> <identity-sha1> — true when one of the
+# profile's DeveloperCertificates is the certificate behind that identity
+# (`security find-identity` prints the SHA-1 of the certificate DER).
+macos_profile_signs_with () {
+    local plist="$1" identity="$2" count i cert_sha1
+    count=$(macos_profile_value "$plist" DeveloperCertificates)
+    for (( i = 0; i < ${count:-0}; i++ )); do
+        cert_sha1=$(macos_profile_value "$plist" "DeveloperCertificates.$i" | base64 -d 2>/dev/null | shasum -a 1 | awk '{ print toupper($1) }')
+        if [ "$cert_sha1" = "$identity" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Install every ~/.provisionprofiles/*.provisionprofile into Xcode's profile
+# directory as <UUID>.provisionprofile, failing on the first file that is not
+# a valid, unexpired profile (the message names the file).
+macos_install_provisioning_profiles () {
+    local profile plist problem uuid
+    plist=$(mktemp) || return 1
+    mkdir -p "$MACOS_PROFILES_INSTALL_DIR" || { rm -f "$plist"; return 1; }
+    for profile in "$MACOS_PROFILES_SOURCE_DIR"/*.provisionprofile(N); do
+        problem=$(macos_profile_problem "$profile" "$plist")
+        if [ "$problem" ]; then
+            builder_message "error: $problem; regenerate it in the portal (see the provisioning profile note in all/run.sh) and replace it in $MACOS_PROFILES_SOURCE_DIR/"
+            rm -f "$plist"
+            return 1
+        fi
+        uuid=$(macos_profile_value "$plist" UUID)
+        cp "$profile" "$MACOS_PROFILES_INSTALL_DIR/$uuid.provisionprofile" || { rm -f "$plist"; return 1; }
+        echo "installed provisioning profile \"$(macos_profile_value "$plist" Name)\" ($uuid) from $profile"
+    done
+    rm -f "$plist"
+}
+
+# macos_require_direct_profiles <identity-sha1> — every MACOS_DIRECT_PROFILE_NAMES
+# profile is installed, unexpired, and issued for the Developer ID Application
+# identity that signs the build. A corrupt installed .provisionprofile fails
+# outright; an expired or foreign-certificate copy of a required name only
+# fails when no valid copy of that name is installed.
+macos_require_direct_profiles () {
+    local identity="$1" profile plist problem name
+    local -A found problems
+    plist=$(mktemp) || return 1
+    for profile in "$MACOS_PROFILES_INSTALL_DIR"/*.provisionprofile(N); do
+        problem=$(macos_profile_problem "$profile" "$plist")
+        case "$problem" in
+            *"security cms -D failed"*|*"not a provisioning profile"*)
+                builder_message "error: $problem; remove it from $MACOS_PROFILES_INSTALL_DIR"
+                rm -f "$plist"
+                return 1
+                ;;
+        esac
+        name=$(macos_profile_value "$plist" Name)
+        [ "${MACOS_DIRECT_PROFILE_NAMES[(Ie)$name]}" != 0 ] || continue
+        if [ ! "$problem" ] && ! macos_profile_signs_with "$plist" "$identity"; then
+            problem="provisioning profile $profile (\"$name\") was not issued for the Developer ID Application identity $identity"
+        fi
+        if [ "$problem" ]; then
+            problems[$name]="$problem"
+        else
+            found[$name]="$profile"
+        fi
+    done
+    rm -f "$plist"
+    for name in "${MACOS_DIRECT_PROFILE_NAMES[@]}"; do
+        if [ "${found[$name]}" ]; then
+            echo "provisioning profile \"$name\": ${found[$name]}"
+        elif [ "${problems[$name]}" ]; then
+            builder_message "error: ${problems[$name]}; regenerate it in the portal (see the provisioning profile note in all/run.sh), put it in $MACOS_PROFILES_SOURCE_DIR/ and rerun"
+            return 1
+        else
+            builder_message "error: provisioning profile \"$name\" is not installed in $MACOS_PROFILES_INSTALL_DIR, so the macOS direct-download build cannot be signed. Download it from the portal into $MACOS_PROFILES_SOURCE_DIR/ (see the provisioning profile note in all/run.sh) and rerun"
+            return 1
+        fi
+    done
+}
+
 # Mirror the existing Windows architecture plan, not a nullglob-derived subset.
 require_windows_artifacts () {
     local output_directory="$1" version="$2" suffix
@@ -421,12 +552,21 @@ if [ "$BUILD_APPLE_IDENTITY" ]; then
     rm -f /tmp/apple-identity-smoke
 fi
 
+# The macOS direct-download build signs manually with Developer ID profiles
+# from ~/.provisionprofiles/ (see the provisioning profile note above). Install
+# them into Xcode's profile directory now, validating each file.
+macos_install_provisioning_profiles
+error_trap 'macos direct: provisioning profile install'
+
 # The macOS direct-download DMG (Apple section below) is signed with a
 # "Developer ID Application" identity: ~/.identity-devid.p12 imported above,
-# or one already in the login keychain. Prove it is present before spending
-# hours on the builds ahead of it.
+# or one already in the login keychain. Prove it is present, and that both
+# Developer ID profiles are installed for it, before spending hours on the
+# builds ahead of it.
 MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
 error_trap 'macos direct: Developer ID Application identity'
+macos_require_direct_profiles "$MACOS_DIRECT_IDENTITY"
+error_trap 'macos direct: Developer ID provisioning profiles'
 
 
 git_main () {
@@ -2185,20 +2325,26 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` uploaded to App Store Connec
 # Developer ID, notarized and stapled, wrapped in a DMG that is itself signed,
 # notarized and stapled, then Gatekeeper-assessed before it becomes the macOS
 # asset of the GitHub release and the ur.io install page. The App Store build
-# above is untouched. Requires the "Developer ID Application" identity proved
-# at startup (macos_developer_id_identity) and the App Store Connect API key
-# .p8 (APPLE_API_KEY_P8) for notarytool. Covered by
+# above is untouched. Signing is MANUAL (ExportOptions-DeveloperID.plist maps
+# each bundle id to its Developer ID profile), so the archive/export run
+# without -allowProvisioningUpdates and need the "Developer ID Application"
+# identity plus the two Developer ID profiles proved at startup
+# (macos_developer_id_identity, macos_require_direct_profiles; see the
+# provisioning profile note there), and the App Store Connect API key .p8
+# (APPLE_API_KEY_P8) for notarytool. Covered by
 # all/macos-direct-release.test.sh and component_required_test.go.
 
 MACOS_DIRECT_DMG="URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg"
 MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
 error_trap 'macos direct: Developer ID Application identity'
+macos_require_direct_profiles "$MACOS_DIRECT_IDENTITY"
+error_trap 'macos direct: Developer ID provisioning profiles'
 
 (cd $BUILD_HOME/apple/app &&
     rm -rf build-direct.xcarchive build/direct build/direct-dmg "build/$MACOS_DIRECT_DMG" &&
     xcodebuild -scheme URnetworkDirect clean &&
-    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetworkDirect -archivePath build-direct.xcarchive -destination generic/platform=macOS &&
-    xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions-DeveloperID.plist -archivePath build-direct.xcarchive -exportPath build/direct -destination generic/platform=macOS &&
+    xcodebuild archive -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetworkDirect -archivePath build-direct.xcarchive -destination generic/platform=macOS &&
+    xcodebuild archive -exportArchive -exportOptionsPlist ExportOptions-DeveloperID.plist -archivePath build-direct.xcarchive -exportPath build/direct -destination generic/platform=macOS &&
     require_build_artifacts build/direct/URnetwork.app/Contents/MacOS/URnetwork &&
     macos_notarize_and_staple build/direct/URnetwork.app)
 error_trap 'macos direct build and notarize'
