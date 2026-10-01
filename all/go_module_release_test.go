@@ -264,10 +264,11 @@ eval "$6"
 }
 
 // The release fork moves go.mod into vNNNN. Replacements whose targets remain
-// outside that directory must climb one more level afterward. This includes a
-// child-relative root nested module (the Connect/SCTP layout), while paths that
-// move inside the versioned module and module-version replacements stay intact.
-func TestGoModForkRebasesLocalReplacementsLeftOutsideVersionedModule(t *testing.T) {
+// outside that directory must climb one more level afterward. Targets in an
+// earlier sibling fork must follow that move too, including nested modules
+// below third_party (the Server/SN layout). Preserved sibling trees and root
+// nested modules (the Connect/SCTP layout) must still resolve at their old paths.
+func TestGoModForkRebasesLocalReplacementsAcrossReleaseModules(t *testing.T) {
 	outer := t.TempDir()
 	root := filepath.Join(outer, "server")
 	for _, directory := range []string{
@@ -277,6 +278,9 @@ func TestGoModForkRebasesLocalReplacementsLeftOutsideVersionedModule(t *testing.
 		filepath.Join(root, "third_party", "local"),
 		filepath.Join(outer, "warp"),
 		filepath.Join(outer, "shared"),
+		filepath.Join(outer, "sn", "third_party", "substrate"),
+		filepath.Join(outer, "sn", "sctp"),
+		filepath.Join(outer, "sn", "release", "evidence"),
 	} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
@@ -288,13 +292,19 @@ func TestGoModForkRebasesLocalReplacementsLeftOutsideVersionedModule(t *testing.
 go 1.26.7
 
 require (
+	example.invalid/evidence v0.0.0
 	example.invalid/local v0.0.0
 	example.invalid/obsolete v0.0.0
 	example.invalid/preserved v0.0.0
+	example.invalid/retained v0.0.0
 	example.invalid/sctp v0.0.0
 	example.invalid/shared v0.0.0
+	example.invalid/sn v0.0.0
+	example.invalid/substrate v0.0.0
 	example.invalid/warp v0.0.0
 )
+
+replace example.invalid/evidence => ../sn/release/evidence
 
 replace example.invalid/local => ./third_party/local
 
@@ -302,9 +312,15 @@ replace example.invalid/obsolete => ../obsolete
 
 replace example.invalid/preserved => ./release/local
 
+replace example.invalid/retained => ../sn/sctp
+
 replace example.invalid/sctp => ./sctp
 
 replace example.invalid/shared v0.0.0 => ../shared
+
+replace example.invalid/sn => ../sn
+
+replace example.invalid/substrate v0.0.0 => ../sn/third_party/substrate
 
 replace example.invalid/versioned => example.invalid/versioned-fork v1.2.3
 
@@ -313,25 +329,37 @@ replace example.invalid/warp => ../warp
 		filepath.Join(root, "server.go"): `package server
 
 import (
+	"example.invalid/evidence"
 	"example.invalid/local"
 	"example.invalid/preserved"
+	"example.invalid/retained"
 	"example.invalid/sctp"
 	"example.invalid/shared"
+	"example.invalid/sn"
+	"example.invalid/substrate"
 	"example.invalid/warp"
 )
 
-const Value = local.Value + preserved.Value + sctp.Value + shared.Value + warp.Value
+const Value = evidence.Value + local.Value + preserved.Value + retained.Value + sctp.Value + shared.Value + sn.Value + substrate.Value + warp.Value
 `,
-		filepath.Join(root, "release", "local", "go.mod"):       "module example.invalid/preserved\n\ngo 1.26.7\n",
-		filepath.Join(root, "release", "local", "preserved.go"): "package preserved\n\nconst Value = 5\n",
-		filepath.Join(root, "sctp", "go.mod"):                   "module example.invalid/sctp\n\ngo 1.26.7\n",
-		filepath.Join(root, "sctp", "sctp.go"):                  "package sctp\n\nconst Value = 4\n",
-		filepath.Join(root, "third_party", "local", "go.mod"):   "module example.invalid/local\n\ngo 1.26.7\n",
-		filepath.Join(root, "third_party", "local", "local.go"): "package local\n\nconst Value = 1\n",
-		filepath.Join(outer, "warp", "go.mod"):                  "module example.invalid/warp\n\ngo 1.26.7\n",
-		filepath.Join(outer, "warp", "warp.go"):                 "package warp\n\nconst Value = 2\n",
-		filepath.Join(outer, "shared", "go.mod"):                "module example.invalid/shared\n\ngo 1.26.7\n",
-		filepath.Join(outer, "shared", "shared.go"):             "package shared\n\nconst Value = 3\n",
+		filepath.Join(root, "release", "local", "go.mod"):                      "module example.invalid/preserved\n\ngo 1.26.7\n",
+		filepath.Join(root, "release", "local", "preserved.go"):                "package preserved\n\nconst Value = 5\n",
+		filepath.Join(root, "sctp", "go.mod"):                                  "module example.invalid/sctp\n\ngo 1.26.7\n",
+		filepath.Join(root, "sctp", "sctp.go"):                                 "package sctp\n\nconst Value = 4\n",
+		filepath.Join(root, "third_party", "local", "go.mod"):                  "module example.invalid/local\n\ngo 1.26.7\n",
+		filepath.Join(root, "third_party", "local", "local.go"):                "package local\n\nconst Value = 1\n",
+		filepath.Join(outer, "warp", "go.mod"):                                 "module example.invalid/warp\n\ngo 1.26.7\n",
+		filepath.Join(outer, "warp", "warp.go"):                                "package warp\n\nconst Value = 2\n",
+		filepath.Join(outer, "shared", "go.mod"):                               "module example.invalid/shared\n\ngo 1.26.7\n",
+		filepath.Join(outer, "shared", "shared.go"):                            "package shared\n\nconst Value = 3\n",
+		filepath.Join(outer, "sn", "go.mod"):                                   "module example.invalid/sn\n\ngo 1.26.7\n",
+		filepath.Join(outer, "sn", "sn.go"):                                    "package sn\n\nconst Value = 6\n",
+		filepath.Join(outer, "sn", "third_party", "substrate", "go.mod"):       "module example.invalid/substrate\n\ngo 1.26.7\n",
+		filepath.Join(outer, "sn", "third_party", "substrate", "substrate.go"): "package substrate\n\nconst Value = 7\n",
+		filepath.Join(outer, "sn", "sctp", "go.mod"):                           "module example.invalid/retained\n\ngo 1.26.7\n",
+		filepath.Join(outer, "sn", "sctp", "sctp.go"):                          "package retained\n\nconst Value = 8\n",
+		filepath.Join(outer, "sn", "release", "evidence", "go.mod"):            "module example.invalid/evidence\n\ngo 1.26.7\n",
+		filepath.Join(outer, "sn", "release", "evidence", "evidence.go"):       "package evidence\n\nconst Value = 9\n",
 	}
 	for name, contents := range files {
 		if err := os.WriteFile(name, []byte(contents), 0o644); err != nil {
@@ -349,6 +377,7 @@ eval "$3"
 eval "$4"
 eval "$5"
 go_mod_drop_require example.invalid/obsolete
+(cd ../sn && go_mod_fork 'release/evidence')
 go_mod_fork 'release/local'
 `
 	command := exec.Command(
@@ -370,10 +399,14 @@ go_mod_fork 'release/local'
 		t.Fatal(err)
 	}
 	wantDirectives := []string{
+		"replace example.invalid/evidence => ../../sn/release/evidence",
 		"replace example.invalid/local => ./third_party/local",
 		"replace example.invalid/preserved => ../release/local",
+		"replace example.invalid/retained => ../../sn/sctp",
 		"replace example.invalid/sctp => ../sctp",
 		"replace example.invalid/shared v0.0.0 => ../../shared",
+		"replace example.invalid/sn => ../../sn/v2026",
+		"replace example.invalid/substrate v0.0.0 => ../../sn/v2026/third_party/substrate",
 		"replace example.invalid/versioned => example.invalid/versioned-fork v1.2.3",
 		"replace example.invalid/warp => ../../warp",
 	}

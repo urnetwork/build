@@ -1341,11 +1341,11 @@ go_mod_fork_rebase_local_replaces () {
     go_mod_json=$(cd "$module_dir" && go mod edit -json) || return $?
 
     # The fork moves go.mod one directory deeper. Parent-relative replacements
-    # always need to climb one more level. A child-relative replacement only
-    # needs rebasing when its target stayed at the repository root, as happens
-    # for a nested module or an explicitly preserved release tree. Targets that
-    # moved into the versioned module and replacements to module versions retain
-    # their original meaning.
+    # need to climb one more level and follow any target moved by an earlier
+    # sibling fork. A child-relative replacement only needs rebasing when its
+    # target stayed at the repository root, as happens for a nested module or an
+    # explicitly preserved release tree. Targets that moved with this module
+    # and replacements to module versions retain their original meaning.
     local local_replaces
     local_replaces=$(printf '%s\n' "$go_mod_json" | jq -r '
         .Replace[]?
@@ -1363,7 +1363,7 @@ go_mod_fork_rebase_local_replaces () {
         | @tsv
     ') || return $?
 
-    local old_module new_path
+    local old_module new_path target_root target_suffix
     while IFS=$'\t' read -r old_module new_path; do
         if [ -n "$old_module" ]; then
             if [[ "$new_path" == "." || "$new_path" == ./* ]]; then
@@ -1381,6 +1381,24 @@ go_mod_fork_rebase_local_replaces () {
                     new_path="../${new_path#./}"
                 fi
             else
+                # A sibling may already have moved its root module and trees
+                # such as SN's third_party into vNNNN. Walk toward that module
+                # root to find the relocated target. Existing nested modules
+                # and preserved trees still resolve at their original paths.
+                if [ ! -f "$new_path/go.mod" ]; then
+                    target_root="$new_path"
+                    target_suffix=""
+                    while [[ "$target_root" == ".." || "$target_root" == ../* ]]; do
+                        if [ -f "$target_root/$module_dir/go.mod" ] && \
+                           [ -f "$target_root/$module_dir$target_suffix/go.mod" ]; then
+                            new_path="$target_root/$module_dir$target_suffix"
+                            break
+                        fi
+                        [ "$target_root" != ".." ] || break
+                        target_suffix="/${target_root##*/}$target_suffix"
+                        target_root="${target_root%/*}"
+                    done
+                fi
                 new_path="../$new_path"
             fi
             (cd "$module_dir" && go mod edit "-replace=${old_module}=${new_path}") || return $?
