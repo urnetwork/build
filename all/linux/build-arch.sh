@@ -266,15 +266,14 @@ expect_artifact() {
   echo ">>> [${ARCH}] ${name}"
 }
 
-# Run the packaging scripts with the CWD set to OUT_DIR. This is load-bearing
-# for the AppImage: appimagetool writes its .zsync into the CURRENT WORKING
-# DIRECTORY, not next to the output AppImage it was told to produce (verified
-# against appimagetool continuous build 295 — with cwd elsewhere, the AppImage
-# lands in OUT_DIR and the .zsync silently lands in the cwd). The .zsync is a
-# contract artifact and the whole update channel depends on it, so make the cwd
-# agree with the destination rather than hope. make-deb.sh and
-# make-install-tarball.sh are cwd-independent (they cd in subshells), so this
-# is safe for all three.
+# Run the packaging scripts with the CWD set to OUT_DIR. Historically
+# load-bearing for the AppImage: appimagetool wrote its .zsync into the
+# CURRENT WORKING DIRECTORY, not next to the output AppImage (verified against
+# appimagetool continuous build 295). The AppImage no longer embeds update
+# information, so no .zsync is produced (the GUI updates through its in-app
+# checker, linux/README.md "Updates"); the cwd stays here because anything
+# else appimagetool drops relative to cwd belongs in /out too, and make-deb.sh
+# and make-install-tarball.sh are cwd-independent (they cd in subshells).
 cd /out
 
 if [ "${ROLE}" = daemon ]; then
@@ -348,10 +347,12 @@ else
   echo ">>> [${ARCH}] GUI AppImage: ${appimage_script}"
   bash "${appimage_script}"
   expect_artifact "URnetwork-${VERSION}-${ARCH}.AppImage" "GUI AppImage"
-  # appimagetool emits the .zsync into the CWD (set to /out above). If it is
-  # still absent the update channel would ship broken, so make it fatal here
-  # rather than inheriting make-appimage.sh's warning.
-  expect_artifact "URnetwork-${VERSION}-${ARCH}.AppImage.zsync" "GUI AppImage (.zsync update feed)"
+  # No .zsync: the AppImage embeds no update information (the in-app
+  # UpdateChecker is the update channel), so appimagetool emits no sidecar.
+  if [ -f "/out/URnetwork-${VERSION}-${ARCH}.AppImage.zsync" ]; then
+    echo "ERROR: a .AppImage.zsync was produced -- make-appimage.sh must not embed update information" >&2
+    exit 1
+  fi
 fi
 
 # --- verification: prove the artifacts work, not just that they exist --------
