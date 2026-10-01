@@ -6,7 +6,10 @@ package allbuild
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -641,15 +644,46 @@ func macosDirectRegion(t *testing.T) string {
 }
 
 // The healthy chain, in order, with builder messages filtered out.
-var macosDirectSteps = []string{"identity", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "assess-app", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
+var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "assess-app", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
 
+// The synthetic Developer ID Application certificate: the identity stub prints
+// its SHA-1 (as security find-identity does) and the healthy profile fixtures
+// carry its DER in DeveloperCertificates.
+const macosDirectCertificate = "synthetic developer id certificate"
+
+var macosDirectCertificateSha1 = fmt.Sprintf("%X", sha1.Sum([]byte(macosDirectCertificate)))
+
+// Manual signing: the two Developer ID profiles are already installed (plain
+// plist fixtures; the security stub "decodes" them by printing them).
+// DIRECT_PROFILE_MODE breaks the extension profile: missing, expired,
+// wrong-name or wrong-cert.
 const macosDirectSetup = `
 APPLE_API_KEY_P8="$BUILD_HOME/AuthKey_synthetic-key.p8"
 printf 'synthetic p8\n' > "$APPLE_API_KEY_P8"
 NOTARY_STATUS="${NOTARY_STATUS:-Accepted}"
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download")
+MACOS_PROFILES_SOURCE_DIR="$BUILD_HOME/provisionprofiles"
+MACOS_PROFILES_INSTALL_DIR="$BUILD_HOME/profiles"
+mkdir -p "$MACOS_PROFILES_INSTALL_DIR"
+write_profile() {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Name</key><string>%s</string><key>UUID</key><string>%s</string><key>ExpirationDate</key><date>%s</date><key>DeveloperCertificates</key><array><data>%s</data></array></dict></plist>\n' "$2" "$3" "$4" "$5" > "$MACOS_PROFILES_INSTALL_DIR/$1.provisionprofile"
+}
+write_profile download "URnetwork Download" 11111111-1111-1111-1111-111111111111 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64
+case "${DIRECT_PROFILE_MODE:-healthy}" in
+    healthy) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    missing) ;;
+    expired) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2020-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    wrong-name) write_profile extension "URnetwork Extension" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    wrong-cert) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z b3RoZXIgY2VydGlmaWNhdGU= ;;
+esac
 security() {
+    if [[ "$1" == cms ]]; then
+        record_component_step "profile:$(basename "$4" .provisionprofile)" || return $?
+        command cat "$4"
+        return
+    fi
     record_component_step identity || return $?
-    printf '  1) 0123456789ABCDEF0123456789ABCDEF01234567 "Developer ID Application: Synthetic (6BGU69Q742)"\n'
+    printf '  1) SYNTHETIC_CERT_SHA1 "Developer ID Application: Synthetic (6BGU69Q742)"\n'
 }
 xcodebuild() {
     local step=archive
@@ -694,7 +728,7 @@ hdiutil() {
     esac
 }
 codesign() {
-    if [[ "$2" != --timestamp || "$3" != --sign || "$4" != 0123456789ABCDEF0123456789ABCDEF01234567 ]]; then
+    if [[ "$2" != --timestamp || "$3" != --sign || "$4" != SYNTHETIC_CERT_SHA1 ]]; then
         printf 'unexpected-codesign\n' >> "$event_log"
         return 41
     fi
@@ -711,11 +745,21 @@ spctl() {
 
 func runMacosDirect(t *testing.T, setup string, overrides ...string) componentResult {
 	t.Helper()
-	helpers := componentFunctions(t, "macos_developer_id_identity", "macos_notarize_and_staple")
-	if !strings.Contains(helpers, "macos_developer_id_identity () {") || !strings.Contains(helpers, "macos_notarize_and_staple () {") {
-		t.Fatal("missing required production macOS direct download helpers")
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("the macOS direct download profile gate reads profiles with plutil")
 	}
-	return runComponent(t, macosDirectRegion(t), helpers+macosDirectSetup+setup, append([]string{"DIRECT_APP_MODE=complete", "DIRECT_DMG_MODE=complete"}, overrides...)...)
+	helperNames := []string{"macos_developer_id_identity", "macos_notarize_and_staple", "macos_profile_value", "macos_profile_problem", "macos_profile_signs_with", "macos_require_direct_profiles"}
+	helpers := componentFunctions(t, helperNames...)
+	for _, name := range helperNames {
+		if !strings.Contains(helpers, name+" () {") {
+			t.Fatalf("missing required production macOS direct download helper %s", name)
+		}
+	}
+	fixtures := strings.NewReplacer(
+		"SYNTHETIC_CERT_BASE64", base64.StdEncoding.EncodeToString([]byte(macosDirectCertificate)),
+		"SYNTHETIC_CERT_SHA1", macosDirectCertificateSha1,
+	).Replace(macosDirectSetup)
+	return runComponent(t, macosDirectRegion(t), helpers+fixtures+setup, append([]string{"DIRECT_APP_MODE=complete", "DIRECT_DMG_MODE=complete"}, overrides...)...)
 }
 
 func macosDirectEvents(result componentResult) []string {
@@ -749,7 +793,7 @@ func TestRunMacosDirectComponentFailuresAreFatal(t *testing.T) {
 		if result.exitCode == 0 || strings.Contains(result.events, "release-continued") {
 			t.Fatalf("%s failure was masked: %+v", step, result)
 		}
-		if step != "identity" && result.exitCode != 37 {
+		if step != "identity" && !strings.HasPrefix(step, "profile:") && result.exitCode != 37 {
 			t.Fatalf("%s failure status was rewritten: %+v", step, result)
 		}
 		if step != "publish" && strings.Contains(result.events, "publish\n") {
@@ -784,6 +828,20 @@ func TestRunMacosDirectRequiresDeveloperIdIdentity(t *testing.T) {
 	result := runMacosDirect(t, `security() { record_component_step identity; printf '  1) FFFF "Apple Distribution: Synthetic (6BGU69Q742)"\n'; }`+"\n")
 	if result.exitCode == 0 || strings.Contains(result.events, "clean\n") || strings.Contains(result.events, "release-continued") {
 		t.Fatalf("missing Developer ID Application identity was masked: %+v", result)
+	}
+}
+
+// Manual signing: without both Developer ID profiles installed, valid and
+// issued for the signing certificate, nothing is built.
+func TestRunMacosDirectRequiresDeveloperIdProfiles(t *testing.T) {
+	for _, mode := range []string{"missing", "expired", "wrong-name", "wrong-cert"} {
+		result := runMacosDirect(t, "", "DIRECT_PROFILE_MODE="+mode)
+		if result.exitCode == 0 || strings.Contains(result.events, "clean\n") || strings.Contains(result.events, "publish\n") || strings.Contains(result.events, "release-continued") {
+			t.Fatalf("%s extension profile was masked: %+v", mode, result)
+		}
+		if !strings.Contains(result.events, "identity\n") || !strings.Contains(result.events, "profile:download\n") {
+			t.Fatalf("%s extension profile failed before the identity/profile gate ran: %+v", mode, result)
+		}
 	}
 }
 
