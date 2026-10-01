@@ -27,7 +27,11 @@ ENV LANG=C.UTF-8
 # Build + packaging toolchain:
 # - meson/g++/GTK stack: what linux/app's meson build needs
 # - squashfs-tools/zsync/desktop-file-utils/patchelf/file: AppDir assembly +
-#   appimagetool helpers (zsyncmake produces the .zsync update feed)
+#   appimagetool helpers. zsyncmake stays installed as one of them, but no
+#   .zsync is produced: the AppImage embeds no update information, and the
+#   GUI's in-app UpdateChecker is the update channel
+# - libsoup-3.0-dev: the in-app updater's HTTP client (linux/app/src/
+#   UpdateChecker.cpp); its TLS comes from glib-networking below
 # - librsvg2-common/gtk-update-icon-cache: svg pixbuf loader + icon cache for
 #   the hand-rolled AppDir (APPIMAGE.md §11e)
 # - libgdk-pixbuf2.0-bin: gdk-pixbuf-query-loaders, which make-appimage.sh
@@ -63,6 +67,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         libgtkmm-4.0-dev \
         libadwaita-1-dev \
         libsecret-1-dev \
+        libsoup-3.0-dev \
         libzxing-dev \
         libglib2.0-dev \
         libglib2.0-bin \

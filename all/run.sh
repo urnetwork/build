@@ -421,9 +421,11 @@ require_linux_artifacts () {
                         "$output_directory/urnetwork-daemon-${version}-${package_arch}.pkg.tar.zst" || return $?
                     ;;
                 gui)
+                    # No .AppImage.zsync: the AppImage embeds no update information
+                    # (linux/packaging/make-appimage.sh); the GUI updates through its
+                    # in-app checker against the stable urnetwork/linux releases.
                     require_build_artifacts \
-                        "$output_directory/URnetwork-${version}-${architecture}.AppImage" \
-                        "$output_directory/URnetwork-${version}-${architecture}.AppImage.zsync" || return $?
+                        "$output_directory/URnetwork-${version}-${architecture}.AppImage" || return $?
                     ;;
                 *) builder_message "error: invalid Linux role plan"; return 2 ;;
             esac
@@ -2411,11 +2413,14 @@ builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - 
 # SUBMISSION/PUBLISHING is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
 # Store (Partner Center). Linux has no store — the deb/tarball/rpm/AppImage
-# ship from the release page, and re-hosting the AppImage + .zsync on the
-# update endpoint (GitHub Releases can't serve the multi-range requests zsync
-# needs — linux/APPIMAGE.md §11f) is likewise a manual follow-up. Publishing
-# the .deb to an apt repo and the .rpm to a dnf repo (which additionally wants
-# an rpm HEADER signature, not the detached .asc) are manual follow-ups too.
+# ship from the release page. The Linux GUI updates itself from the STABLE
+# urnetwork/linux releases (linux/app/src/UpdateChecker.cpp), to which a human
+# copies this nightly's Linux assets under the same names when it is declared
+# stable; there is no zsync channel (GitHub Releases can't serve the
+# multi-range requests zsync needs — linux/APPIMAGE.md §11f), so no .zsync is
+# built or uploaded. Publishing the .deb to an apt repo and the .rpm to a dnf
+# repo (which additionally wants an rpm HEADER signature, not the detached
+# .asc) are manual follow-ups.
 # =============================================================================
 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
@@ -2471,9 +2476,9 @@ error_trap 'required linux artifacts'
 # Six artifact types per arch (names normative — linux/MIGRATION.md):
 # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
 # urnetwork-daemon-<v>.<rpmarch>.rpm, urnetwork-daemon-<v>-<pkgarch>.pkg.tar.zst,
-# URnetwork-<v>-<arch>.AppImage + .AppImage.zsync, and URnetwork-<v>-<arch>.flatpak
-# (one native architecture). Exact selected outputs are required above; (N)
-# avoids literal wildcard uploads without allowing missing types to succeed.
+# URnetwork-<v>-<arch>.AppImage, and URnetwork-<v>-<arch>.flatpak (one native
+# architecture). Exact selected outputs are required above; (N) avoids literal
+# wildcard uploads without allowing missing types to succeed.
 #
 # A bare *.rpm is safe: nfpm writes binary rpms only, so no .src.rpm can
 # appear here. The .sha256/.asc sidecars the packaging scripts write are
@@ -2483,8 +2488,7 @@ for artifact in "$DESKTOP_OUT/linux/"*.deb(N) \
                 "$DESKTOP_OUT/linux/"*.rpm(N) \
                 "$DESKTOP_OUT/linux/"*.pkg.tar.zst(N) \
                 "$DESKTOP_OUT/linux/"*.flatpak(N) \
-                "$DESKTOP_OUT/linux/"*.AppImage(N) \
-                "$DESKTOP_OUT/linux/"*.AppImage.zsync(N); do
+                "$DESKTOP_OUT/linux/"*.AppImage(N); do
     github_release_upload "$(basename "$artifact")" "$artifact"
 done
 builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
