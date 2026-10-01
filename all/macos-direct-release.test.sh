@@ -2,8 +2,10 @@
 # Proves the macOS direct download is released the only way a non-App-Store
 # Mac app can be: the URnetworkDirect scheme exported with the Developer ID
 # ExportOptions, notarized and stapled, wrapped in a signed + notarized DMG,
-# Gatekeeper-assessed, and only then attached to the GitHub release as
-# URnetwork-<version>-macos.dmg. Signing is manual: the two Developer ID
+# Gatekeeper-assessed, and only then attached to the GitHub release: first the
+# stapled app as URnetwork-<version>-macos.zip (ditto --keepParent, the asset
+# the app's in-app updater fetches by name), then URnetwork-<version>-macos.dmg
+# for humans. Signing is manual: the two Developer ID
 # profiles from ~/.provisionprofiles/ are installed and proved up front, and the
 # direct archive/export never use -allowProvisioningUpdates. The App Store block before it stays intact
 # (its pkg still uploads to App Store Connect and is still never published;
@@ -47,6 +49,10 @@ echo "$region" | grep -E 'xcodebuild archive' | grep -Eq 'allowProvisioningUpdat
   fail "the App Store archives lost -allowProvisioningUpdates"
 expect 'require_build_artifacts build/direct/URnetwork\.app/Contents/MacOS/URnetwork' "app executable gate"
 expect 'macos_notarize_and_staple build/direct/URnetwork\.app' "app notarization + staple"
+expect '^    ditto -c -k --keepParent build/direct/URnetwork\.app "build/\$MACOS_DIRECT_ZIP" &&$' "updater zip of the stapled app with --keepParent"
+expect 'require_build_artifacts "build/\$MACOS_DIRECT_ZIP"' "zip artifact gate"
+expect '^github_release_upload "URnetwork-\$\{EXTERNAL_WARP_VERSION\}-macos\.zip" "\$BUILD_HOME/apple/app/build/\$MACOS_DIRECT_ZIP"' "zip release upload"
+echo "$region" | grep -Eq '^MACOS_DIRECT_ZIP="URnetwork-\$\{EXTERNAL_WARP_VERSION\}-macos\.zip"' || fail "zip name is not URnetwork-<version>-macos.zip"
 expect 'ln -s /Applications build/direct-dmg/Applications' "Applications symlink in the DMG"
 expect 'hdiutil create .* -format UDZO "build/\$MACOS_DIRECT_DMG"' "UDZO DMG"
 expect 'codesign --force --timestamp --sign "\$MACOS_DIRECT_IDENTITY" "build/\$MACOS_DIRECT_DMG"' "DMG codesign with the Developer ID identity"
@@ -57,12 +63,25 @@ expect '^github_release_upload "URnetwork-\$\{EXTERNAL_WARP_VERSION\}-macos\.dmg
 expect '^builder_message "macos direct download' "builder message"
 echo "$region" | grep -Eq '^MACOS_DIRECT_DMG="URnetwork-\$\{EXTERNAL_WARP_VERSION\}-macos\.dmg"' || fail "DMG name is not URnetwork-<version>-macos.dmg"
 
-# each chain is trapped, in order: identity, profiles, build+notarize, dmg, upload
+# each chain is trapped, in order: identity, profiles, build+notarize, zip, dmg
 echo "$region" | grep -E '^error_trap ' | tr '\n' '|' |
-  grep -q "error_trap 'macos direct: Developer ID Application identity'|error_trap 'macos direct: Developer ID provisioning profiles'|error_trap 'macos direct build and notarize'|error_trap 'macos direct dmg'|" ||
+  grep -q "error_trap 'macos direct: Developer ID Application identity'|error_trap 'macos direct: Developer ID provisioning profiles'|error_trap 'macos direct build and notarize'|error_trap 'macos direct zip'|error_trap 'macos direct dmg'|" ||
   fail "the region's error traps changed"
-[ "$(echo "$region" | grep -c '^github_release_upload ')" = 1 ] || fail "the region must publish exactly one asset"
+# exactly two assets, the updater zip before the DMG, and both after the app's
+# Gatekeeper assessment
+[ "$(echo "$region" | grep -c '^github_release_upload ')" = 2 ] || fail "the region must publish exactly two assets (zip, then dmg)"
+echo "$region" | grep -E '^github_release_upload ' | cut -d'"' -f2 | tr '\n' '|' |
+  grep -q '^URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip|URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg|$' ||
+  fail "the region does not publish the zip and then the dmg: $(echo "$region" | grep -E '^github_release_upload ')"
 echo "$region" | grep -E '^github_release_upload ' | grep -q '\.pkg' && fail "the region publishes a pkg"
+assess_app_line=$(echo "$region" | grep -n 'spctl --assess --type execute -vv build/direct/URnetwork\.app' | cut -d: -f1)
+first_upload_line=$(echo "$region" | grep -n '^github_release_upload ' | head -n 1 | cut -d: -f1)
+[ "$(echo "$assess_app_line" | wc -l | tr -d ' ')" = 1 ] && [ "$assess_app_line" -lt "$first_upload_line" ] ||
+  fail "the app must pass its Gatekeeper assessment before either asset is published"
+zip_line=$(echo "$region" | grep -n 'ditto -c -k --keepParent build/direct/URnetwork\.app "build/\$MACOS_DIRECT_ZIP"' | cut -d: -f1)
+staple_line=$(echo "$region" | grep -n 'macos_notarize_and_staple build/direct/URnetwork\.app' | cut -d: -f1)
+dmg_line=$(echo "$region" | grep -n 'hdiutil create' | cut -d: -f1)
+[ "$staple_line" -lt "$zip_line" ] && [ "$zip_line" -lt "$dmg_line" ] || fail "the updater zip is not made after stapling the app and before the DMG"
 
 # the notarization helper: explicit API key, --wait, an Accepted verdict, staple
 helper=$(sed -n '/^macos_notarize_and_staple () {/,/^}/p' "$run_sh")

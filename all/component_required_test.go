@@ -666,8 +666,11 @@ func macosDirectRegion(t *testing.T) string {
 	return componentRegion(t, macosDirectStart, "# =============================================================================")
 }
 
-// The healthy chain, in order, with builder messages filtered out.
-var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "assess-app", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
+// The healthy chain, in order, with builder messages filtered out: the app is
+// built, notarized, stapled and Gatekeeper-assessed, then published twice --
+// the updater zip (ditto --keepParent of the stapled app) first, the DMG
+// second -- each upload scanned. "scan" and "publish" therefore occur twice.
+var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "assess-app", "zip-asset", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.zip", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
 
 // The synthetic Developer ID Application certificate: the identity stub prints
 // its SHA-1 (as security find-identity does) and the healthy profile fixtures
@@ -725,7 +728,20 @@ xcodebuild() {
 }
 ditto() {
     if [[ "$1" == -c ]]; then
-        record_component_step zip || return $?
+        # the notarization submission zip, or the updater asset (--keepParent
+        # of the stapled app, named URnetwork-<version>-macos.zip)
+        case "${@: -1}" in
+            *-notarize.zip) record_component_step zip || return $? ;;
+            *-macos.zip)
+                if [[ "$2 $3" != "-k --keepParent" ]]; then printf 'unexpected-ditto\n' >> "$event_log"; return 41; fi
+                record_component_step zip-asset || return $?
+                case "$DIRECT_ZIP_MODE" in
+                    empty) : > "${@: -1}"; return ;;
+                    missing) return ;;
+                esac
+                ;;
+            *) printf 'unexpected-ditto\n' >> "$event_log"; return 41 ;;
+        esac
         printf 'zip\n' > "${@: -1}"
     else
         record_component_step stage || return $?
@@ -782,7 +798,23 @@ func runMacosDirect(t *testing.T, setup string, overrides ...string) componentRe
 		"SYNTHETIC_CERT_BASE64", base64.StdEncoding.EncodeToString([]byte(macosDirectCertificate)),
 		"SYNTHETIC_CERT_SHA1", macosDirectCertificateSha1,
 	).Replace(macosDirectSetup)
-	return runComponent(t, macosDirectRegion(t), helpers+fixtures+setup, append([]string{"DIRECT_APP_MODE=complete", "DIRECT_DMG_MODE=complete"}, overrides...)...)
+	return runComponent(t, macosDirectRegion(t), helpers+fixtures+setup, append([]string{"DIRECT_APP_MODE=complete", "DIRECT_DMG_MODE=complete", "DIRECT_ZIP_MODE=complete"}, overrides...)...)
+}
+
+// How many times `step` occurs in `events`.
+func stepCount(events, step string) int {
+	return strings.Count("\n"+events, "\n"+step+"\n")
+}
+
+// How many times `step` is expected among the healthy steps before `index`.
+func stepsBefore(index int, step string) int {
+	count := 0
+	for _, earlier := range macosDirectSteps[:index] {
+		if earlier == step {
+			count++
+		}
+	}
+	return count
 }
 
 func macosDirectEvents(result componentResult) []string {
@@ -795,21 +827,38 @@ func macosDirectEvents(result componentResult) []string {
 	return events
 }
 
-// A healthy direct build runs every step once, in order, and publishes only the DMG.
+// A healthy direct build runs every step once, in order, and publishes exactly
+// two assets: the updater zip, then the DMG.
 func TestRunMacosDirectRequiredComponentsSucceed(t *testing.T) {
 	result := runMacosDirect(t, "")
 	if result.exitCode != 0 || strings.Join(macosDirectEvents(result), " ") != strings.Join(macosDirectSteps, " ") {
 		t.Fatalf("healthy macOS direct download did not run the whole chain once: %+v", result)
 	}
-	if strings.Count(result.events, "publish\n") != 1 || strings.Contains(result.events, "asset:URnetwork.pkg") {
-		t.Fatalf("macOS direct download must publish exactly the DMG: %+v", result)
+	if stepCount(result.events, "publish") != 2 || strings.Contains(result.events, "asset:URnetwork.pkg") {
+		t.Fatalf("macOS direct download must publish exactly the zip and the DMG: %+v", result)
+	}
+	zip := strings.Index(result.events, "asset:URnetwork-0.0.0-123-macos.zip\n")
+	dmg := strings.Index(result.events, "asset:URnetwork-0.0.0-123-macos.dmg\n")
+	if zip < 0 || dmg < 0 || dmg < zip {
+		t.Fatalf("the updater zip must be published before the DMG: %+v", result)
 	}
 }
 
-// Every build, notarization, packaging, assessment and publication step is fatal.
+// Every build, notarization, packaging, assessment and publication step is
+// fatal: nothing later runs, and nothing is published past the failure (the
+// zip upload that already happened before a DMG-side failure is the one
+// exception the step order allows, and is counted exactly).
 func TestRunMacosDirectComponentFailuresAreFatal(t *testing.T) {
+	seen := map[string]int{}
 	for index, step := range macosDirectSteps {
+		occurrence := seen[step]
+		seen[step]++
 		if step == "scan" || strings.HasPrefix(step, "asset:") || step == "release-continued" {
+			continue
+		}
+		if step == "publish" && occurrence > 0 {
+			// the fixture's FAIL_STEP fails the FIRST publish; a second
+			// publish failure is the same upload transport
 			continue
 		}
 		result := runMacosDirect(t, "", "FAIL_STEP="+step)
@@ -819,13 +868,44 @@ func TestRunMacosDirectComponentFailuresAreFatal(t *testing.T) {
 		if step != "identity" && !strings.HasPrefix(step, "profile:") && result.exitCode != 37 {
 			t.Fatalf("%s failure status was rewritten: %+v", step, result)
 		}
-		if step != "publish" && strings.Contains(result.events, "publish\n") {
-			t.Fatalf("%s failure still published: %+v", step, result)
+		publishedBefore := stepsBefore(index, "publish")
+		if step == "publish" {
+			publishedBefore++
+		}
+		if stepCount(result.events, "publish") != publishedBefore {
+			t.Fatalf("%s failure changed what was published: %+v", step, result)
 		}
 		for _, later := range macosDirectSteps[index+1:] {
-			if strings.Contains(result.events, later+"\n") {
+			// the failing step itself is recorded once more than the
+			// healthy steps before it
+			allowed := stepsBefore(index, later)
+			if later == step {
+				allowed++
+			}
+			if stepCount(result.events, later) > allowed {
 				t.Fatalf("%s failure did not stop before %s: %+v", step, later, result)
 			}
+		}
+	}
+}
+
+// The updater zip is the stapled app archived with --keepParent, gated like
+// every other artifact: a zero-exit ditto without a new nonempty zip publishes
+// nothing, and a stale zip from an earlier run is removed up front.
+func TestRunMacosDirectRejectsMissingEmptyAndStaleZip(t *testing.T) {
+	for _, mode := range []string{"missing", "empty", "stale"} {
+		zipMode := mode
+		setup := ""
+		if mode == "stale" {
+			zipMode = "missing"
+			setup = `printf 'old zip\n' > "$BUILD_HOME/apple/app/build/URnetwork-0.0.0-123-macos.zip"` + "\n"
+		}
+		result := runMacosDirect(t, setup, "DIRECT_ZIP_MODE="+zipMode)
+		if result.exitCode == 0 || strings.Contains(result.events, "publish\n") || strings.Contains(result.events, "stage\n") || strings.Contains(result.events, "release-continued") {
+			t.Fatalf("%s updater zip falsely succeeded: %+v", mode, result)
+		}
+		if !strings.Contains(result.events, "assess-app\n") || !strings.Contains(result.events, "zip-asset\n") {
+			t.Fatalf("%s updater zip failed before the app was assessed and zipped: %+v", mode, result)
 		}
 	}
 }
@@ -885,8 +965,10 @@ printf 'old dmg\n' > "$BUILD_HOME/apple/app/build/URnetwork-0.0.0-123-macos.dmg"
 		if app.exitCode == 0 || strings.Contains(app.events, "zip\n") || strings.Contains(app.events, "notarize-app\n") || strings.Contains(app.events, "publish\n") || strings.Contains(app.events, "release-continued") {
 			t.Fatalf("%s app export falsely succeeded: %+v", mode, app)
 		}
+		// the updater zip (published before the DMG is made) is the one
+		// publish allowed here; the DMG itself never goes out
 		dmg := runMacosDirect(t, setup, "DIRECT_DMG_MODE="+dmgMode)
-		if dmg.exitCode == 0 || strings.Contains(dmg.events, "sign-dmg\n") || strings.Contains(dmg.events, "notarize-dmg\n") || strings.Contains(dmg.events, "publish\n") || strings.Contains(dmg.events, "release-continued") {
+		if dmg.exitCode == 0 || strings.Contains(dmg.events, "sign-dmg\n") || strings.Contains(dmg.events, "notarize-dmg\n") || stepCount(dmg.events, "publish") != 1 || strings.Contains(dmg.events, "asset:URnetwork-0.0.0-123-macos.dmg") || strings.Contains(dmg.events, "release-continued") {
 			t.Fatalf("%s dmg creation falsely succeeded: %+v", mode, dmg)
 		}
 	}

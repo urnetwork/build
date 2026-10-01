@@ -2333,23 +2333,39 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` uploaded to App Store Connec
 # identity plus the two Developer ID profiles proved at startup
 # (macos_developer_id_identity, macos_require_direct_profiles; see the
 # provisioning profile note there), and the App Store Connect API key .p8
-# (APPLE_API_KEY_P8) for notarytool. Covered by
+# (APPLE_API_KEY_P8) for notarytool. Two assets: the stapled app zipped as
+# URnetwork-<version>-macos.zip for the app's own updater (apple
+# network/Shared/Updater, which fetches it by this exact name and verifies
+# GitHub's per-asset sha256 digest), then the DMG for humans. Covered by
 # all/macos-direct-release.test.sh and component_required_test.go.
 
 MACOS_DIRECT_DMG="URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg"
+MACOS_DIRECT_ZIP="URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip"
 MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
 error_trap 'macos direct: Developer ID Application identity'
 macos_require_direct_profiles "$MACOS_DIRECT_IDENTITY"
 error_trap 'macos direct: Developer ID provisioning profiles'
 
 (cd $BUILD_HOME/apple/app &&
-    rm -rf build-direct.xcarchive build/direct build/direct-dmg "build/$MACOS_DIRECT_DMG" &&
+    rm -rf build-direct.xcarchive build/direct build/direct-dmg "build/$MACOS_DIRECT_DMG" "build/$MACOS_DIRECT_ZIP" &&
     xcodebuild -scheme URnetworkDirect clean &&
     xcodebuild archive -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetworkDirect -archivePath build-direct.xcarchive -destination generic/platform=macOS &&
     xcodebuild archive -exportArchive -exportOptionsPlist ExportOptions-DeveloperID.plist -archivePath build-direct.xcarchive -exportPath build/direct -destination generic/platform=macOS &&
     require_build_artifacts build/direct/URnetwork.app/Contents/MacOS/URnetwork &&
     macos_notarize_and_staple build/direct/URnetwork.app)
 error_trap 'macos direct build and notarize'
+
+# Updater zip: the stapled, Gatekeeper-assessed app archived with
+# --keepParent so it unpacks to URnetwork.app (ditto keeps the staple ticket
+# and extended attributes). Assessed here, before anything is published, so a
+# rejected app never reaches the release in either form.
+(cd $BUILD_HOME/apple/app &&
+    spctl --assess --type execute -vv build/direct/URnetwork.app &&
+    ditto -c -k --keepParent build/direct/URnetwork.app "build/$MACOS_DIRECT_ZIP" &&
+    require_build_artifacts "build/$MACOS_DIRECT_ZIP")
+error_trap 'macos direct zip'
+
+github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_ZIP"
 
 # DMG: the stapled app plus an Applications symlink (drag to install; the app
 # must run from /Applications to activate its system extension)
@@ -2361,8 +2377,7 @@ error_trap 'macos direct build and notarize'
     require_build_artifacts "build/$MACOS_DIRECT_DMG" &&
     codesign --force --timestamp --sign "$MACOS_DIRECT_IDENTITY" "build/$MACOS_DIRECT_DMG" &&
     macos_notarize_and_staple "build/$MACOS_DIRECT_DMG" &&
-    spctl --assess --type open --context context:primary-signature -vv "build/$MACOS_DIRECT_DMG" &&
-    spctl --assess --type execute -vv build/direct/URnetwork.app)
+    spctl --assess --type open --context context:primary-signature -vv "build/$MACOS_DIRECT_DMG")
 error_trap 'macos direct dmg'
 
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_DMG"
