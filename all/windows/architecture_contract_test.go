@@ -177,7 +177,7 @@ func TestWindowsBuildScriptsThreadTheValidatedPlan(t *testing.T) {
 
 	upperBuild := readBuildFile(t, "../build-windows.sh")
 	plan := strings.Index(upperBuild, "win_windows_build_plan")
-	stage := strings.Index(upperBuild, "stage_local_repos sdk connect glog goidenticons windows")
+	stage := strings.Index(upperBuild, "stage_local_repos sdk connect gvisor glog goidenticons windows")
 	build := strings.Index(upperBuild, `"$here/windows/build.sh"`)
 	verify := strings.Index(upperBuild, `win_windows_verify_msi_outputs "$OUT_DIR" "$EXTERNAL_WARP_VERSION"`)
 	if plan < 0 || stage < 0 || build < 0 || verify < 0 || !(plan < stage && stage < build && build < verify) {

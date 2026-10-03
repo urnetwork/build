@@ -136,13 +136,13 @@ COMPONENT_ORDER = [
     "build",
     "sdk", "connect", "warp", "sn",
     "server", "proxy", "userwireguard",
-    "localizations", "docs", "glog", "goidenticons",
+    "localizations", "docs", "gvisor", "glog", "goidenticons",
 ]
 
 # Everything that is compiled INTO every one of the four apps and is not one of
 # them. sdk is the Go client library each app links; connect is what sdk is built
-# on; glog and goidenticons are compiled into sdk (its go.mod requires all three
-# and `replace`s them at ../). warp is warpctl, the build tool -- it produces the
+# on; gvisor, glog and goidenticons are compiled into sdk (via the local Go
+# module graph). warp is warpctl, the build tool -- it produces the
 # artifact, it is not in it -- and server, proxy, sn and userwireguard run on the
 # network's own machines, not on anybody's device.
 #
@@ -152,9 +152,9 @@ COMPONENT_ORDER = [
 # `gomobile bind -target ios/arm64,iossimulator/arm64,macos/arm64,macos/amd64`
 # of the same package (sdk build/Makefile, target build_apple), and linux and
 # windows both build sdk/cgo -- all/build-linux.sh and all/build-windows.sh each
-# stage exactly `sdk connect glog goidenticons` over the build root, because
+# stage exactly `sdk connect gvisor glog goidenticons` over the build root, because
 # sdk/cgo/go.mod replaces all of them with local paths at once.
-SHARED_COMPONENTS = ["sdk", "connect", "glog", "goidenticons"]
+SHARED_COMPONENTS = ["sdk", "connect", "gvisor", "glog", "goidenticons"]
 
 # THE STOREFRONT TABLE.
 #
@@ -1478,7 +1478,7 @@ def self_test():
           and AUDIENCES["android"]["format"] == "text")
     check("android draws from exactly the components it always did",
           AUDIENCES["android"]["app"] + AUDIENCES["android"]["shared"]
-          == ["android", "sdk", "connect", "glog", "goidenticons"])
+          == ["android", "sdk", "connect", "gvisor", "glog", "goidenticons"])
     check("every storefront has its own limit, none inherits 500",
           [AUDIENCES[a]["limit"] for a in ("android", "windows", "apple")]
           == [500, 1500, 4000])

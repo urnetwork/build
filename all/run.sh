@@ -598,6 +598,7 @@ error_trap 'pull warp release'
 
 if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf connect)
+    (cd $BUILD_HOME && rm -rf gvisor)
     (cd $BUILD_HOME && rm -rf sdk)
     (cd $BUILD_HOME && rm -rf android)
     (cd $BUILD_HOME && rm -rf apple)
@@ -650,6 +651,25 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 
 (cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'
+# gVisor's Go-consumable source lives on the fork's go branch. Keep its
+# module/import path gvisor.dev/gvisor; release consumers use an immutable
+# fork revision, while local checkouts replace it with this sibling source.
+(cd $BUILD_HOME/gvisor && git_main go)
+error_trap 'pull gvisor go'
+# The development modules replace gvisor.dev/gvisor with the sibling checkout.
+# Published release modules cannot retain a local-path replace: resolve the
+# exact checked-out fork commit to an immutable Go pseudo-version instead.
+GVISOR_COMMIT=$(git -C "$BUILD_HOME/gvisor" rev-parse HEAD)
+GVISOR_COMMIT_SHORT=$(git -C "$BUILD_HOME/gvisor" rev-parse --short=12 HEAD)
+GVISOR_GO_VERSION=$(GOWORK=off GOPROXY=direct go list -m -f '{{.Version}}' "github.com/urnetwork/gvisor@$GVISOR_COMMIT")
+error_trap 'query immutable gvisor go revision'
+case "$GVISOR_GO_VERSION" in
+    *-"$GVISOR_COMMIT_SHORT") ;;
+    *) false ;;
+esac
+error_trap 'match immutable gvisor go revision'
+test "$(head -n 1 "$BUILD_HOME/gvisor/go.mod")" = 'module gvisor.dev/gvisor'
+error_trap 'verify gvisor module path'
 (cd $BUILD_HOME/sdk && git_main)
 error_trap 'pull sdk'
 (cd $BUILD_HOME/android && git_main)
@@ -1330,6 +1350,10 @@ go_mod_edit_require () {
     go_edit_require $1
 }
 
+go_mod_edit_gvisor () {
+    go mod edit -replace="gvisor.dev/gvisor=github.com/urnetwork/gvisor@$GVISOR_GO_VERSION"
+}
+
 go_mod_drop_require () {
     go mod edit -dropreplace=$1 &&
     go mod edit -droprequire=$1
@@ -1603,6 +1627,7 @@ error_trap 'glog push branch'
 
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
+    go_mod_edit_gvisor &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
@@ -1640,6 +1665,7 @@ error_trap 'goidenticons push branch'
 
 (cd $BUILD_HOME/proxy &&
     go_mod_edit_module github.com/urnetwork/proxy &&
+    go_mod_edit_gvisor &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
@@ -1657,6 +1683,7 @@ error_trap 'proxy push branch'
 
 
 (cd $BUILD_HOME/sdk/build &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
@@ -1664,6 +1691,7 @@ error_trap 'proxy push branch'
 error_trap 'sdk build edit'
 
 (cd $BUILD_HOME/sdk/cgo &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
@@ -1671,6 +1699,7 @@ error_trap 'sdk build edit'
 error_trap 'sdk cgo edit'
 
 (cd $BUILD_HOME/sdk/js &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk)
@@ -1686,6 +1715,7 @@ error_trap 'sdk js edit'
 # aar, apple xcframework, cgo desktop) picks the version up from this one edit.
 (cd $BUILD_HOME/sdk &&
     go_mod_edit_module github.com/urnetwork/sdk &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
@@ -1732,6 +1762,7 @@ error_trap 'js-sdk publish'
 
 (cd $BUILD_HOME/sn &&
     go_mod_edit_module github.com/urfoundation/sn &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/sdk &&
@@ -1765,6 +1796,7 @@ error_trap 'sn push branch'
 
 (cd $BUILD_HOME/server &&
     go_mod_edit_module github.com/urnetwork/server &&
+    go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&

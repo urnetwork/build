@@ -126,3 +126,5 @@ replace github.com/urnetwork/connect => ../../../connect
 replace github.com/urnetwork/glog => ../../../glog
 
 replace github.com/urnetwork/goidenticons => ../../../goidenticons
+
+replace gvisor.dev/gvisor => ../../../gvisor

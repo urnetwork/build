@@ -80,7 +80,7 @@ name: Linux build + test
 # ONLY TWO of the repo's seventeen submodules are checked out, and they are
 # checked out in DIFFERENT jobs: `sdk` (253 MB) in build-sdk, `linux` (4.5 MB)
 # in the build legs. Nothing in the Linux leg opens the other fifteen —
-# all/build-linux.sh's `stage_local_repos sdk connect glog goidenticons linux`
+# all/build-linux.sh's `stage_local_repos sdk connect gvisor glog goidenticons linux`
 # call is a no-op unless SRC_HOME/SRC_<REPO> is set, which this workflow never
 # sets. Checking out all seventeen would be 2.53 GB against 258 MB.
 #
@@ -1021,7 +1021,7 @@ jobs:
 
       # The knob that lets a CI point the pipeline at the fork's linux tree.
       # NOT SRC_LINUX: all/stage-local-repos.sh would then also try to resolve
-      # sdk, connect, glog and goidenticons from the same SRC_HOME and hard-fail
+      # sdk, connect, gvisor, glog and goidenticons from the same SRC_HOME and hard-fail
       # on the first one it cannot find. Replacing the checkout in place leaves
       # stage_local_repos the no-op it is on the release host.
       - name: Override the linux ref

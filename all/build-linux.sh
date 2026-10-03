@@ -56,11 +56,10 @@ export BUILD_HOME="${BUILD_HOME:-$(dirname "$here")}"
 # LOCAL (possibly uncommitted) changes. No-op unless SRC_HOME / SRC_<REPO> is set
 # (release builds via run.sh stage BUILD_HOME themselves and pass no SRC_*).
 # shellcheck source=stage-local-repos.sh
-# sdk/cgo/go.mod replaces sdk, connect, AND glog with local paths, so all three
-# must be staged together or the module graph mismatches (a stale glog vs the
-# staged sdk breaks resolution).
+# sdk/cgo/go.mod replaces sdk, connect, gvisor, glog and goidenticons with
+# local paths. Stage the complete dependency closure together.
 source "$here/stage-local-repos.sh"
-stage_local_repos sdk connect glog goidenticons linux
+stage_local_repos sdk connect gvisor glog goidenticons linux
 
 # The local branches are the source of truth: when the caller doesn't pass the
 # version (run.sh exports it), read it off the linux repo's v<version> branch.

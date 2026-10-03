@@ -89,21 +89,21 @@ win_sync_source() {
   local src="$1"
   [ -d "$src" ] || win_die "build dir not found: $src"
   win_source_rsync_excludes
-  # Allowlist: the VM build needs only five repos — the app (windows/) and the
-  # cgo SDK with its local module deps (sdk/ + connect/ + glog/ + goidenticons/,
+  # Allowlist: the VM build needs the app (windows/) and the cgo SDK with its
+  # local module deps (sdk/ + connect/ + gvisor/ + glog/ + goidenticons/,
   # wired by sdk/cgo's replace directives; goidenticons backs the SDK's
   # post-quantum device identity). Sync just those, not the whole build home:
   # BUILD_HOME also holds the VM's OWN ~24GB disk image (all/windows/output/
   # *.qcow2 — copying the VM into itself), ~4GB of .git, node_modules, and every
   # other platform's repo, which made openrsync-over-cwRsync crawl (the "stuck at
-  # syncing the build home" hang). Within the five, drop the usual .git
+  # syncing the build home" hang). Within this allowlist, drop the usual .git
   # (build-sdk.ps1 passes -buildvcs=false, so Go doesn't need it) + node_modules.
   # --delete only ever touches the VM, never $src; --progress shows per-file
   # activity so the sync isn't a silent wait. To add a repo, list it here.
   rsync -a --delete --delete-excluded --progress \
     "${WIN_SOURCE_RSYNC_EXCLUDES[@]}" \
     -e "ssh -i $SSH_KEY -p $SSH_PORT ${WIN_SSH_OPTS[*]}" \
-    "$src/windows" "$src/sdk" "$src/connect" "$src/glog" "$src/goidenticons" \
+    "$src/windows" "$src/sdk" "$src/connect" "$src/gvisor" "$src/glog" "$src/goidenticons" \
     "builder@127.0.0.1:$WIN_DIR_UNIX/"
 }
 

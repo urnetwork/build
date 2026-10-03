@@ -4,6 +4,10 @@
 [submodule "connect"]
 	path = connect
 	url = git@github.com:urnetwork/connect.git
+[submodule "gvisor"]
+	path = gvisor
+	url = git@github.com:urnetwork/gvisor.git
+	branch = go
 [submodule "android"]
 	path = android
 	url = git@github.com:urnetwork/android.git
