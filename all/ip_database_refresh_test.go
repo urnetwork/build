@@ -11,7 +11,7 @@ import (
 )
 
 // One independent fake build home records exact source and command ordering.
-func ipDatabaseRefreshFixture(t *testing.T, fail bool) (string, string, *exec.Cmd) {
+func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, string, *exec.Cmd) {
 	t.Helper()
 	dir := t.TempDir()
 	buildHome, warpHome := filepath.Join(dir, "build tree"), filepath.Join(dir, "config owner")
@@ -28,7 +28,7 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool) (string, string, *exec.Cm
 	fake := filepath.Join(dir, "fake-arindbctl")
 	if err := os.WriteFile(fake, []byte(`#!/bin/sh
 printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS"
-[ "$1" = refresh ] || exit 8
+[ "$1" = update ] || exit 8
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --output ]; then shift; target="$1"; fi
   shift
@@ -41,6 +41,9 @@ printf 'synthetic arin\n' > "$target/arindb/arin.mmdb"
 printf 'synthetic places\n' > "$target/mmdb/places.yml"
 printf '{}\n' > "$target/mmdb/manifest.json"
 printf '{}\n' > "$target/arindb/manifest.json"
+mkdir -p "$target/subscriber-evidence"
+printf 'synthetic evidence\n' > "$target/subscriber-evidence/catalog.yml"
+printf 'registration and subscriber augmentation applied; unavailable evidence: asdb\n' > "$target/update-summary.txt"
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +63,7 @@ git() {
     if [ "$1" = diff ]; then return 1; fi
 }
 git_push_with_rebase_retry() { print -r -- push >> "$IP_DATABASE_TEST_EVENTS"; }
-builder_message() { :; }
+builder_message() { print -r -- "message:$*" >> "$IP_DATABASE_TEST_EVENTS"; }
 eval "$1"
 refresh_ip_databases
 `
@@ -69,6 +72,7 @@ refresh_ip_databases
 	if fail {
 		command.Env[len(command.Env)-1] = "IP_DATABASE_TEST_FAIL=yes"
 	}
+	command.Env = append(command.Env, env...)
 	return dir, warpHome, command
 }
 
@@ -83,7 +87,7 @@ func TestReleaseRefreshesIpDatabasesFromVersionedServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"refresh\n", "--geoip-config\n" + filepath.Join(warpHome, "vault", "mm-geoip.yml") + "\n", "--credentials\n" + filepath.Join(warpHome, "vault", "arin.yml") + "\n", "--rules\n" + filepath.Join(warpHome, "config", "main", "arindb.yml") + "\n"} {
+	for _, want := range []string{"update\n", "--timeout\n2h\n", "--geoip-config\n" + filepath.Join(warpHome, "vault", "mm-geoip.yml") + "\n", "--credentials\n" + filepath.Join(warpHome, "vault", "arin.yml") + "\n", "--rules\n" + filepath.Join(warpHome, "config", "main", "arindb.yml") + "\n"} {
 		if !strings.Contains(string(args), want) {
 			t.Errorf("refresh lost explicit input %q", want)
 		}
@@ -99,6 +103,16 @@ func TestReleaseRefreshesIpDatabasesFromVersionedServer(t *testing.T) {
 	}
 	if !strings.Contains(string(events), filepath.Join("build tree", "server", "v2026")) || !strings.Contains(string(events), "push\n") {
 		t.Fatal("release lost selected source or config publication")
+	}
+	if !strings.Contains(string(events), "message:GeoLite2 and ARIN databases refreshed for `1.2.3-4`: registration and subscriber augmentation applied; unavailable evidence: asdb") {
+		t.Fatalf("release message lost the update summary: %s", events)
+	}
+	if strings.Contains(string(args), "--subscriber-catalog") || strings.Contains(string(args), "--relay-geofeeds") {
+		t.Fatalf("absent catalog or relay opt-in produced flags: %s", args)
+	}
+	// The evidence directory stays in the build output; it is never config.
+	if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", "subscriber-evidence")); !os.IsNotExist(err) {
+		t.Fatal("subscriber evidence was published as config")
 	}
 	runner, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
@@ -208,5 +222,41 @@ func TestReleaseIpDatabaseRefreshRollsBackSecondRenameFailure(t *testing.T) {
 	}
 	if strings.Contains(string(events), "git:") || strings.Contains(string(events), "push\n") {
 		t.Fatal("failed publication committed or pushed config")
+	}
+}
+
+// A reviewed subscriber catalog at the default path is passed to update, and
+// the relay geofeeds are pinned only when explicitly requested.
+func TestReleaseIpDatabaseUpdateUsesReviewedSubscriberCatalog(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false, "ARIN_RELAY_GEOFEEDS=1")
+	catalog := filepath.Join(warpHome, "config", "main", "arindb-subscribers", "catalog.yml")
+	if err := os.MkdirAll(filepath.Dir(catalog), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(catalog, []byte("synthetic reviewed catalog\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("update: %v\n%s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--subscriber-catalog\n"+catalog+"\n") || !strings.Contains(string(args), "--relay-geofeeds\n") {
+		t.Fatalf("update lost the reviewed catalog or relay opt-in: %s", args)
+	}
+}
+
+// An explicitly configured catalog that cannot be read stops the release
+// instead of silently publishing a registration-only resource.
+func TestReleaseIpDatabaseUpdateRejectsUnreadableConfiguredCatalog(t *testing.T) {
+	dir, _, command := ipDatabaseRefreshFixture(t, false, "ARIN_SUBSCRIBER_CATALOG_FILE="+filepath.Join(t.TempDir(), "missing.yml"))
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "ARIN_SUBSCRIBER_CATALOG_FILE") {
+		t.Fatalf("unreadable configured catalog was not reported: %v %s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "events")); !os.IsNotExist(err) {
+		t.Fatal("unreadable catalog started the release tools")
 	}
 }

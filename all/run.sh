@@ -10,6 +10,13 @@
 # GEOIP_CONF_FILE defaults to $WARP_HOME/vault/mm-geoip.yml (MaxMind YAML)
 # ARIN_CREDENTIALS_FILE defaults to $WARP_HOME/vault/arin.yml (replacement key)
 # ARIN_RULES_FILE defaults to $WARP_HOME/config/$BUILD_ENV/arindb.yml (reviewed rules)
+# (optional) ARIN_SUBSCRIBER_CATALOG_FILE defaults to
+#            $WARP_HOME/config/$BUILD_ENV/arindb-subscribers/catalog.yml (reviewed
+#            subscriber operators); when present, arindbctl update also pins fresh
+#            routing, RPKI, registry, cloud, VPN and label evidence and publishes
+#            the augmented database. When absent the resource is registration only.
+# (optional) ARIN_RELAY_GEOFEEDS=1 also pins the Apple Private Relay and
+#            Cloudflare egress geofeeds as reviewed VPN address lists
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the GitHub-API-backed release-body
@@ -2744,10 +2751,17 @@ builder_message "android fdroid tag \`v${EXTERNAL_WARP_VERSION}-fdroid\` pushed"
 # Generate both databases from the selected versioned Server before packaging
 # config. Ordinary local builds may keep using their existing cache; this is
 # the explicit all-release refresh workflow, not a service startup gate.
+# arindbctl update refreshes GeoLite2 and ARIN, builds the registration
+# database and, with a reviewed subscriber catalog, pins fresh evidence, runs
+# the subscriber augmentation, audits the catalog and validates the result
+# against RIPE Atlas. Only GeoLite2, ARIN and the RIS routing snapshots are
+# required; other evidence that is unavailable upstream is left out and named
+# in arindb/update-manifest.json and the release message.
 refresh_ip_databases () {
     local geoip_config="${GEOIP_CONF_FILE:-$WARP_HOME/vault/mm-geoip.yml}"
     local arin_credentials="${ARIN_CREDENTIALS_FILE:-$WARP_HOME/vault/arin.yml}"
     local arin_rules="${ARIN_RULES_FILE:-$WARP_HOME/config/$BUILD_ENV/arindb.yml}"
+    local subscriber_catalog="${ARIN_SUBSCRIBER_CATALOG_FILE:-$WARP_HOME/config/$BUILD_ENV/arindb-subscribers/catalog.yml}"
     if [ ! -f "$geoip_config" ] || [ ! -r "$geoip_config" ]; then
         print -u2 -- "IP refresh requires readable GEOIP_CONF_FILE: $geoip_config"
         return 1
@@ -2759,6 +2773,20 @@ refresh_ip_databases () {
     if [ ! -f "$arin_rules" ] || [ ! -r "$arin_rules" ]; then
         print -u2 -- "IP refresh requires readable ARIN_RULES_FILE with reviewed classifier rules: $arin_rules"
         return 1
+    fi
+    local -a update_args
+    update_args=()
+    if [ -n "${ARIN_SUBSCRIBER_CATALOG_FILE:-}" ] && { [ ! -f "$subscriber_catalog" ] || [ ! -r "$subscriber_catalog" ]; }; then
+        # An explicitly configured catalog that cannot be read is an error,
+        # never a silent fallback to a registration-only resource.
+        print -u2 -- "IP refresh requires readable ARIN_SUBSCRIBER_CATALOG_FILE: $subscriber_catalog"
+        return 1
+    fi
+    if [ -f "$subscriber_catalog" ] && [ -r "$subscriber_catalog" ]; then
+        update_args+=(--subscriber-catalog "$subscriber_catalog")
+    fi
+    if [ "${ARIN_RELAY_GEOFEEDS:-0}" = 1 ]; then
+        update_args+=(--relay-geofeeds)
     fi
     local config_root="$WARP_HOME/config"
     local geoip_target="$config_root/all/mmdb/$WARP_VERSION"
@@ -2774,14 +2802,16 @@ refresh_ip_databases () {
     ipdb_work=$(mktemp -d "$ipdb_out/refresh.XXXXXXXX") || return $?
     (cd "$BUILD_HOME/server${GO_MOD_SUFFIX}" &&
         go build -ldflags "-X main.Version=$WARP_VERSION" -o "$ipdb_work/arindbctl" ./arindbctl) || return $?
-    # The refresh command downloads GeoLite2 first, then ARIN orgs+nets, and
-    # only publishes the bundle after both databases and manifests validate.
-    "$ipdb_work/arindbctl" refresh \
+    # Nothing is published unless every required database validates. The
+    # subscriber evidence, registration base, audit and validation stay in
+    # $ipdb_work/bundle/subscriber-evidence for review; they are not config.
+    "$ipdb_work/arindbctl" update \
         --geoip-config "$geoip_config" \
         --credentials "$arin_credentials" \
         --rules "$arin_rules" \
+        "${update_args[@]}" \
         --output "$ipdb_work/bundle" \
-        --timeout 1h || return $?
+        --timeout 2h || return $?
     if [ -e "$geoip_target" ] || [ -L "$geoip_target" ] || [ -e "$arin_target" ] || [ -L "$arin_target" ]; then
         print -u2 -- "IP refresh version appeared during generation; nothing published"
         return 1
@@ -2800,11 +2830,15 @@ refresh_ip_databases () {
                 "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
             git_push_with_rebase_retry
         fi) || return $?
-    builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`"
+    local update_summary=''
+    if [ -r "$ipdb_work/bundle/update-summary.txt" ]; then
+        update_summary=$(<"$ipdb_work/bundle/update-summary.txt")
+    fi
+    builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${update_summary:-no update summary}"
 }
 
 refresh_ip_databases
-error_trap 'GeoLite2 then ARIN release refresh'
+error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 
 # The config-updater image carries this release's config, so on the deploy
 # path it is built after the Brevo template export below has written its
