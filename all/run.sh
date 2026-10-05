@@ -774,9 +774,14 @@ error_trap 'ur.io changelog freshness'
 # The per-URL content-date record (sitemap lastmod + dateModified) is derived
 # from the docs, country data and API spec and committed with them; regenerate
 # it here so the release commit below carries the record its build checks.
+# The page dates (react/src/data/page-dates.js) come from the git history of
+# each page's sources. The web build's prebuild regenerates them too, so a
+# stale committed module would leave this checkout dirty after the build and
+# block the next release's pull; regenerate and commit them here as well.
 (cd $WARP_HOME/mmm/ur.io &&
     node react/scripts/generate-docs.mjs &&
-    node react/scripts/content-dates.mjs)
+    node react/scripts/content-dates.mjs &&
+    node react/scripts/generate-page-dates.mjs)
 error_trap 'ur.io content dates update'
 
 # regenerate every app's strings from the shared localization store:
@@ -1069,9 +1074,10 @@ fi
         ur.io/react/src/data/changelog.js \
         ur.io/react/src/data/changelog-version.js \
         ur.io/react/src/data/releases.js \
-        ur.io/react/src/data/content-dates.js &&
+        ur.io/react/src/data/content-dates.js \
+        ur.io/react/src/data/page-dates.js &&
     if ! git diff --cached --quiet; then
-        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog, releases and content dates update" &&
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog, releases, content and page dates update" &&
         git push
     fi)
 error_trap 'ur.io changelog update push'
