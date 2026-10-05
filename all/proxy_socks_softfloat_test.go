@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// The release publishes proxy-socks MIPS binaries only when they are soft
+// float: run.sh's proxy socks region, run with real MIPS binaries.
 package allbuild
 
 import (
@@ -35,6 +37,8 @@ for arch in mips mipsle mips64 mips64le; do
 done
 `
 
+// Builds the module at moduleDir for linux into out, with env on top of a
+// float-neutral MIPS environment.
 func buildMipsBinary(t *testing.T, moduleDir string, out string, env ...string) {
 	t.Helper()
 	cmd := exec.Command("go", "build", "-o", out, ".")
@@ -45,6 +49,8 @@ func buildMipsBinary(t *testing.T, moduleDir string, out string, env ...string) 
 	}
 }
 
+// Each MIPS proxy-socks binary must record soft float, or the release stops
+// before the upload with a builder message that names the architecture.
 func TestProxySocksReleaseRequiresMipsSoftFloat(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
@@ -84,58 +90,57 @@ func TestProxySocksReleaseRequiresMipsSoftFloat(t *testing.T) {
 		binaries map[string]string
 		wantFail string
 	}{
-		{"all softfloat", map[string]string{"mips": soft, "mipsle": soft, "mips64": soft, "mips64le": soft}, ""},
-		{"mips64 hardfloat", map[string]string{"mips": soft, "mipsle": soft, "mips64": hard, "mips64le": soft}, "mips64"},
-		{"mips64le hardfloat", map[string]string{"mips": soft, "mipsle": soft, "mips64": soft, "mips64le": hard}, "mips64le"},
-		{"mips64 missing", map[string]string{"mips": soft, "mipsle": soft, "mips64le": soft}, "mips64"},
+		{name: "all softfloat", binaries: map[string]string{"mips": soft, "mipsle": soft, "mips64": soft, "mips64le": soft}, wantFail: ""},
+		{name: "mips64 hardfloat", binaries: map[string]string{"mips": soft, "mipsle": soft, "mips64": hard, "mips64le": soft}, wantFail: "mips64"},
+		{name: "mips64le hardfloat", binaries: map[string]string{"mips": soft, "mipsle": soft, "mips64": soft, "mips64le": hard}, wantFail: "mips64le"},
+		{name: "mips64 missing", binaries: map[string]string{"mips": soft, "mipsle": soft, "mips64le": soft}, wantFail: "mips64"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			buildHome := filepath.Join(t.TempDir(), "build home")
-			socksDir := filepath.Join(buildHome, "proxy", "v2026", "socks")
-			binDir := filepath.Join(buildHome, "bin")
-			selected := filepath.Join(buildHome, "selected")
-			for _, dir := range []string{socksDir, binDir, selected} {
-				if err := os.MkdirAll(dir, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			for arch, from := range test.binaries {
-				data, err := os.ReadFile(filepath.Join(from, arch))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(selected, arch), data, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := os.WriteFile(filepath.Join(binDir, "make"), []byte(proxySocksFakeMake), 0o700); err != nil {
+		buildHome := filepath.Join(t.TempDir(), "build home")
+		socksDir := filepath.Join(buildHome, "proxy", "v2026", "socks")
+		binDir := filepath.Join(buildHome, "bin")
+		selected := filepath.Join(buildHome, "selected")
+		for _, dir := range []string{socksDir, binDir, selected} {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
+		}
+		for arch, from := range test.binaries {
+			data, err := os.ReadFile(filepath.Join(from, arch))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(selected, arch), data, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "make"), []byte(proxySocksFakeMake), 0o700); err != nil {
+			t.Fatal(err)
+		}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, zsh, "-f", "-c", proxySocksSoftfloatHarness, "proxy-socks-softfloat-test", buildHome, mipsEnv, errorTrap, region)
-			cmd.Env = environmentWith(
-				"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"PROXY_SOCKS_BINARIES="+selected,
-				"GOFLAGS=",
-			)
-			output, err := cmd.CombinedOutput()
-			eventData, _ := os.ReadFile(filepath.Join(buildHome, "events"))
-			events := string(eventData)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		cmd := exec.CommandContext(ctx, zsh, "-f", "-c", proxySocksSoftfloatHarness, "proxy-socks-softfloat-test", buildHome, mipsEnv, errorTrap, region)
+		cmd.Env = environmentWith(
+			"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"PROXY_SOCKS_BINARIES="+selected,
+			"GOFLAGS=",
+		)
+		output, err := cmd.CombinedOutput()
+		cancel()
+		eventData, _ := os.ReadFile(filepath.Join(buildHome, "events"))
+		events := string(eventData)
 
-			if test.wantFail == "" {
-				if err != nil || !strings.Contains(events, "release-continued") {
-					t.Fatalf("softfloat release stopped: %v\n%s\n%s", err, output, events)
-				}
-				return
+		if test.wantFail == "" {
+			if err != nil || !strings.Contains(events, "release-continued") {
+				t.Errorf("%s: softfloat release stopped: %v\n%s\n%s", test.name, err, output, events)
 			}
-			if err == nil || strings.Contains(events, "release-continued") {
-				t.Fatalf("release continued past a %s binary that is not softfloat\n%s\n%s", test.wantFail, output, events)
-			}
-			if want := "message:error(1): proxy socks " + test.wantFail + " softfloat"; !strings.Contains(events, want) {
-				t.Fatalf("builder message missing %q\n%s\n%s", want, output, events)
-			}
-		})
+			continue
+		}
+		if err == nil || strings.Contains(events, "release-continued") {
+			t.Errorf("%s: release continued past a %s binary that is not softfloat\n%s\n%s", test.name, test.wantFail, output, events)
+			continue
+		}
+		if want := "message:error(1): proxy socks " + test.wantFail + " softfloat"; !strings.Contains(events, want) {
+			t.Errorf("%s: builder message missing %q\n%s\n%s", test.name, want, output, events)
+		}
 	}
 }
