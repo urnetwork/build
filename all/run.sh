@@ -41,7 +41,8 @@
 #            retry for exact, freshly published dependencies (defaults: 6
 #            attempts, 10s).
 # (optional) CONNECT_IP_UPDATE set (non-empty) to regenerate the connect IP
-#            tables (security + blocker) from the live feeds before the tests
+#            tables (security, with the Meta prefixes of the WhatsApp
+#            exception, + blocker) from their live sources before the tests
 #            run, then push them to connect main (commit message stamped with
 #            the release version) before the version branches are cut
 # (optional) BUILD_APPLE_IDENTITY set (non-empty) to create a per-run apple
@@ -712,8 +713,10 @@ error_trap 'pull localizations'
 (cd $WARP_HOME/mmm && git_main)
 error_trap 'pull mmm'
 
-# refresh the generated connect IP tables from the live threat feeds:
-# security/main.go -> ip_security_cfaa_block.go, blocker/main.go -> ip_blocker_block.go.
+# refresh the generated connect IP tables from their live sources:
+# security/main.go -> ip_security_cfaa_block.go (threat feeds) and
+# ip_security_messaging_meta.go (Meta's AS32934 prefixes for the WhatsApp
+# exception, from RADb over whois, TCP 43), blocker/main.go -> ip_blocker_block.go.
 # Runs while every repo is still on main so the tests below exercise the update.
 # The commit + push to connect main happens after the release version is staged
 # (the commit message carries it) and before the version branches are cut — see
@@ -1044,10 +1047,11 @@ builder_message "Build all \`${EXTERNAL_WARP_VERSION}\`"
 
 # push the connect IP table update (generated before the tests above) to connect
 # main, stamped with the release version, before the version branches below are
-# cut from it. Stage only the generated tables, never a blanket add.
+# cut from it. Stage only the generated tables, never a blanket add; a table
+# left out would stay modified and fail the next build's connect pull.
 if [ "$CONNECT_IP_UPDATE" ]; then
     (cd $BUILD_HOME/connect &&
-        git add ip_security_cfaa_block.go ip_blocker_block.go &&
+        git add ip_security_cfaa_block.go ip_security_messaging_meta.go ip_blocker_block.go &&
         if ! git diff --cached --quiet; then
             git commit -m "${EXTERNAL_WARP_VERSION} ip security and blocker update" &&
             git push
