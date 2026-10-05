@@ -117,7 +117,10 @@ func validateAccept(accept *x402Accept) error {
 }
 
 // x402Payment signs a transfer of exactly the quoted amount to the quoted
-// payTo and wraps it as an X-PAYMENT header value.
+// payTo and wraps it as an X-PAYMENT header value. The payTo must be the
+// settlement address pinned for Solana (Runner.x402SolanaPayTo): terms naming
+// any other address, or any address while none is pinned, are refused before
+// anything is signed, as a quote naming another merchant is (Runner.pay).
 //
 // NOTE ON VERIFICATION. The settle half of this flow has never run anywhere:
 // vault x402.yml ships enabled:false with a blank facilitator url and api key,
@@ -130,6 +133,18 @@ func validateAccept(accept *x402Accept) error {
 func (r *Runner) x402Payment(ctx context.Context, terms *x402Accept) (header string, signature string, err error) {
 	if r.payer == nil {
 		return "", "", errors.New(r.skipReason)
+	}
+	switch {
+	case r.x402SolanaPayTo == "":
+		return "", "", fmt.Errorf(
+			"x402 quoted payTo %s on %s, but no solana settlement address is pinned (paycases officialX402SolanaPayTo); nothing was signed",
+			terms.PayTo, terms.Network,
+		)
+	case terms.Network != "solana" || terms.PayTo != r.x402SolanaPayTo:
+		return "", "", fmt.Errorf(
+			"x402 quoted payTo %s on %s, not the pinned solana settlement address %s; nothing was signed",
+			terms.PayTo, terms.Network, r.x402SolanaPayTo,
+		)
 	}
 	amount, err := strconv.ParseUint(terms.MaxAmountRequired, 10, 64)
 	if err != nil {

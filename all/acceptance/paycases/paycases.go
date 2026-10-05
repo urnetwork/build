@@ -9,12 +9,19 @@
 // server quotes but will not honour. These cases pay the way a customer pays
 // and then assert the entitlement arrived.
 //
-// What it costs. Each case moves real USDC on Solana mainnet into the
-// production merchant address, and that money is not recoverable. So nothing
+// What it costs. Each case moves real USDC on Solana mainnet to the merchant
+// address the server quotes, and that money is not recoverable. So nothing
 // here runs unless vault tests.yml sets payments.allow_real_usdc_spend, and
 // two ceilings -- per payment and per campaign -- bound what a misconfigured
 // run can spend. A disabled payments section reports SKIP, which is the normal
 // state for a machine that is not deliberately spending.
+//
+// Where to pay is the server's to quote but not to choose. A case pays the
+// recipient its quote names only when that is the official merchant in USDC
+// (officialMerchantAddress), and x402 only when its payTo is the pinned
+// settlement address (officialX402SolanaPayTo). Any other quote fails its case
+// with nothing paid, so a misconfigured server cannot redirect acceptance
+// money.
 //
 // Once spending IS enabled, a product surface that cannot be paid is a
 // failure, not a skip. x402 answering 404 because nobody configured its
@@ -48,12 +55,20 @@ import (
 
 const maxResponseBytes = 1024 * 1024
 
-// MerchantAddress is where a URnetwork USDC payment goes. It is the first
-// entry of the server's solanaReceiverAddresses and the same address the site
-// and the apps put in a payment url. A transfer to any other address is not a
-// payment, so this is pinned rather than read from the config: if it drifts,
-// the case should fail loudly rather than quietly pay somewhere else.
-const MerchantAddress = "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM"
+// The official URnetwork merchant: the first entry of the server's
+// solanaReceiverAddresses, which every Solana intent quotes as its recipient
+// and which the site and the apps pay. It is a guard, not a payment target: a
+// case pays the recipient its quote names, and only when that is this address
+// and the mint is USDC (usdcpay.UsdcMintMainnet). It is pinned here rather than
+// read from any config, so a server that quotes another address fails the case
+// loudly instead of being paid.
+const officialMerchantAddress = "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM"
+
+// The address x402 settles Solana payments to (vault x402.yml pay_to.solana, a
+// Stripe crypto deposit address, not the merchant), pinned like the merchant.
+// Empty while no deployment has x402 configured: until it is pinned, no x402
+// quote is paid, whatever payTo it names.
+const officialX402SolanaPayTo = ""
 
 // Case names, matching the acceptance result matrix.
 const (
@@ -106,6 +121,8 @@ type subscriptionIntentResult struct {
 	RegularAmountUsd float64   `json:"regular_amount_usd,omitempty"`
 	OfferApplied     bool      `json:"offer_applied,omitempty"`
 	Currency         string    `json:"currency,omitempty"`
+	Recipient        string    `json:"recipient,omitempty"`
+	SplTokenMint     string    `json:"spl_token_mint,omitempty"`
 	Error            *apiError `json:"error,omitempty"`
 }
 
@@ -115,7 +132,19 @@ type dataIntentResult struct {
 	Memo        string     `json:"memo,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	NetworkName string     `json:"network_name,omitempty"`
-	Error       *apiError  `json:"error,omitempty"`
+	// where to pay, as on a plan intent
+	Recipient    string    `json:"recipient,omitempty"`
+	SplTokenMint string    `json:"spl_token_mint,omitempty"`
+	Error        *apiError `json:"error,omitempty"`
+}
+
+// A Solana payment as its quote states it: the amount, the reference the
+// server matches the transfer by, and where to pay.
+type solanaPaymentQuote struct {
+	amountUsd    float64
+	reference    string
+	recipient    string
+	splTokenMint string
 }
 
 type dataStatusResult struct {
@@ -139,6 +168,15 @@ type balanceResult struct {
 	Error                 *apiError       `json:"error,omitempty"`
 }
 
+// The acceptance wallet as the cases use it: usdcpay.Payer on mainnet. Tests
+// substitute a recorder that moves nothing.
+type usdcPayer interface {
+	Address() string
+	Balances(ctx context.Context) (usdc float64, sol float64, err error)
+	Send(ctx context.Context, payment usdcpay.Payment) (*usdcpay.Result, error)
+	SignTransfer(ctx context.Context, recipient string, amountAtomic uint64) (*usdcpay.SignedTransfer, error)
+}
+
 // Runner holds everything a payment case needs. Payer is nil when the vault
 // has not enabled spending, which is what turns every case into a SKIP.
 type Runner struct {
@@ -146,7 +184,12 @@ type Runner struct {
 	Config *testconfig.Config
 	Client *http.Client
 
-	payer *usdcpay.Payer
+	payer usdcPayer
+	// what a quote must name before anything is paid: the merchant (with
+	// the USDC mint) and x402's Solana settlement address. NewRunner pins the
+	// official values; tests substitute fixture keys.
+	merchantAddress string
+	x402SolanaPayTo string
 	// spent is what this runner has already moved, against
 	// payments.max_campaign_spend_usd.
 	spent float64
@@ -158,7 +201,13 @@ type Runner struct {
 // cases all SKIP; it does not yield an error, because not spending is the
 // normal state.
 func NewRunner(apiURL string, config *testconfig.Config, client *http.Client) (*Runner, error) {
-	runner := &Runner{APIURL: apiURL, Config: config, Client: client}
+	runner := &Runner{
+		APIURL:          apiURL,
+		Config:          config,
+		Client:          client,
+		merchantAddress: officialMerchantAddress,
+		x402SolanaPayTo: officialX402SolanaPayTo,
+	}
 
 	payments := config.Payments
 	if !payments.Enabled() {
@@ -247,8 +296,8 @@ func unwrapSkip(err error) string {
 // ----- the cases -----
 
 // runSubscription buys a Pro year the way the site and the Android app do:
-// register an intent, pay the amount the SERVER quoted, wait for the
-// entitlement.
+// register an intent, pay the amount the server quoted to the recipient it
+// named, wait for the entitlement.
 func (r *Runner) runSubscription(ctx context.Context) (detail string, returnErr error) {
 	jwt, cleanup, err := r.createNetwork(ctx, "usdc-sub")
 	if err != nil {
@@ -280,7 +329,12 @@ func (r *Runner) runSubscription(ctx context.Context) (detail string, returnErr 
 		return "", fmt.Errorf("payment intent quoted a non-positive amount: %v", intent.AmountUsd)
 	}
 
-	payment, err := r.pay(ctx, intent.AmountUsd, reference)
+	payment, err := r.pay(ctx, solanaPaymentQuote{
+		amountUsd:    intent.AmountUsd,
+		reference:    reference,
+		recipient:    intent.Recipient,
+		splTokenMint: intent.SplTokenMint,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -342,7 +396,12 @@ func (r *Runner) runDataPack(ctx context.Context) (detail string, returnErr erro
 		)
 	}
 
-	payment, err := r.pay(ctx, intent.AmountUsd, reference)
+	payment, err := r.pay(ctx, solanaPaymentQuote{
+		amountUsd:    intent.AmountUsd,
+		reference:    reference,
+		recipient:    intent.Recipient,
+		splTokenMint: intent.SplTokenMint,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -478,40 +537,70 @@ func (r *Runner) runX402(ctx context.Context) (detail string, returnErr error) {
 	), nil
 }
 
-// PayReference sends one payment against a reference somebody else registered.
+// Sends one payment against a reference somebody else registered, to the
+// recipient and mint their payment names.
 //
 // The browser acceptance cases need this: the page under test registers its own
 // intent and builds its own payment url, which is the whole point -- the client
 // doing it is what is being checked. The test then has to actually pay the
-// reference the PAGE produced, not one this process invented.
+// payment the page produced (its reference, amount and recipient), not one this
+// process invented.
 //
-// It enforces the same ceilings as every other payment here.
-func (r *Runner) PayReference(ctx context.Context, reference string, amountUsd float64) (*usdcpay.Result, error) {
-	if r.payer == nil {
-		return nil, errors.New(r.skipReason)
+// It enforces the same checks as every other payment here: the official
+// merchant in USDC, and the ceilings.
+func (self *Runner) PayReference(
+	ctx context.Context, reference string, amountUsd float64, recipient string, splTokenMint string,
+) (*usdcpay.Result, error) {
+	if self.payer == nil {
+		return nil, errors.New(self.skipReason)
 	}
-	return r.pay(ctx, amountUsd, reference)
+	return self.pay(ctx, solanaPaymentQuote{
+		amountUsd:    amountUsd,
+		reference:    reference,
+		recipient:    recipient,
+		splTokenMint: splTokenMint,
+	})
 }
 
 // ----- payment plumbing -----
 
-// pay enforces the campaign budget, sends, and records the spend.
-func (r *Runner) pay(ctx context.Context, amountUsd float64, reference string) (*usdcpay.Result, error) {
-	if err := r.budget(amountUsd); err != nil {
+// Pays a quote to the recipient it names, once it is known to name the
+// official merchant in USDC; enforces the campaign budget, sends, and records
+// the spend. A quote naming any other recipient or mint, or none (a server
+// that predates quoting where to pay), is refused before anything is signed.
+func (self *Runner) pay(ctx context.Context, quote solanaPaymentQuote) (*usdcpay.Result, error) {
+	switch {
+	case quote.recipient == "" || quote.splTokenMint == "":
+		return nil, fmt.Errorf(
+			"the quote does not say where to pay (recipient %q, spl_token_mint %q); nothing was paid",
+			quote.recipient, quote.splTokenMint,
+		)
+	case quote.recipient != self.merchantAddress:
+		return nil, fmt.Errorf(
+			"the quote says to pay %s, not the official merchant %s; nothing was paid",
+			quote.recipient, self.merchantAddress,
+		)
+	case quote.splTokenMint != usdcpay.UsdcMintMainnet:
+		return nil, fmt.Errorf(
+			"the quote says to pay in mint %s, not USDC (%s); nothing was paid",
+			quote.splTokenMint, usdcpay.UsdcMintMainnet,
+		)
+	}
+	if err := self.budget(quote.amountUsd); err != nil {
 		return nil, err
 	}
-	payment, err := r.payer.Send(ctx, usdcpay.Payment{
-		Recipient: MerchantAddress,
-		AmountUsd: amountUsd,
-		Reference: reference,
+	payment, err := self.payer.Send(ctx, usdcpay.Payment{
+		Recipient: quote.recipient,
+		AmountUsd: quote.amountUsd,
+		Reference: quote.reference,
 	})
 	if payment != nil {
 		// Count anything that was broadcast, whether or not it confirmed:
 		// the money left either way.
-		r.spent += payment.AmountUsd
+		self.spent += payment.AmountUsd
 	}
 	if err != nil {
-		return nil, fmt.Errorf("send %.2f USDC: %w", amountUsd, err)
+		return nil, fmt.Errorf("send %.2f USDC: %w", quote.amountUsd, err)
 	}
 	return payment, nil
 }
