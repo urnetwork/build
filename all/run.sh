@@ -2259,6 +2259,12 @@ error_trap 'build bringyourctl'
 
 (cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks && make)
 error_trap 'build proxy socks'
+# The socks Makefile picks the MIPS float variables itself. A hardfloat MIPS
+# binary crashes on FPU-less routers, so check what the toolchain recorded.
+for proxy_socks_arch in mips mipsle mips64 mips64le; do
+    go_mips_require_softfloat "$proxy_socks_arch" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/linux/$proxy_socks_arch/socks"
+    error_trap "proxy socks $proxy_socks_arch softfloat"
+done
 
 github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-socks.tar.gz"
 
