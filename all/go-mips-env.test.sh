@@ -29,6 +29,21 @@ for arch in mips mipsle mips64 mips64le; do
       go build -o "$run_dir/$arch" .)
   go version -m "$run_dir/$arch" | grep -Eq 'GOMIPS(64)?=softfloat' ||
     fail "$arch binary is not softfloat: $(go version -m "$run_dir/$arch" | grep GOMIPS)"
+  go_mips_require_softfloat "$arch" "$run_dir/$arch" || fail "$arch softfloat binary rejected"
 done
+
+# A Makefile that sets GOMIPS on a 64-bit target builds hardfloat.
+for arch in mips64 mips64le; do
+  (cd "$run_dir" &&
+    env CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOMIPS=softfloat GOMIPS64= \
+      go build -o "$run_dir/$arch-hardfloat" .)
+  if go_mips_require_softfloat "$arch" "$run_dir/$arch-hardfloat" 2>/dev/null; then
+    fail "$arch hardfloat binary accepted"
+  fi
+done
+if go_mips_require_softfloat mips64 "$run_dir/missing" 2>/dev/null; then
+  fail "missing mips64 binary accepted"
+fi
+go_mips_require_softfloat amd64 "$run_dir/missing" || fail "amd64 is not a MIPS target"
 
 echo "go-mips-env: OK"

@@ -18,3 +18,18 @@ go_mips_softfloat_env() {
         mips64|mips64le) echo "GOMIPS64=softfloat" ;;
     esac
 }
+
+#   go_mips_require_softfloat <goarch> <binary>
+#
+# Fails when the Go binary is missing or does not record soft float for its
+# MIPS GOARCH; other architectures pass. Use it on binaries a Makefile built,
+# where go_mips_softfloat_env did not choose the float variable.
+go_mips_require_softfloat() {
+    local float_env
+    float_env="$(go_mips_softfloat_env "$1")"
+    [ -n "$float_env" ] || return 0
+    if ! go version -m "$2" | grep -Eq "^[[:space:]]+build[[:space:]]+${float_env}\$"; then
+        echo "error: $2 ($1) is not softfloat" >&2
+        return 1
+    fi
+}
