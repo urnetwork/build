@@ -44,7 +44,7 @@ func TestSDKBuildToolsPreflight(t *testing.T) {
 case "${0##*/}" in
   go)
     if [ "$1" = version ]; then
-      printf 'go version go1.26.7 darwin/arm64\n'
+      printf 'go version go1.27.1 darwin/arm64\n'
     else
       printf '%s\n' "$@" >> "$SDK_TOOL_TEST_LOG"
       [ "$SDK_TOOL_TEST_FAILURE" != 1 ] || exit 7
