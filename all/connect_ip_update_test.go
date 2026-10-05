@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// The CONNECT_IP_UPDATE push step, run from run.sh against a local connect
+// repository and a bare origin.
 package allbuild
 
 import (
@@ -28,22 +30,22 @@ var connectGeneratedTables = []string{
 
 // A connect checkout whose generated tables (and one hand-written file) the
 // generators have just rewritten, with a local bare origin to push to.
-func connectIpUpdateFixture(t *testing.T, tables []string) (buildHome string, connect string, remote string) {
+func connectIpUpdateFixture(t *testing.T, tables []string) (buildHome string, connectDir string, remoteDir string) {
 	t.Helper()
 	tempDir := t.TempDir()
-	remote = filepath.Join(tempDir, "connect.git")
+	remoteDir = filepath.Join(tempDir, "connect.git")
 	buildHome = filepath.Join(tempDir, "build")
-	connect = filepath.Join(buildHome, "connect")
-	runGit(t, tempDir, "init", "--bare", remote)
-	runGit(t, tempDir, "init", "-b", "main", connect)
+	connectDir = filepath.Join(buildHome, "connect")
+	runGit(t, tempDir, "init", "--bare", remoteDir)
+	runGit(t, tempDir, "init", "-b", "main", connectDir)
 	names := append(slices.Clone(tables), "ip_security.go")
 	for _, name := range names {
-		commitTestFile(t, connect, name, "before\n", "seed "+name)
+		commitTestFile(t, connectDir, name, "before\n", "seed "+name)
 	}
-	runGit(t, connect, "remote", "add", "origin", remote)
-	runGit(t, connect, "push", "-u", "origin", "main")
+	runGit(t, connectDir, "remote", "add", "origin", remoteDir)
+	runGit(t, connectDir, "push", "-u", "origin", "main")
 	for _, name := range names {
-		if err := os.WriteFile(filepath.Join(connect, name), []byte("after\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(connectDir, name), []byte("after\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,24 +78,27 @@ print -r -- push-region-continued
 	return command.CombinedOutput()
 }
 
+// The push commits the generated tables, and only them, with the release
+// version in the message: a hand-written change stays unstaged, and tables
+// regenerated unchanged make no commit.
 func TestRunConnectIpUpdateCommitsEveryGeneratedTable(t *testing.T) {
-	buildHome, connect, remote := connectIpUpdateFixture(t, connectGeneratedTables)
+	buildHome, connectDir, remoteDir := connectIpUpdateFixture(t, connectGeneratedTables)
 	output, err := runConnectIpUpdatePush(t, buildHome)
 	if err != nil || !strings.Contains(string(output), "push-region-continued") {
 		t.Fatalf("push region failed: %v\n%s", err, output)
 	}
 
-	head := runGit(t, remote, "rev-parse", "main")
-	committed := strings.Fields(runGit(t, remote, "diff-tree", "--no-commit-id", "--name-only", "-r", head))
+	head := runGit(t, remoteDir, "rev-parse", "main")
+	committed := strings.Fields(runGit(t, remoteDir, "diff-tree", "--no-commit-id", "--name-only", "-r", head))
 	slices.Sort(committed)
 	if !slices.Equal(committed, connectGeneratedTables) {
 		t.Fatalf("pushed commit holds %v, want exactly the generated tables %v", committed, connectGeneratedTables)
 	}
-	if message := runGit(t, remote, "log", "-1", "--format=%s", head); message != "2026.10.5-1061000000 ip security and blocker update" {
+	if message := runGit(t, remoteDir, "log", "-1", "--format=%s", head); message != "2026.10.5-1061000000 ip security and blocker update" {
 		t.Fatalf("commit message = %q", message)
 	}
 	// only the hand-written file is left for a human; no generated table stays dirty
-	if status := runGit(t, connect, "status", "--porcelain"); status != "M ip_security.go" {
+	if status := runGit(t, connectDir, "status", "--porcelain"); status != "M ip_security.go" {
 		t.Fatalf("connect status after the push = %q, want only the hand-written change", status)
 	}
 
@@ -102,7 +107,7 @@ func TestRunConnectIpUpdateCommitsEveryGeneratedTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unchanged push region failed: %v\n%s", err, output)
 	}
-	if again := runGit(t, remote, "rev-parse", "main"); again != head {
+	if again := runGit(t, remoteDir, "rev-parse", "main"); again != head {
 		t.Fatalf("unchanged tables made a commit: %s -> %s", head, again)
 	}
 }
@@ -114,13 +119,13 @@ func TestRunConnectIpUpdateRequiresEveryGeneratedTable(t *testing.T) {
 	tables := slices.DeleteFunc(slices.Clone(connectGeneratedTables), func(name string) bool {
 		return name == "ip_security_messaging_meta.go"
 	})
-	buildHome, _, remote := connectIpUpdateFixture(t, tables)
-	before := runGit(t, remote, "rev-parse", "main")
+	buildHome, _, remoteDir := connectIpUpdateFixture(t, tables)
+	before := runGit(t, remoteDir, "rev-parse", "main")
 	output, err := runConnectIpUpdatePush(t, buildHome)
 	if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "connect ip update push") {
 		t.Fatalf("push region without the Meta table: err=%v\n%s", err, output)
 	}
-	if after := runGit(t, remote, "rev-parse", "main"); after != before {
+	if after := runGit(t, remoteDir, "rev-parse", "main"); after != before {
 		t.Fatalf("a failed push region still pushed: %s -> %s", before, after)
 	}
 }
