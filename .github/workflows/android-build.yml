@@ -47,7 +47,7 @@ name: Android build + test
 # unresolved `com.bringyour.sdk.*`. all/build-fdroid.sh:103 names it first for
 # exactly this reason: `./gradlew clean buildSdk assembleGithub`.
 #
-# One .aar carries all three ABIs (sdk/build/Makefile:52 binds
+# One .aar carries all three ABIs (sdk/build/Makefile's build_android binds
 # android/arm64,android/arm,android/amd64), so one SDK job serves every flavor.
 #
 # -----------------------------------------------------------------------------
@@ -197,17 +197,18 @@ env:
   # the one all/run.sh:209-212 installs on the release host. It is PREINSTALLED
   # on ubuntu-24.04 (as $ANDROID_NDK_LATEST_HOME), so no sdkmanager download is
   # needed — but the assertion steps check that rather than assume it, because
-  # sdk/build/Makefile:46-47 greps ANDROID_NDK_HOME for llvm-objcopy and fails
-  # the build if it is absent.
+  # sdk/build/Makefile's build_android finds llvm-objcopy under ANDROID_NDK_HOME
+  # and fails the build if it is absent.
   UR_ANDROID_NDK_VERSION: "29.0.14206865"
-  # go <= 1.26 is a hard requirement, not a preference: sdk/build/Makefile:23-25
-  # and :110-112 both say "gomobile/gobind must be built with go <= 1.26 -- the
-  # go 1.27 runtime fatals when this GODEBUG is set", the GODEBUG being
-  # gotypesalias=0, which the build_android recipe exports at :44. Do NOT
-  # replace this with `stable` the way linux-build.yml:566 can afford to.
-  # 1.26.6 is also exactly what all/run.sh:213 requires of the release host,
-  # and it is in the ubuntu-24.04 tool cache, so setup-go does not download.
-  UR_GO_VERSION: "1.26.6"
+  # The release host's Go: all/run.sh requires exactly this version and
+  # all/build-fdroid.sh installs it for the F-Droid build, so this job builds
+  # the aar with the Go a release uses (all/go_version_workflow_contract_test.go
+  # keeps the three in step). Pinned rather than `stable`, so a new Go release
+  # cannot change it without a commit here. go 1.27 can run the bind since sdk
+  # f36da2ab, whose recipes no longer export GODEBUG=gotypesalias=0: go 1.27
+  # removed that setting and gomobile exits at startup while it is set, so an
+  # sdk pin from before that commit fails at the first gomobile call.
+  UR_GO_VERSION: "1.27.1"
   # Java 21 is not a choice either: build.gradle:430-436 sets
   # sourceCompatibility/targetCompatibility VERSION_21 and jvmTarget JVM_21,
   # and all/run.sh:217 requires openjdk 21.0.x. The ubuntu image DEFAULTS to
@@ -319,13 +320,13 @@ jobs:
   #
   # This is the `buildSdk` gradle task's `make init build_android`
   # (build.gradle:449-454) with ONE deliberate substitution, which the android
-  # repo itself documents: `make init` ends with `go clean -cache && go clean
-  # -modcache` (sdk/build/Makefile:189-190), which throws away whatever
-  # actions/setup-go just restored AND the two `go mod download`s it just did.
-  # sdk/build/Makefile:173-175 says setup should use `init_tools` "so acceptance
-  # builds do not install tools or clean shared Go caches", and build.gradle
-  # registers a second task, `buildSdkAcceptance` (:458-463), for exactly this
-  # reason: "Keep the app build itself non-mutating".
+  # repo itself documents: `make init` ended with `go clean -cache && go clean
+  # -modcache` until sdk 40432c72, which threw away whatever actions/setup-go
+  # had just restored AND the two `go mod download`s it had just done.
+  # sdk/build/Makefile's init_tools comment says setup should use `init_tools`
+  # "so acceptance builds do not install tools or clean shared Go caches", and
+  # build.gradle registers a second task, `buildSdkAcceptance` (:458-463), for
+  # exactly this reason: "Keep the app build itself non-mutating".
   #
   # `init_tools` alone is NOT sufficient, and it fails loudly rather than
   # subtly: at the recorded pin sdk/build/go.mod has no golang.org/x/mobile
@@ -372,8 +373,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # PINNED, not `stable`. See UR_GO_VERSION above: go 1.27 fatals under
-          # the GODEBUG the bind recipe requires.
+          # Pinned, not `stable`: see UR_GO_VERSION above.
           go-version: ${{ env.UR_GO_VERSION }}
           # Without this, setup-go looks for a go.sum at the REPO ROOT, finds
           # none and silently caches nothing.
@@ -439,8 +439,8 @@ jobs:
             ls -1 "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/ndk" 2>/dev/null || true
             fail=1
           fi
-          # sdk/build/Makefile:46-47 finds llvm-objcopy under ANDROID_NDK_HOME
-          # and `test -n` fails the build if it is absent.
+          # sdk/build/Makefile's build_android finds llvm-objcopy under
+          # ANDROID_NDK_HOME and `test -n` fails the build if it is absent.
           if [ -d "$ndk" ] && [ -z "$(find "$ndk" -type f -name llvm-objcopy -print -quit)" ]; then
             echo "::error::no llvm-objcopy under $ndk — build_android's .comment strip would fail"
             fail=1
