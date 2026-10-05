@@ -2,6 +2,7 @@ package usdcpay
 
 import (
 	"context"
+	"crypto/sha256"
 	"strings"
 	"testing"
 
@@ -27,6 +28,13 @@ func newTestPayer(t *testing.T, maxUsd float64) (*Payer, solana.PrivateKey) {
 		t.Fatalf("new payer: %v", err)
 	}
 	return payer, key
+}
+
+// A recipient that is a fixture key, not a wallet: sha256 of a fixed phrase as
+// a public key.
+func testRecipient() solana.PublicKey {
+	sum := sha256.Sum256([]byte("urnetwork acceptance test recipient"))
+	return solana.PublicKeyFromBytes(sum[:])
 }
 
 func TestUsdToAtomicRoundsRatherThanTruncates(t *testing.T) {
@@ -121,7 +129,7 @@ func TestSendRefusesAboveTheCeiling(t *testing.T) {
 		t.Fatalf("generate reference: %v", err)
 	}
 	_, err = payer.Send(context.Background(), Payment{
-		Recipient: "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM",
+		Recipient: testRecipient().String(),
 		AmountUsd: 25.01,
 		Reference: reference.PublicKey().String(),
 	})
@@ -141,7 +149,7 @@ func TestSendRefusesANonPositiveAmount(t *testing.T) {
 	}
 	for _, amount := range []float64{0, -1} {
 		_, err := payer.Send(context.Background(), Payment{
-			Recipient: "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM",
+			Recipient: testRecipient().String(),
 			AmountUsd: amount,
 			Reference: reference.PublicKey().String(),
 		})
@@ -157,7 +165,7 @@ func TestSendRefusesAHexUuidReference(t *testing.T) {
 	// refusal must happen before anything is signed.
 	payer, _ := newTestPayer(t, 25)
 	_, err := payer.Send(context.Background(), Payment{
-		Recipient: "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM",
+		Recipient: testRecipient().String(),
 		AmountUsd: 5,
 		Reference: "0f9a6d2c8b7e4f1aa3c5d7e9f1b3c5d7",
 	})
@@ -199,7 +207,7 @@ func TestTransferInstructionCarriesTheReferenceAsAnAccountKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("payer token account: %v", err)
 	}
-	recipient := solana.MustPublicKeyFromBase58("4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM")
+	recipient := testRecipient()
 	destination, _, err := solana.FindAssociatedTokenAddress(recipient, payer.mint)
 	if err != nil {
 		t.Fatalf("recipient token account: %v", err)

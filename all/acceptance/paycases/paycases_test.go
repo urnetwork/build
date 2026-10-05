@@ -178,7 +178,7 @@ func TestValidateAcceptRejectsUnpayableTerms(t *testing.T) {
 		Scheme:            "exact",
 		Network:           "solana",
 		MaxAmountRequired: "5000000",
-		PayTo:             MerchantAddress,
+		PayTo:             testX402PayTo,
 		Asset:             "usdc",
 	}
 	if err := validateAccept(&good); err != nil {
@@ -227,19 +227,6 @@ func TestAtomicToUsdReadsQuotedTerms(t *testing.T) {
 		if got := atomicToUsd(input); got != want {
 			t.Errorf("atomicToUsd(%q) = %v, want %v", input, got, want)
 		}
-	}
-}
-
-func TestMerchantAddressIsTheServerReceiver(t *testing.T) {
-	// Pinned against server/controller/subscription_controller.go
-	// solanaReceiverAddresses[0]. A transfer to any other address is not a
-	// payment, so a drift here must fail rather than quietly misdirect money.
-	const serverReceiver = "4Fj9RCwJqHLdLNK28DwWHunHqWapxKbbzeYZLmreSYCM"
-	if MerchantAddress != serverReceiver {
-		t.Fatalf("merchant address drifted: %s != %s", MerchantAddress, serverReceiver)
-	}
-	if _, err := solana.PublicKeyFromBase58(MerchantAddress); err != nil {
-		t.Fatalf("merchant address is not a valid solana address: %v", err)
 	}
 }
 

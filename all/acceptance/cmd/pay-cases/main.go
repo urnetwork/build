@@ -11,6 +11,11 @@
 //
 //	pay-cases --config tests.json --result results.tsv --platform server/proxy
 //	pay-cases --config tests.json --balances       # report the payer, spend nothing
+//	pay-cases --config tests.json --pay --reference R --amount A --recipient M --spl-token-mint U
+//
+// --pay pays one payment a page built, to the recipient its payment url names,
+// once that is checked to be the official merchant in USDC: like the cases, it
+// carries no payment target of its own.
 package main
 
 import (
@@ -39,10 +44,13 @@ func main() {
 	balances := flag.Bool("balances", false, "report the payer address and balances, then exit")
 	// Single-payment mode, for the browser acceptance cases: the PAGE builds
 	// the payment and registers the intent, and this pays the reference it
-	// produced. Prints the transaction signature on success.
+	// produced, to the recipient and mint its payment url names. Prints the
+	// transaction signature on success.
 	pay := flag.Bool("pay", false, "pay one reference, then exit")
 	reference := flag.String("reference", "", "with --pay: the base58 payment reference to pay")
 	amountUsd := flag.Float64("amount", 0, "with --pay: the amount in USD the server quoted")
+	recipient := flag.String("recipient", "", "with --pay: the recipient the payment url names (paid only when it is the official merchant)")
+	splTokenMint := flag.String("spl-token-mint", "", "with --pay: the spl-token mint the payment url names (paid only when it is USDC)")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -69,7 +77,7 @@ func main() {
 	}
 
 	if *pay {
-		payOnce(runner, *reference, *amountUsd, *timeout)
+		payOnce(runner, *reference, *amountUsd, *recipient, *splTokenMint, *timeout)
 		return
 	}
 
@@ -146,13 +154,17 @@ func reportBalances(runner *paycases.Runner) {
 	fmt.Printf("sol     %.6f\n", sol)
 }
 
-// payOnce pays a reference another process registered and prints the signature.
-// A disabled payments section is an error here rather than a skip: the caller
-// asked for a payment, and answering with silence would let a browser case sit
-// waiting for money that is never coming.
-func payOnce(runner *paycases.Runner, reference string, amountUsd float64, timeout time.Duration) {
-	if reference == "" || amountUsd <= 0 {
-		fmt.Fprintln(os.Stderr, "pay-cases: --pay needs --reference and a positive --amount")
+// Pays a reference another process registered, to the recipient and mint its
+// payment url names, and prints the signature. A disabled payments section is
+// an error here rather than a skip: the caller asked for a payment, and
+// answering with silence would let a browser case sit waiting for money that
+// is never coming. A payment url that does not name the official merchant in
+// USDC is refused without paying (Runner.PayReference).
+func payOnce(
+	runner *paycases.Runner, reference string, amountUsd float64, recipient string, splTokenMint string, timeout time.Duration,
+) {
+	if reference == "" || amountUsd <= 0 || recipient == "" || splTokenMint == "" {
+		fmt.Fprintln(os.Stderr, "pay-cases: --pay needs --reference, a positive --amount, --recipient and --spl-token-mint")
 		os.Exit(2)
 	}
 	if runner.PayerAddress() == "" {
@@ -161,7 +173,7 @@ func payOnce(runner *paycases.Runner, reference string, amountUsd float64, timeo
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	result, err := runner.PayReference(ctx, reference, amountUsd)
+	result, err := runner.PayReference(ctx, reference, amountUsd, recipient, splTokenMint)
 	if err != nil {
 		// A result with an error means the transfer was broadcast but not
 		// confirmed. Print the signature anyway so the money is traceable.
