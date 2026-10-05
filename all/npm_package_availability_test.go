@@ -629,29 +629,29 @@ func TestNPMInstallReadinessDoesNotRetryUnrelatedFailures(t *testing.T) {
 	}
 }
 
-func TestRunWaitsForBothExactNPMDependenciesBeforeExtensionEdit(t *testing.T) {
+// The extension pins only this release's localizations package. It builds
+// against the run's sdk/js checkout (the extension's sdk-source.ts), so no npm
+// SDK version is probed, pinned or installed for it.
+func TestRunWaitsForExactLocalizationsPackageBeforeExtensionEdit(t *testing.T) {
 	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	runSource := string(runData)
-	if strings.Count(runSource, `"$BUILD_HOME/all/npm-package-ready.zsh"`) != 2 {
-		t.Fatal("run.sh must use the tested npm readiness helper for both extension dependencies")
+	extensionEdit := componentRegion(t, "error_trap 'localizations push branch'", "error_trap 'extension edit'")
+	for _, sdkPin := range []string{`@urnetwork/sdk "$EXTERNAL_WARP_VERSION"`, `@urnetwork/sdk-js "$EXTERNAL_WARP_VERSION"`, "npm_edit_module @urnetwork/sdk"} {
+		if strings.Contains(extensionEdit, sdkPin) {
+			t.Fatalf("extension edit pins an npm SDK package (%s) instead of building against this run's sdk checkout", sdkPin)
+		}
 	}
-	waitStart := strings.Index(runSource, `@urnetwork/localizations "$EXTERNAL_WARP_VERSION"`)
-	sdkWait := strings.Index(runSource, `@urnetwork/sdk "$EXTERNAL_WARP_VERSION"`)
-	extensionEdit := strings.Index(runSource, "npm_edit_module @urnetwork/localizations")
-	if waitStart < 0 || sdkWait <= waitStart || extensionEdit <= sdkWait {
-		t.Fatalf("run.sh does not wait for both exact npm packages before extension edit")
-	}
-	if strings.Contains(runSource, `@urnetwork/sdk-js "$EXTERNAL_WARP_VERSION"`) {
-		t.Fatal("run.sh probes the compatibility package instead of the extension's @urnetwork/sdk dependency")
-	}
-	installCall := `npm_fork_version "$EXTENSION_VERSION" \
-            @urnetwork/localizations "$EXTERNAL_WARP_VERSION" \
-            @urnetwork/sdk "$EXTERNAL_WARP_VERSION"`
-	if !strings.Contains(runSource, installCall) {
-		t.Fatal("run.sh does not install the exact verified extension dependencies through npm_fork_version")
+	wait := strings.Index(extensionEdit, `"$BUILD_HOME/all/npm-package-ready.zsh" \
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION"`)
+	edit := strings.Index(extensionEdit, "npm_edit_module @urnetwork/localizations")
+	install := strings.Index(extensionEdit, `npm_fork_version "$EXTENSION_VERSION" \
+            @urnetwork/localizations "$EXTERNAL_WARP_VERSION"
+`)
+	if wait < 0 || edit <= wait || install <= edit {
+		t.Fatal("run.sh does not prove the exact localizations package before the extension edit and install")
 	}
 	if !strings.Contains(runSource, `"$BUILD_HOME/all/npm-install-ready.zsh" "$@"`) {
 		t.Fatal("npm_fork_version does not use the tested install retry helper when exact dependencies are supplied")

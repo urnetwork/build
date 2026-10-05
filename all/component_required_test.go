@@ -137,6 +137,11 @@ func runComponent(t *testing.T, source, setup string, overrides ...string) compo
 			t.Fatal(err)
 		}
 	}
+	// eval reports a region cut from inside a block on stderr and the harness
+	// carries on as if the component had run, so refuse it before running.
+	if output, err := exec.Command("zsh", "-f", "-n", "-c", source).CombinedOutput(); err != nil {
+		t.Fatalf("extracted component does not parse: %v\n%s", err, output)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	functions := componentFunctions(t, "error_trap", "warn_trap", "require_build_artifacts", "require_windows_artifacts", "require_linux_artifacts", "github_release_upload")
@@ -249,12 +254,22 @@ func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
 	}
 }
 
+// The ur.io /changelog source refresh has its own switch; the desktop release
+// refresh follows it.
+const siteChangelogStart = `if [ "${BUILD_URIO_SITE_CHANGELOG:-1}" = 1 ]; then`
+const siteChangelogEnd = `builder_message "updating the generated ur.io desktop releases"`
+
+// The release-note generator starts with its BUILD_URIO_CHANGELOG gate: a region
+// cut from inside that if block does not parse.
+const releaseNotesStart = `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
+    builder_message "generating the changelog for`
+
 // Every attempted generator is a gate; committed or pending content is not a failed-run stand-in.
 func TestRunReleaseInputGenerationFailuresAreFatal(t *testing.T) {
 	for _, source := range []string{
-		componentRegion(t, `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then`, "# The install page's desktop downloads:"),
+		componentRegion(t, siteChangelogStart, siteChangelogEnd),
 		componentRegion(t, `builder_message "updating the generated ur.io desktop releases"`, "# regenerate every app's strings"),
-		componentRegion(t, `builder_message "generating the changelog for`, "# metadata -- THE OTHER THREE STOREFRONTS"),
+		componentRegion(t, releaseNotesStart, "# metadata -- THE OTHER THREE STOREFRONTS"),
 	} {
 		setup := `BUILD_CHANGELOG_STORE="$BUILD_HOME/store.txt"
 BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
@@ -271,18 +286,20 @@ printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt
 }
 
 // The ur.io changelog API walk is strict by default and when explicitly enabled,
-// while the host override skips only that generator and lets the release continue.
+// while its host override skips only that generator and lets the release continue.
+// Turning the release notes off must not freeze the site changelog.
 func TestRunUrioChangelogGate(t *testing.T) {
-	source := componentRegion(t, `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then`, "# The install page's desktop downloads:")
+	source := componentRegion(t, siteChangelogStart, siteChangelogEnd)
 	for _, testCase := range []struct {
-		name     string
-		override string
+		name      string
+		overrides []string
 	}{
-		{name: "default", override: "BUILD_URIO_CHANGELOG="},
-		{name: "enabled", override: "BUILD_URIO_CHANGELOG=1"},
+		{name: "default", overrides: []string{"BUILD_URIO_SITE_CHANGELOG="}},
+		{name: "enabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=1"}},
+		{name: "release notes disabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=", "BUILD_URIO_CHANGELOG=0"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			result := runComponent(t, source, "", "FAIL_STEP=generate", testCase.override)
+			result := runComponent(t, source, "", append([]string{"FAIL_STEP=generate"}, testCase.overrides...)...)
 			if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
 				t.Fatalf("failed ur.io changelog generator was masked: %+v", result)
 			}
@@ -290,7 +307,7 @@ func TestRunUrioChangelogGate(t *testing.T) {
 	}
 
 	t.Run("disabled", func(t *testing.T) {
-		result := runComponent(t, source, "", "FAIL_STEP=generate", "BUILD_URIO_CHANGELOG=0")
+		result := runComponent(t, source, "", "FAIL_STEP=generate", "BUILD_URIO_SITE_CHANGELOG=0")
 		if result.exitCode != 0 || strings.Contains(result.events, "generate\n") || !strings.Contains(result.events, "release-continued") {
 			t.Fatalf("disabled ur.io changelog generator was invoked or stopped the release: %+v", result)
 		}
@@ -299,7 +316,7 @@ func TestRunUrioChangelogGate(t *testing.T) {
 
 // A zero-exit generator must still produce all requested nonempty release metadata.
 func TestRunChangelogRejectsMissingOutputs(t *testing.T) {
-	source := componentRegion(t, `builder_message "generating the changelog for`, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
 	setup := `BUILD_CHANGELOG_STORE="$BUILD_HOME/store.txt"
 BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
 BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
@@ -350,7 +367,7 @@ printf 'old note\n' > "$BUILD_NOTES_DIR/$MISSING_NOTE"
 
 // Generated notes stage successfully, but each attempted copy must preserve failure status.
 func TestRunChangelogCopyFailuresAreFatal(t *testing.T) {
-	source := componentRegion(t, `builder_message "generating the changelog for`, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
 	for _, target := range []string{"125.txt", "default.txt", "release-description.xml"} {
 		setup := completeChangelogSetup + `mkdir -p "$BUILD_HOME/linux/app/packaging"
 printf 'opted-in description\n' > "$BUILD_HOME/linux/app/packaging/release-description.xml"
@@ -368,7 +385,7 @@ cp() {
 
 // Healthy metadata and the existing Linux opt-in handshake remain supported.
 func TestRunChangelogRequiredInputsSucceed(t *testing.T) {
-	source := componentRegion(t, `builder_message "generating the changelog for`, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
 	setup := completeChangelogSetup + `
 `
 	result := runComponent(t, source, setup, "MISSING_NOTE=")
