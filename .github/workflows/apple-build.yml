@@ -53,7 +53,7 @@ name: Apple build + test (iOS + macOS)
 # (`[ -d "$root/sdk/build/apple/URnetworkSdk.xcframework" ] || die "Apple SDK is missing"`).
 #
 # AND THE CHEAP SHORTCUT DOES NOT EXIST. `URnetworkExtensionSdk` is never
-# published: sdk/build/Makefile:141-145 zips only URnetworkSdk.xcframework, so
+# published: the sdk's build_apple zips only URnetworkSdk.xcframework, so
 # run.sh:1237 has only that one asset to upload and no release carries the
 # extension one. Downloading the published URnetworkSdk zip and building only
 # the extension framework would also be wrong on its own terms — the released
@@ -201,13 +201,16 @@ concurrency:
 #     and iPhone 16 simulators on iOS 18.5 and 18.6 — comfortably above what the
 #     project asks for.
 env:
-  # go <= 1.26 is a hard requirement for the gomobile half, not a preference:
-  # sdk/build/Makefile:110-112 says "gomobile/gobind must be built with go <=
-  # 1.26 -- the go 1.27 runtime fatals when this GODEBUG is set", the GODEBUG
-  # being gotypesalias=0 which build_apple exports at :115. Do NOT replace this
-  # with `stable` the way linux-build.yml:566 can afford to. It is also exactly
-  # what all/run.sh:213 requires of the release host.
-  UR_GO_VERSION: "1.26.6"
+  # The release host's Go, for the gomobile half: all/run.sh requires exactly
+  # this version and all/build-fdroid.sh installs it for the F-Droid build, so
+  # both xcframeworks are built with the Go a release uses
+  # (all/go_version_workflow_contract_test.go keeps the three in step). Pinned
+  # rather than `stable`, so a new Go release cannot change it without a commit
+  # here. go 1.27 can run the binds since sdk f36da2ab, whose recipes no longer
+  # export GODEBUG=gotypesalias=0: go 1.27 removed that setting and gomobile
+  # exits at startup while it is set, so an sdk pin from before that commit
+  # fails at the first gomobile call.
+  UR_GO_VERSION: "1.27.1"
   # Matches the release host (all/run.sh:221-227). Used only for the
   # localization regeneration, whose one dependency is js-yaml.
   UR_NODE_VERSION: "24.14.1"
@@ -238,7 +241,7 @@ jobs:
       #
       # On this platform the version reaches exactly one place: the
       # `-ldflags "-X github.com/urnetwork/sdk.Version=…"` the gomobile binds
-      # bake into both xcframeworks (sdk/build/Makefile:127 and :137). The
+      # bake into both xcframeworks (sdk/build/Makefile's build_apple). The
       # app's own CFBundleVersion comes from the project, not from here.
       - name: Derive the version
         id: version
@@ -330,12 +333,12 @@ jobs:
   #
   # This is `make init build_apple` — what apple/build.sh:28-31 runs under
   # BUILD_SDK=1 — with ONE deliberate substitution, which the sdk repo itself
-  # documents: `make init` ends with `go clean -cache && go clean -modcache`
-  # (Makefile:189-190), which throws away whatever actions/setup-go just
-  # restored AND its own two `go mod download`s. Makefile:173-175 says setup
-  # should use `init_tools` "so acceptance builds do not install tools or clean
-  # shared Go caches". So: init_tools, then the single `go get` that `init`
-  # adds on top, then build_apple.
+  # documents: `make init` ended with `go clean -cache && go clean -modcache`
+  # until sdk 40432c72, which threw away whatever actions/setup-go had just
+  # restored AND its own two `go mod download`s. sdk/build/Makefile's
+  # init_tools comment says setup should use `init_tools` "so acceptance builds
+  # do not install tools or clean shared Go caches". So: init_tools, then the
+  # single `go get` that `init` adds on top, then build_apple.
   #
   # `init_tools` alone is NOT sufficient and fails loudly rather than subtly: at
   # the recorded pin sdk/build/go.mod has no golang.org/x/mobile requirement and
