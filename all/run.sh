@@ -597,6 +597,42 @@ git_push_with_rebase_retry () {
     git push
 }
 
+# A pull that drops a submodule cannot remove its checkout (git will not rmdir
+# a populated directory), and the leftover is an untracked nested repository
+# that the release commit's `git add .` records again as a gitlink with no
+# .gitmodules entry, after which every `git submodule update --init` fails.
+# elements went that way: dropped in c1442ac, put back by release fbd5a5c and
+# removed again by hand in 045eb15. Delete such a leftover the way git's own
+# submodule removal does: only a clean checkout whose git directory is this
+# repository's modules/<name>, and that git directory stays, so no commit is
+# lost. A leftover with local changes fails the step for a person to look at.
+remove_retired_submodule_checkouts () {
+    local build_home="$1" modules_dir checkout name gitdir changes
+    local -a listed_paths
+    [ -n "$build_home" ] || return 2
+    modules_dir=$(git -C "$build_home" rev-parse --absolute-git-dir) || return $?
+    modules_dir="${modules_dir:A}/modules"
+    if [ -f "$build_home/.gitmodules" ]; then
+        listed_paths=(${(f)"$(git config --file "$build_home/.gitmodules" --get-regexp '^submodule\..*\.path$' | awk '{print $2}')"})
+    fi
+    for checkout in "$build_home"/*(N/); do
+        name=${checkout:t}
+        [ -f "$checkout/.git" ] || continue
+        [ "${listed_paths[(Ie)$name]}" = 0 ] || continue
+        [ -z "$(git -C "$build_home" ls-files -- "$name")" ] || continue
+        gitdir=$(git -C "$checkout" rev-parse --absolute-git-dir 2>/dev/null) || continue
+        gitdir=${gitdir:A}
+        [[ "$gitdir" = "$modules_dir"/* ]] || continue
+        changes=$(git -C "$checkout" status --porcelain) || return $?
+        if [ "$changes" ]; then
+            builder_message "error: $checkout is the checkout of a submodule that .gitmodules no longer lists, and it has local changes. Save what you need, delete the directory and rerun."
+            return 1
+        fi
+        rm -rf -- "$checkout" || return $?
+        echo "removed the checkout of retired submodule $name (its git directory stays at $gitdir)"
+    done
+}
+
 (cd $WARP_HOME/config && git_main)
 error_trap 'pull warp config'
 (cd $WARP_HOME/vault && git_main)
@@ -645,6 +681,8 @@ BUILD_PRE_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
     git pull --rebase &&
     git submodule update --init --recursive)
 error_trap 'pull'
+remove_retired_submodule_checkouts "$BUILD_HOME"
+error_trap 'remove retired submodule checkouts'
 BUILD_COMMIT=`cd $BUILD_HOME && git log -1 --format=%H`
 if [ "$BUILD_PRE_COMMIT" != "$BUILD_COMMIT" ]; then
     builder_message "Build repo updated. Must restart to use the latest script."
