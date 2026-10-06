@@ -10,13 +10,15 @@ Names are **normative** (`linux/MIGRATION.md` "Artifact filenames"):
 urnetwork-daemon_<version>_<arch>.deb              # daemon, apt path
 urnetwork-daemon-<version>-<arch>.install.tar.gz   # daemon, install.sh path
 urnetwork-daemon-<version>.<rpmarch>.rpm           # daemon, dnf/zypper path
+urnetwork-daemon-<version>-<pkgarch>.pkg.tar.zst   # daemon, pacman path
 URnetwork-<version>-<arch>.AppImage                # GUI (no .zsync: the in-app checker updates it)
 URnetwork-<version>-<arch>.flatpak                 # GUI (one build-machine arch)
 ```
 
-The `.rpm` is the only name that does not carry `<arch>` verbatim: rpm has its
-own arch spelling, so `<rpmarch>` is `x86_64`/`aarch64` while the asset arch
-stays Debian-spelled everywhere else.
+The `.rpm` and the Arch package are the names that do not carry `<arch>`
+verbatim: rpm and pacman have their own arch spelling, so `<rpmarch>` and
+`<pkgarch>` are `x86_64`/`aarch64` while the asset arch stays Debian-spelled
+everywhere else.
 
 (This replaces the snap pipeline — Linux no longer ships as a `.snap`; see
 `linux/MIGRATION.md` + `linux/APPIMAGE.md` for the why and the shape.)
@@ -122,14 +124,14 @@ that looks like a pass is worse than no test.
 
 | File | Role |
 |---|---|
-| `Dockerfile.daemon` | `ubuntu:22.04` (the declared glibc floor) + C++ toolchain, **no GTK** + nfpm/dpkg/systemd + rpm/checkpolicy/semodule-utils |
+| `Dockerfile.daemon` | `ubuntu:22.04` (the declared glibc floor) + C++ toolchain, **no GTK** + nfpm/dpkg/systemd + rpm/checkpolicy/semodule-utils + zstd |
 | `Dockerfile.gui` | `ubuntu:24.04` + C++/GTK4 toolchain + appimagetool/linuxdeploy/zsyncmake + xvfb |
 | `Dockerfile.flatpak` | `ubuntu:24.04` + flatpak/native flatpak-builder/elfutils and source helpers |
 | `setup.sh` | **one-time smoke test** — build both containers per arch + verify each toolchain (the Linux analog of `windows/setup.sh`). Run this first. |
 | `smoke-test.sh` | run inside a container by `setup.sh`; role-aware (`ROLE=daemon` checks nfpm/dpkg/systemd and asserts GTK is *absent*; `ROLE=gui` checks the GTK4 stack, the AppImage tools, and asserts webkitgtk is *absent*) |
 | `build.sh` | host orchestration: stage SDK, `docker build`+`docker run` per arch **per role**, verify the artifact names |
 | `build-arch.sh` | in-container per-arch/per-role step: meson build → `meson test` (incl. the glibc-floor gate) → staging tree → the linux repo's packaging scripts → artifact-name asserts → `verify.sh` |
-| `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag; the split tunnel launcher (`/usr/bin/urnetwork-exclude`) in the `.deb`, the tarball and the `.rpm`, skipped for a linux tree that predates it. Independently runnable. |
+| `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag; Arch package `.PKGINFO` + arch tag; the split tunnel launcher (`/usr/bin/urnetwork-exclude`) in the `.deb`, the tarball, the `.rpm` and the Arch package, skipped for a linux tree that predates it. Independently runnable. |
 | `build-flatpak.sh` | host orchestration for the dedicated Flatpak image; `UR_FLATPAK_NATIVE=1` is the explicit CI-only native path |
 | `build-flatpak-container.sh` | installs/caches the GNOME runtime, copies read-only `/src` to ephemeral `/work`, and builds the bundle |
 

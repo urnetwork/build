@@ -37,7 +37,8 @@ ENV LANG=C.UTF-8
 #   Without it the script still writes a correct package and simply skips the
 #   check — the same degrade-quietly shape the .rpm has when `rpm` is absent,
 #   and the same reason to install it: that assertion is what catches a package
-#   whose payload is not what was staged.
+#   whose payload is not what was staged. verify.sh reads the package's arch tag
+#   and the split tunnel launcher back the same way.
 # - rpm/checkpolicy/semodule-utils: the .rpm. make-rpm.sh is nfpm-based (below)
 #   and needs no rpmbuild, but it HARD-DIES without checkmodule AND
 #   semodule_package: the Fedora-family package ships a compiled SELinux policy

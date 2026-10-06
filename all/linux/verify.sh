@@ -51,15 +51,17 @@ APP_ID="com.bringyour.network"
 APPIMAGE="${OUT_DIR}/URnetwork-${VERSION}-${ARCH}.AppImage"
 DEB="${OUT_DIR}/urnetwork-daemon_${VERSION}_${ARCH}.deb"
 TARBALL="${OUT_DIR}/urnetwork-daemon-${VERSION}-${ARCH}.install.tar.gz"
-# The .rpm is the one artifact name that does not carry ${ARCH} verbatim — rpm
-# has its own arch spelling. Mirrors make-rpm.sh's map; an unknown ARCH leaves
-# RPM_ARCH empty and the rpm section reports a skip rather than a bogus path.
+# The .rpm and the Arch package are the artifact names that do not carry ${ARCH}
+# verbatim — rpm and pacman have their own arch spelling, the same one. Mirrors
+# make-rpm.sh's and make-arch.sh's maps; an unknown ARCH leaves RPM_ARCH and
+# PKG_ARCH empty and their sections report a skip rather than a bogus path.
 case "${ARCH}" in
-  amd64) RPM_ARCH='x86_64' ;;
-  arm64) RPM_ARCH='aarch64' ;;
-  *)     RPM_ARCH='' ;;
+  amd64) RPM_ARCH='x86_64'; PKG_ARCH='x86_64' ;;
+  arm64) RPM_ARCH='aarch64'; PKG_ARCH='aarch64' ;;
+  *)     RPM_ARCH=''; PKG_ARCH='' ;;
 esac
 RPM="${OUT_DIR}/urnetwork-daemon-${VERSION}.${RPM_ARCH}.rpm"
+ARCH_PKG="${OUT_DIR}/urnetwork-daemon-${VERSION}-${PKG_ARCH}.pkg.tar.zst"
 
 # The per-app split tunnel launcher. Every daemon package of a linux tree that
 # carries its source (app/packaging/urnetwork-exclude) must ship it. A mounted
@@ -111,6 +113,14 @@ exclude_launcher_runs() {
 rpm_ships_executable() {
   rpm -qp --qf '[%{FILEMODES:perms} %{FILENAMES}\n]' "$1" >"${WORK}/rpm-files.txt" 2>/dev/null || return 1
   awk -v want="$2" '$2 == want && $1 ~ /^-..x/ { found = 1 } END { exit !found }' "${WORK}/rpm-files.txt"
+}
+
+# arch_pkg_ships_executable <pkg> <member> — the package's payload has <member>
+# (no leading slash, as tar lists it) as a regular file with its owner's
+# execute bit. Read from a file for the same reason as the rpm listing above.
+arch_pkg_ships_executable() {
+  tar --zstd -tvf "$1" >"${WORK}/arch-pkg-files.txt" 2>/dev/null || return 1
+  awk -v want="$2" '$NF == want && $1 ~ /^-..x/ { found = 1 } END { exit !found }' "${WORK}/arch-pkg-files.txt"
 }
 
 WORK="$(mktemp -d)"
@@ -341,7 +351,7 @@ fi
 # ===========================================================================
 if [ "${do_daemon}" = 0 ]; then
   sec "5-6. daemon package lifecycle"
-  skip ".deb + .rpm + install.sh tarball lifecycle" "ROLE=${ROLE}; the dpkg/nfpm/rpm tooling lives in the daemon image"
+  skip ".deb + .rpm + Arch package + install.sh tarball lifecycle" "ROLE=${ROLE}; the dpkg/nfpm/rpm/zstd tooling lives in the daemon image"
 else
 sec "5. .deb install lifecycle"
 # ===========================================================================
@@ -432,10 +442,10 @@ sec "5b. .rpm (metadata only)"
 # file-exists check can see it.
 #
 # One payload path is checked anyway, the split tunnel launcher, so that the
-# .deb, the tarball and the .rpm are held to it alike. make-rpm.sh lists it too,
-# and build-arch.sh keeps an .rpm that failed that check out of OUT_DIR, but
-# make-rpm.sh skips its check where rpm is absent, and this script also runs
-# standalone against any OUT_DIR.
+# .deb, the tarball, the .rpm and the Arch package are held to it alike.
+# make-rpm.sh lists it too, and build-arch.sh keeps an .rpm that failed that
+# check out of OUT_DIR, but make-rpm.sh skips its check where rpm is absent, and
+# this script also runs standalone against any OUT_DIR.
 #
 # There is NO install test, on purpose. `rpm -i` on Ubuntu would create an
 # rpmdb on a dpkg-owned filesystem and STILL not exercise what matters: %post's
@@ -466,6 +476,43 @@ else
   fi
 
   exclude_check "rpm ships ${EXCLUDE_LAUNCHER}, executable" rpm_ships_executable "${RPM}" "${EXCLUDE_LAUNCHER}"
+fi
+
+# ===========================================================================
+sec "5c. Arch package (metadata only)"
+# ===========================================================================
+# As thin as the .rpm section, for the same reasons. make-arch.sh already
+# asserts the payload, .PKGINFO, the six .INSTALL hooks and the .MTREE before it
+# returns, so none of that is repeated. What only the caller can know is the
+# leg: the arch tag pacman reads from .PKGINFO must be this leg's. The split
+# tunnel launcher is checked as in the other packages. There is no install test:
+# pacman is not in this image, so nothing here runs a hook either.
+if [ -z "${PKG_ARCH}" ]; then
+  skip "Arch package checks" "ARCH='${ARCH}' has no pacman arch spelling (expected amd64|arm64)"
+elif [ ! -f "${ARCH_PKG}" ]; then
+  # A skip, not a fail, as for the .rpm: build-arch.sh tolerates a missing Arch
+  # package unless UR_REQUIRE_ARCH_PKG is set, and has already said why.
+  skip "Arch package present" "no $(basename "${ARCH_PKG}") in ${OUT_DIR} — see build-arch.sh's UR_REQUIRE_ARCH_PKG warning above"
+elif ! command -v zstd >/dev/null 2>&1; then
+  skip "Arch package metadata" "zstd is not installed in this image (Dockerfile.daemon installs it; tar --zstd needs it)"
+else
+  pass "Arch package present ($(du -h "${ARCH_PKG}" | cut -f1))"
+  if tar --zstd -xOf "${ARCH_PKG}" .PKGINFO >"${WORK}/PKGINFO" 2>/dev/null; then
+    pass "Arch package metadata readable (.PKGINFO)"
+  else
+    fail "Arch package metadata readable (.PKGINFO)"
+  fi
+
+  # The arch tag in .PKGINFO, not merely in the filename, as for the .rpm.
+  pkg_tag_arch="$(awk -F' = ' '$1 == "arch" { print $2; exit }' "${WORK}/PKGINFO" 2>/dev/null)"
+  if [ "${pkg_tag_arch}" = "${PKG_ARCH}" ]; then
+    pass "Arch package arch tag is ${PKG_ARCH} (this leg is ARCH=${ARCH})"
+  else
+    fail "Arch package arch tag is ${PKG_ARCH} (got '${pkg_tag_arch:-unreadable}') — a package from the other arch's leg?"
+  fi
+
+  exclude_check "Arch package ships ${EXCLUDE_LAUNCHER}, executable" \
+    arch_pkg_ships_executable "${ARCH_PKG}" "${EXCLUDE_LAUNCHER#/}"
 fi
 
 # ===========================================================================
