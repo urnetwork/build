@@ -51,15 +51,29 @@ APP_ID="com.bringyour.network"
 APPIMAGE="${OUT_DIR}/URnetwork-${VERSION}-${ARCH}.AppImage"
 DEB="${OUT_DIR}/urnetwork-daemon_${VERSION}_${ARCH}.deb"
 TARBALL="${OUT_DIR}/urnetwork-daemon-${VERSION}-${ARCH}.install.tar.gz"
-# The .rpm is the one artifact name that does not carry ${ARCH} verbatim — rpm
-# has its own arch spelling. Mirrors make-rpm.sh's map; an unknown ARCH leaves
-# RPM_ARCH empty and the rpm section reports a skip rather than a bogus path.
+# The .rpm and the Arch package are the artifact names that do not carry ${ARCH}
+# verbatim — rpm and pacman have their own arch spelling, the same one. Mirrors
+# make-rpm.sh's and make-arch.sh's maps; an unknown ARCH leaves RPM_ARCH and
+# PKG_ARCH empty and their sections report a skip rather than a bogus path.
 case "${ARCH}" in
-  amd64) RPM_ARCH='x86_64' ;;
-  arm64) RPM_ARCH='aarch64' ;;
-  *)     RPM_ARCH='' ;;
+  amd64) RPM_ARCH='x86_64'; PKG_ARCH='x86_64' ;;
+  arm64) RPM_ARCH='aarch64'; PKG_ARCH='aarch64' ;;
+  *)     RPM_ARCH=''; PKG_ARCH='' ;;
 esac
 RPM="${OUT_DIR}/urnetwork-daemon-${VERSION}.${RPM_ARCH}.rpm"
+ARCH_PKG="${OUT_DIR}/urnetwork-daemon-${VERSION}-${PKG_ARCH}.pkg.tar.zst"
+
+# The per-app split tunnel launcher. Every daemon package of a linux tree that
+# carries its source (app/packaging/urnetwork-exclude) must ship it. A mounted
+# tree without that source predates the launcher, and the build repo's recorded
+# linux pin can lag behind linux main, so its packages are not held to it. With
+# no /src mounted the launcher is required.
+EXCLUDE_LAUNCHER='/usr/bin/urnetwork-exclude'
+if [ -d /src/app/packaging ] && [ ! -f /src/app/packaging/urnetwork-exclude ]; then
+  exclude_expected=0
+else
+  exclude_expected=1
+fi
 
 pass_n=0; fail_n=0; skip_n=0
 pass() { printf '[PASS] %s\n' "$1"; pass_n=$((pass_n + 1)); }
@@ -72,6 +86,41 @@ sec()  { printf '\n=== %s\n' "$1"; }
 check() {
   local label="$1"; shift
   if "$@" >/dev/null 2>&1; then pass "${label}"; else fail "${label}"; fi
+}
+
+# exclude_check <label> <cmd...> — check the split tunnel launcher, or say why
+# not when the linux tree predates it (a named skip, never a vacuous pass)
+exclude_check() {
+  local label="$1"; shift
+  if [ "${exclude_expected}" = 1 ]; then
+    check "${label}" "$@"
+  else
+    skip "${label}" "this linux tree predates the split tunnel launcher (no app/packaging/urnetwork-exclude in /src)"
+  fi
+}
+
+# exclude_launcher_runs — the installed launcher executes and prints its usage.
+# --help returns before it looks at cgroups or systemd, so this runs anywhere.
+exclude_launcher_runs() {
+  local out
+  out="$("${EXCLUDE_LAUNCHER}" --help 2>&1)" || return 1
+  case "${out}" in *urnetwork-exclude*) return 0 ;; *) return 1 ;; esac
+}
+
+# rpm_ships_executable <rpm> <path> — the rpm header lists <path> as a regular
+# file with its owner's execute bit. Read from a file rather than a pipe: grep
+# or awk exiting early would SIGPIPE rpm, and pipefail would report that as a miss.
+rpm_ships_executable() {
+  rpm -qp --qf '[%{FILEMODES:perms} %{FILENAMES}\n]' "$1" >"${WORK}/rpm-files.txt" 2>/dev/null || return 1
+  awk -v want="$2" '$2 == want && $1 ~ /^-..x/ { found = 1 } END { exit !found }' "${WORK}/rpm-files.txt"
+}
+
+# arch_pkg_ships_executable <pkg> <member> — the package's payload has <member>
+# (no leading slash, as tar lists it) as a regular file with its owner's
+# execute bit. Read from a file for the same reason as the rpm listing above.
+arch_pkg_ships_executable() {
+  tar --zstd -tvf "$1" >"${WORK}/arch-pkg-files.txt" 2>/dev/null || return 1
+  awk -v want="$2" '$NF == want && $1 ~ /^-..x/ { found = 1 } END { exit !found }' "${WORK}/arch-pkg-files.txt"
 }
 
 WORK="$(mktemp -d)"
@@ -302,7 +351,7 @@ fi
 # ===========================================================================
 if [ "${do_daemon}" = 0 ]; then
   sec "5-6. daemon package lifecycle"
-  skip ".deb + .rpm + install.sh tarball lifecycle" "ROLE=${ROLE}; the dpkg/nfpm/rpm tooling lives in the daemon image"
+  skip ".deb + .rpm + Arch package + install.sh tarball lifecycle" "ROLE=${ROLE}; the dpkg/nfpm/rpm/zstd tooling lives in the daemon image"
 else
 sec "5. .deb install lifecycle"
 # ===========================================================================
@@ -326,6 +375,8 @@ else
   check "installed: /usr/lib/urnetwork/urnetworkd"          test -x /usr/lib/urnetwork/urnetworkd
   check "installed: /usr/lib/urnetwork/libURnetworkSdk.so"  test -f /usr/lib/urnetwork/libURnetworkSdk.so
   check "installed: /usr/bin/urnetwork (launcher)"          test -x /usr/bin/urnetwork
+  exclude_check "installed: ${EXCLUDE_LAUNCHER} (split tunnel launcher)" test -x "${EXCLUDE_LAUNCHER}"
+  exclude_check "split tunnel launcher runs (--help prints its usage)"   exclude_launcher_runs
   check "installed: unit at /lib/systemd/system"            test -f /lib/systemd/system/urnetworkd.service
   check "installed: desktop entry (app-id filename)" \
         test -f "/usr/share/applications/${APP_ID}.desktop"
@@ -370,6 +421,7 @@ else
   fi
   check "purge removed /usr/lib/urnetwork/urnetworkd"  test ! -e /usr/lib/urnetwork/urnetworkd
   check "purge removed /usr/bin/urnetwork"             test ! -e /usr/bin/urnetwork
+  exclude_check "purge removed ${EXCLUDE_LAUNCHER}"    test ! -e "${EXCLUDE_LAUNCHER}"
 fi
 
 # ===========================================================================
@@ -378,7 +430,7 @@ sec "5b. .rpm (metadata only)"
 # Deliberately THIN, and both halves of that are on purpose.
 #
 # What is NOT repeated here: make-rpm.sh already asserts the payload against
-# `rpm -qp` before it returns — the six required installed paths, the policy
+# `rpm -qp` before it returns — the seven required installed paths, the policy
 # module, that nothing ships under /lib, that the unit is not %config, and that
 # all four scriptlets exist and name their units. Re-running those would test
 # the same tool twice. (That is also why Dockerfile.daemon installs `rpm`:
@@ -388,6 +440,12 @@ sec "5b. .rpm (metadata only)"
 # is arch-specific, so an aarch64 rpm falling out of the amd64 leg is the real
 # failure mode at this level, and neither the packaging script nor a
 # file-exists check can see it.
+#
+# One payload path is checked anyway, the split tunnel launcher, so that the
+# .deb, the tarball, the .rpm and the Arch package are held to it alike.
+# make-rpm.sh lists it too, and build-arch.sh keeps an .rpm that failed that
+# check out of OUT_DIR, but make-rpm.sh skips its check where rpm is absent, and
+# this script also runs standalone against any OUT_DIR.
 #
 # There is NO install test, on purpose. `rpm -i` on Ubuntu would create an
 # rpmdb on a dpkg-owned filesystem and STILL not exercise what matters: %post's
@@ -416,6 +474,45 @@ else
   else
     fail "rpm arch tag is ${RPM_ARCH} (got '${rpm_pkg_arch:-unreadable}') — an rpm from the other arch's leg?"
   fi
+
+  exclude_check "rpm ships ${EXCLUDE_LAUNCHER}, executable" rpm_ships_executable "${RPM}" "${EXCLUDE_LAUNCHER}"
+fi
+
+# ===========================================================================
+sec "5c. Arch package (metadata only)"
+# ===========================================================================
+# As thin as the .rpm section, for the same reasons. make-arch.sh already
+# asserts the payload, .PKGINFO, the six .INSTALL hooks and the .MTREE before it
+# returns, so none of that is repeated. What only the caller can know is the
+# leg: the arch tag pacman reads from .PKGINFO must be this leg's. The split
+# tunnel launcher is checked as in the other packages. There is no install test:
+# pacman is not in this image, so nothing here runs a hook either.
+if [ -z "${PKG_ARCH}" ]; then
+  skip "Arch package checks" "ARCH='${ARCH}' has no pacman arch spelling (expected amd64|arm64)"
+elif [ ! -f "${ARCH_PKG}" ]; then
+  # A skip, not a fail, as for the .rpm: build-arch.sh tolerates a missing Arch
+  # package unless UR_REQUIRE_ARCH_PKG is set, and has already said why.
+  skip "Arch package present" "no $(basename "${ARCH_PKG}") in ${OUT_DIR} — see build-arch.sh's UR_REQUIRE_ARCH_PKG warning above"
+elif ! command -v zstd >/dev/null 2>&1; then
+  skip "Arch package metadata" "zstd is not installed in this image (Dockerfile.daemon installs it; tar --zstd needs it)"
+else
+  pass "Arch package present ($(du -h "${ARCH_PKG}" | cut -f1))"
+  if tar --zstd -xOf "${ARCH_PKG}" .PKGINFO >"${WORK}/PKGINFO" 2>/dev/null; then
+    pass "Arch package metadata readable (.PKGINFO)"
+  else
+    fail "Arch package metadata readable (.PKGINFO)"
+  fi
+
+  # The arch tag in .PKGINFO, not merely in the filename, as for the .rpm.
+  pkg_tag_arch="$(awk -F' = ' '$1 == "arch" { print $2; exit }' "${WORK}/PKGINFO" 2>/dev/null)"
+  if [ "${pkg_tag_arch}" = "${PKG_ARCH}" ]; then
+    pass "Arch package arch tag is ${PKG_ARCH} (this leg is ARCH=${ARCH})"
+  else
+    fail "Arch package arch tag is ${PKG_ARCH} (got '${pkg_tag_arch:-unreadable}') — a package from the other arch's leg?"
+  fi
+
+  exclude_check "Arch package ships ${EXCLUDE_LAUNCHER}, executable" \
+    arch_pkg_ships_executable "${ARCH_PKG}" "${EXCLUDE_LAUNCHER#/}"
 fi
 
 # ===========================================================================
@@ -463,6 +560,7 @@ else
   fi
   check "install.sh placed the daemon"   test -x /usr/lib/urnetwork/urnetworkd
   check "install.sh placed the launcher" test -x /usr/bin/urnetwork
+  exclude_check "install.sh placed the split tunnel launcher" test -x "${EXCLUDE_LAUNCHER}"
   check "install.sh created the group"   getent group urnetwork
 
   # Upgrade over itself must preserve /etc state (the same command installs
@@ -519,6 +617,7 @@ else
   fi
   check "purge removed the daemon"   test ! -e /usr/lib/urnetwork/urnetworkd
   check "purge removed the launcher" test ! -e /usr/bin/urnetwork
+  exclude_check "purge removed the split tunnel launcher" test ! -e "${EXCLUDE_LAUNCHER}"
 fi
 fi   # do_daemon
 

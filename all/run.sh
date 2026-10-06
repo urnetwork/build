@@ -2473,7 +2473,8 @@ builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - 
 
 
 # =============================================================================
-# Desktop apps: Windows Store (MSI) + Linux (deb + install tarball + rpm + AppImage).
+# Desktop apps: Windows Store (MSI) + Linux (deb + install tarball + rpm + Arch
+# package + AppImage + Flatpak).
 # See build/DESKTOP_BUILD.md + build/all/{windows,linux}/README.md.
 #
 # Each platform builds via its own script (all/build-windows.sh,
@@ -2489,8 +2490,9 @@ builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - 
 # Each runs meson + the linux repo's packaging scripts, then verify.sh proves
 # the artifacts work: the AppImage extracts, bundles its GTK stack without
 # falling through to host libraries, and launches under xvfb; the .deb installs,
-# creates its group and purges cleanly; the install.sh tarball round-trips. The
-# artifact names are normative in linux/MIGRATION.md). The scripts use the local branches as-is
+# creates its group and purges cleanly; the install.sh tarball round-trips; the
+# .rpm and the Arch package carry the leg's arch tag. The artifact names are
+# normative in linux/MIGRATION.md). The scripts use the local branches as-is
 # (the version branches configured above) and inherit BUILD_HOME + the WARP_*
 # versions exported above; they can also be re-run standalone after this
 # pipeline, e.g. when a flaky VM/container build needs a retry.
@@ -2500,15 +2502,16 @@ builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - 
 #
 # SUBMISSION/PUBLISHING is manual for now: this pipeline builds the bundles and
 # attaches them to the GitHub release; a human submits the MSI to the Microsoft
-# Store (Partner Center). Linux has no store — the deb/tarball/rpm/AppImage
-# ship from the release page. The Linux GUI updates itself from the STABLE
-# urnetwork/linux releases (linux/app/src/UpdateChecker.cpp), to which a human
-# copies this nightly's Linux assets under the same names when it is declared
-# stable; there is no zsync channel (GitHub Releases can't serve the
-# multi-range requests zsync needs — linux/APPIMAGE.md §11f), so no .zsync is
-# built or uploaded. Publishing the .deb to an apt repo and the .rpm to a dnf
-# repo (which additionally wants an rpm HEADER signature, not the detached
-# .asc) are manual follow-ups.
+# Store (Partner Center). Linux has no store — the deb/tarball/rpm/Arch
+# package/AppImage/Flatpak ship from the release page. The Linux GUI updates
+# itself from the STABLE urnetwork/linux releases
+# (linux/app/src/UpdateChecker.cpp), to which a human copies this nightly's
+# Linux assets under the same names when it is declared stable; there is no
+# zsync channel (GitHub Releases can't serve the multi-range requests zsync
+# needs — linux/APPIMAGE.md §11f), so no .zsync is built or uploaded.
+# Publishing the .deb to an apt repo and the .rpm to a dnf repo (which
+# additionally wants an rpm HEADER signature, not the detached .asc) are manual
+# follow-ups.
 # =============================================================================
 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"

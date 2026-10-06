@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Per-arch build + package + verify step for the URnetwork Linux app. Runs
-# INSIDE the urnetwork-linux-builder container (Ubuntu 24.04, root), invoked by
-# build.sh:
+# inside the urnetwork-linux-builder-<role> container (root; one image per role,
+# below), invoked by build.sh:
 #
 #   /src     the linux repo root (app/ + packaging/), mounted READ-ONLY
 #   /out     OUT_DIR, writable — the release artifacts land here
@@ -11,10 +11,11 @@
 #
 # TWO IMAGES, ONE SCRIPT. The halves cannot share a build image:
 #   ROLE=daemon runs on Ubuntu 22.04 (Dockerfile.daemon), whose glibc 2.35 IS
-#     the floor nfpm.yaml declares. -Dgui=disabled; produces the .deb and the
-#     install tarball. 22.04 has no libgtkmm-4.0 at all.
+#     the floor nfpm.yaml declares. -Dgui=disabled; produces the .deb, the
+#     install tarball, the .rpm and the Arch package. 22.04 has no
+#     libgtkmm-4.0 at all.
 #   ROLE=gui runs on Ubuntu 24.04 (Dockerfile.gui), the oldest Ubuntu with
-#     GTK4 + libadwaita. -Dgui=enabled; produces the AppImage + .zsync.
+#     GTK4 + libadwaita. -Dgui=enabled; produces the AppImage.
 # Measured 2026-08-05 (arm64): a daemon built on 24.04 references GLIBC_2.38,
 # so a single-image build cannot honestly declare the 2.35 floor — the app's
 # `glibc-floor` meson test fails it, which is the gate working.
@@ -41,16 +42,16 @@
 #   make-install-tarball.sh -> urnetwork-daemon-<version>-<arch>.install.tar.gz (ROLE=daemon)
 #   make-rpm.sh             -> urnetwork-daemon-<version>.<rpmarch>.rpm       (ROLE=daemon)
 #   make-arch.sh            -> urnetwork-daemon-<version>-<pkgarch>.pkg.tar.zst (ROLE=daemon)
-# The Arch package, like the .rpm, does not carry ${ARCH} verbatim either:
-# <pkgarch> is x86_64/aarch64. Its name IS exact — make-arch.sh composes it from
-# VERSION and the mapped arch and writes nothing else.
-#   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage + .zsync   (ROLE=gui)
+#   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage            (ROLE=gui)
+# The AppImage has no .zsync sidecar: it embeds no update information.
 #
-# NOTE the .rpm is the one name that does not carry ${ARCH} verbatim: rpm has
-# its own arch spelling, so <rpmarch> is x86_64/aarch64 while the ASSET arch
-# stays Debian-spelled (amd64/arm64) everywhere else. The name is still exact,
-# not a glob — make-rpm.sh only emits the mangled canonical NVR under
-# UR_RPM_CANONICAL_NAME=1, which this pipeline never sets.
+# The .rpm and the Arch package are the names that do not carry ${ARCH}
+# verbatim: rpm and pacman have their own arch spelling, so <rpmarch> and
+# <pkgarch> are x86_64/aarch64 while the asset arch stays Debian-spelled
+# (amd64/arm64) everywhere else. The names are still exact, not globs:
+# make-rpm.sh and make-arch.sh emit their canonical names only under
+# UR_RPM_CANONICAL_NAME=1 and UR_ARCH_CANONICAL_NAME=1, which this pipeline
+# never sets.
 #
 # Env knobs:
 #   UR_GLIBC_FLOOR    daemon glibc floor asserted by meson's `glibc-floor` test
@@ -64,22 +65,23 @@
 #                     glibc per the excludelist. So the GUI requires a 24.04+
 #                     host while the daemon runs on 22.04.
 #   UR_REQUIRE_RPM    make a missing or failed .rpm fatal (default false: warn
-#                     and carry on). Default is deliberate. run.sh's own
-#                     warn-and-continue does NOT provide this tolerance: its
-#                     uploads live INSIDE the `then` branch of a single
-#                     `if build-linux.sh`, so one non-zero exit anywhere in the
-#                     linux leg skips EVERY linux asset — the .deb, the
-#                     tarball, the AppImage and the SDK zip included. A fatal
-#                     rpm step would therefore turn "the new package broke"
-#                     into "the release shipped no linux artifacts at all",
-#                     which is strictly worse than the status quo. So the
-#                     tolerance lives here, per artifact, and the .rpm runs
+#                     and carry on). The default is for standalone builds,
+#                     where a broken newer package must not cost the build
+#                     the artifacts it does have. run.sh sets this and
+#                     UR_REQUIRE_ARCH_PKG to true, and stops the release on
+#                     a failed build before any upload (error_trap), so a
+#                     release never ships without either package. The
+#                     tolerance is per artifact, and the .rpm runs
 #                     only after the contract artifacts are already on disk.
 #                     Set true to gate the release on it, as run.sh does.
 #   UR_REQUIRE_ARCH_PKG  same for the Arch .pkg.tar.zst, same default (false),
-#                     for exactly the same reason: a brand-new package must not
-#                     be able to take the four contracted assets off a release.
+#                     for the same reason. With either knob, a failed package
+#                     never reaches /out: see build_optional_package.
 #   UR_SKIP_VERIFY=1  build + package only, skip verify.sh
+#   UR_CONTAINER_ROOT for the build repo's tests only (all/linux_build_arch_test.go):
+#                     a scratch directory standing in for the container's /,
+#                     so /src, /out, /work and /verify.sh resolve under it.
+#                     build.sh never sets it.
 #
 # SPDX-License-Identifier: MPL-2.0
 set -euo pipefail
@@ -88,17 +90,20 @@ set -euo pipefail
 : "${VERSION:?set VERSION}"
 : "${ROLE:?set ROLE (daemon|gui)}"
 case "${ROLE}" in daemon|gui) ;; *) echo "ERROR: ROLE must be daemon or gui (got '${ROLE}')" >&2; exit 1 ;; esac
-[ -d /src/app ] || { echo "ERROR: /src is not the linux repo root (no app/) — check build.sh's -v mount" >&2; exit 1; }
-[ -d /out ] || { echo "ERROR: /out not mounted — check build.sh's -v mount" >&2; exit 1; }
+root="${UR_CONTAINER_ROOT:-}"
+src="${root}/src"
+out="${root}/out"
+[ -d "${src}/app" ] || { echo "ERROR: ${src} is not the linux repo root (no app/) — check build.sh's -v mount" >&2; exit 1; }
+[ -d "${out}" ] || { echo "ERROR: ${out} not mounted — check build.sh's -v mount" >&2; exit 1; }
 
-work="/work"
+work="${root}/work"
 app="${work}/app"
 UR_GLIBC_FLOOR="${UR_GLIBC_FLOOR:-2.35}"
 UR_GLIBC_CEILING="${UR_GLIBC_CEILING:-2.39}"
 
-echo ">>> [${ARCH}] copying /src -> ${work} (the /src mount stays read-only)"
+echo ">>> [${ARCH}] copying ${src} -> ${work} (the ${src} mount stays read-only)"
 mkdir -p "${work}"
-cp -a /src/. "${work}/"
+cp -a "${src}/." "${work}/"
 rm -rf "${work}/.git"
 
 # Resolve the linux repo's packaging entry points BEFORE the (slow, possibly
@@ -139,10 +144,10 @@ if [ "${#missing[@]}" -gt 0 ]; then
 fi
 
 # make-rpm.sh is preflighted too — knowing in seconds beats finding out after a
-# qemu-emulated meson build — but SOFTLY, unlike the three above. It is the
-# newest script in linux/packaging, so a checkout that legitimately predates it
-# must still be able to produce the artifacts it does have; see UR_REQUIRE_RPM
-# in the header for why one missing script must not cost the release its .deb.
+# qemu-emulated meson build — but softly, unlike the ones above. It is newer
+# than they are, so a checkout that predates it must still be able to produce
+# the artifacts it does have in a standalone build; a release sets
+# UR_REQUIRE_RPM=true and stops here instead (see the header).
 build_rpm=1
 if [ "${ROLE}" = daemon ] && [ ! -f "${rpm_script}" ]; then
   if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
@@ -250,19 +255,42 @@ fi
 # --- invoke the linux repo's packaging scripts (env contract in the header) ---
 export VERSION ARCH
 export STAGING_DIR="${staging}"
-export OUT_DIR="/out"
+export OUT_DIR="${out}"
 export APP_DIR="${app}"
 export SDK_DIR="${sdk_dir}"
 export UR_GLIBC_CEILING
 
 expect_artifact() {
   local name="$1" label="$2"
-  if [ ! -f "/out/${name}" ]; then
-    echo "ERROR: the ${label} script ran but did not produce ${name} in OUT_DIR (/out)." >&2
+  if [ ! -f "${out}/${name}" ]; then
+    echo "ERROR: the ${label} script ran but did not produce ${name} in OUT_DIR (${out})." >&2
     echo "       The artifact names are normative — linux/MIGRATION.md 'Artifact filenames'." >&2
     exit 1
   fi
   echo ">>> [${ARCH}] ${name}"
+}
+
+# build_optional_package <script> <artifact> — run a packaging script whose
+# failure this build may tolerate (make-rpm.sh, make-arch.sh), and set
+# package_problem to why it produced no <artifact>, or to '' when it did. The
+# script writes into a scratch OUT_DIR under /work, which is also its cwd, and
+# what it wrote moves to /out only when it exited 0 and wrote <artifact>. So a
+# package that failed its own payload check, or one written under another name,
+# never reaches /out, where build.sh and run.sh pick up every *.rpm and
+# *.pkg.tar.zst.
+build_optional_package() {
+  local script="$1" name="$2" scratch
+  scratch="${work}/out-$(basename "${script}" .sh)"
+  mkdir -p "${scratch}"
+  if ! (cd "${scratch}" && OUT_DIR="${scratch}" bash "${script}"); then
+    package_problem="$(basename "${script}") failed"
+  elif [ ! -f "${scratch}/${name}" ]; then
+    package_problem="$(basename "${script}") reported success but wrote no ${name}"
+  else
+    package_problem=''
+    mv -f "${scratch}"/* "${out}/"
+    echo ">>> [${ARCH}] ${name}"
+  fi
 }
 
 # Run the packaging scripts with the CWD set to OUT_DIR. Historically
@@ -273,7 +301,9 @@ expect_artifact() {
 # checker, linux/README.md "Updates"); the cwd stays here because anything
 # else appimagetool drops relative to cwd belongs in /out too, and make-deb.sh
 # and make-install-tarball.sh are cwd-independent (they cd in subshells).
-cd /out
+# make-rpm.sh and make-arch.sh run in their own scratch OUT_DIR instead, which
+# is their cwd as well (build_optional_package).
+cd "${out}"
 
 if [ "${ROLE}" = daemon ]; then
   echo ">>> [${ARCH}] daemon .deb: ${deb_script}"
@@ -290,25 +320,21 @@ if [ "${ROLE}" = daemon ]; then
   # come out of ONE assemble_daemon_root() call on ONE staging tree, which is
   # also why the .rpm belongs in this container and not in one of its own —
   # three packages built from one install tree cannot ship different daemons.
+  # An .rpm that make-rpm.sh wrote and then failed (its payload check runs after
+  # nfpm writes the file) stays in the scratch directory, so continuing without
+  # the .rpm leaves none in /out.
   if [ "${build_rpm}" = 0 ]; then
     echo "WARN: [${ARCH}] skipping the daemon .rpm — make-rpm.sh is absent (see the preflight)" >&2
   else
     echo ">>> [${ARCH}] daemon .rpm: ${rpm_script}"
     rpm_name="urnetwork-daemon-${VERSION}.${rpm_arch}.rpm"
-    if ! bash "${rpm_script}"; then
-      rpm_problem="make-rpm.sh failed"
-    elif [ ! -f "/out/${rpm_name}" ]; then
-      rpm_problem="make-rpm.sh reported success but wrote no ${rpm_name} to OUT_DIR (/out)"
-    else
-      rpm_problem=''
-      echo ">>> [${ARCH}] ${rpm_name}"
-    fi
-    if [ -n "${rpm_problem}" ]; then
+    build_optional_package "${rpm_script}" "${rpm_name}"
+    if [ -n "${package_problem}" ]; then
       if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
-        echo "ERROR: [${ARCH}] ${rpm_problem} — UR_REQUIRE_RPM=true" >&2
+        echo "ERROR: [${ARCH}] ${package_problem} — UR_REQUIRE_RPM=true" >&2
         exit 1
       fi
-      echo "WARN: [${ARCH}] ${rpm_problem}" >&2
+      echo "WARN: [${ARCH}] ${package_problem}" >&2
       echo "      The other daemon artifacts are already built; continuing without the .rpm." >&2
       echo "      Set UR_REQUIRE_RPM=true to gate the release on it instead." >&2
     fi
@@ -318,26 +344,20 @@ if [ "${ROLE}" = daemon ]; then
   # and the tarball are the contracted artifacts, and a failure in a newer
   # package must never cost them. nfpm is already installed for the .deb, and
   # this is a third packager over the SAME assemble_daemon_root() staging tree,
-  # so all three daemon packages necessarily ship identical content.
+  # so all three daemon packages necessarily ship identical content. A package
+  # that make-arch.sh wrote and then failed stays out of /out, as for the .rpm.
   if [ "${build_arch_pkg}" = 0 ]; then
     echo "WARN: [${ARCH}] skipping the Arch package — make-arch.sh is absent (see the preflight)" >&2
   else
     echo ">>> [${ARCH}] daemon .pkg.tar.zst: ${arch_script}"
     pkg_name="urnetwork-daemon-${VERSION}-${pkg_arch}.pkg.tar.zst"
-    if ! bash "${arch_script}"; then
-      pkg_problem="make-arch.sh failed"
-    elif [ ! -f "/out/${pkg_name}" ]; then
-      pkg_problem="make-arch.sh reported success but wrote no ${pkg_name} to OUT_DIR (/out)"
-    else
-      pkg_problem=''
-      echo ">>> [${ARCH}] ${pkg_name}"
-    fi
-    if [ -n "${pkg_problem}" ]; then
+    build_optional_package "${arch_script}" "${pkg_name}"
+    if [ -n "${package_problem}" ]; then
       if [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
-        echo "ERROR: [${ARCH}] ${pkg_problem} — UR_REQUIRE_ARCH_PKG=true" >&2
+        echo "ERROR: [${ARCH}] ${package_problem} — UR_REQUIRE_ARCH_PKG=true" >&2
         exit 1
       fi
-      echo "WARN: [${ARCH}] ${pkg_problem}" >&2
+      echo "WARN: [${ARCH}] ${package_problem}" >&2
       echo "      The other daemon artifacts are already built; continuing without it." >&2
       echo "      Set UR_REQUIRE_ARCH_PKG=true to gate the release on it instead." >&2
     fi
@@ -348,7 +368,7 @@ else
   expect_artifact "URnetwork-${VERSION}-${ARCH}.AppImage" "GUI AppImage"
   # No .zsync: the AppImage embeds no update information (the in-app
   # UpdateChecker is the update channel), so appimagetool emits no sidecar.
-  if [ -f "/out/URnetwork-${VERSION}-${ARCH}.AppImage.zsync" ]; then
+  if [ -f "${out}/URnetwork-${VERSION}-${ARCH}.AppImage.zsync" ]; then
     echo "ERROR: a .AppImage.zsync was produced -- make-appimage.sh must not embed update information" >&2
     exit 1
   fi
@@ -357,11 +377,11 @@ fi
 # --- verification: prove the artifacts work, not just that they exist --------
 if [ "${UR_SKIP_VERIFY:-0}" = 1 ]; then
   echo ">>> [${ARCH}/${ROLE}] UR_SKIP_VERIFY=1 — skipping verify.sh"
-elif [ -f /verify.sh ]; then
+elif [ -f "${root}/verify.sh" ]; then
   echo ">>> [${ARCH}/${ROLE}] verifying artifacts"
-  ROLE="${ROLE}" bash /verify.sh
+  ROLE="${ROLE}" bash "${root}/verify.sh"
 else
-  echo "ERROR: /verify.sh not mounted — build.sh must mount it (or set UR_SKIP_VERIFY=1)" >&2
+  echo "ERROR: ${root}/verify.sh not mounted — build.sh must mount it (or set UR_SKIP_VERIFY=1)" >&2
   exit 1
 fi
 
