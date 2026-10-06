@@ -65,7 +65,7 @@ eval "$1"
 eval "$2"
 print -r -- push-region-continued
 `
-	command := exec.Command("zsh", "-c", harness, "connect-ip-update-test", componentFunctions(t, "error_trap"), region)
+	command := exec.Command("zsh", "-c", harness, "connect-ip-update-test", componentFunctions(t, "error_trap")+pushRetryFunction(t), region)
 	command.Env = environmentWith(
 		"BUILD_HOME="+buildHome,
 		"CONNECT_IP_UPDATE=1",
@@ -127,5 +127,34 @@ func TestRunConnectIpUpdateRequiresEveryGeneratedTable(t *testing.T) {
 	}
 	if after := runGit(t, remoteDir, "rev-parse", "main"); after != before {
 		t.Fatalf("a failed push region still pushed: %s -> %s", before, after)
+	}
+}
+
+// An overlapping generated update needs a person or a new generator run to
+// resolve it. Keep the rebase conflict and the fatal stage visible; never
+// replace the other writer's tables or continue into version branches.
+func TestRunConnectIpUpdateStopsOnRebaseConflict(t *testing.T) {
+	buildHome, connectDir, remoteDir := connectIpUpdateFixture(t, connectGeneratedTables)
+	// Rebase requires a clean worktree after the generated commit. The fixture's
+	// unrelated hand-written edit is covered by the ordinary push test above.
+	if err := os.WriteFile(filepath.Join(connectDir, "ip_security.go"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	concurrent := filepath.Join(t.TempDir(), "concurrent")
+	runGit(t, buildHome, "clone", "-b", "main", remoteDir, concurrent)
+	table := connectGeneratedTables[0]
+	concurrentCommit := commitTestFile(t, concurrent, table, "concurrent table\n", "concurrent generated update")
+	runGit(t, concurrent, "push")
+
+	output, err := runConnectIpUpdatePush(t, buildHome)
+	if err == nil || strings.Contains(string(output), "push-region-continued") ||
+		!strings.Contains(string(output), "connect ip update push") || !strings.Contains(string(output), "CONFLICT") {
+		t.Fatalf("conflicting push did not fail at the generated push gate: %v\n%s", err, output)
+	}
+	if after := runGit(t, remoteDir, "rev-parse", "main"); after != concurrentCommit {
+		t.Fatalf("conflicting push changed remote main: %s -> %s", concurrentCommit, after)
+	}
+	if unmerged := runGit(t, connectDir, "diff", "--name-only", "--diff-filter=U"); unmerged != table {
+		t.Fatalf("conflict was not preserved for resolution: %q, want %q", unmerged, table)
 	}
 }

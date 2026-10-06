@@ -588,9 +588,10 @@ git_main () {
     git diff --quiet && git diff --cached --quiet && git checkout $branch_name && git pull --recurse-submodules
 }
 
-# Generated build-repository commits can race an unrelated main push during a
-# long release. Integrate that one observed remote advance and retry once; a
-# persistent push or rebase failure remains fatal to the caller.
+# Generated commits can race an unrelated main push during a long release.
+# Integrate that one observed remote advance and retry once; a persistent push
+# or rebase failure remains fatal to the caller. Do not auto-resolve generated
+# conflicts or stash unrelated working-tree edits.
 git_push_with_rebase_retry () {
     git push && return 0
     git pull --rebase || return $?
@@ -1095,7 +1096,7 @@ if [ "$CONNECT_IP_UPDATE" ]; then
         git add ip_security_cfaa_block.go ip_security_messaging_meta.go ip_blocker_block.go &&
         if ! git diff --cached --quiet; then
             git commit -m "${EXTERNAL_WARP_VERSION} ip security and blocker update" &&
-            git push
+            git_push_with_rebase_retry
         fi)
     error_trap 'connect ip update push'
 fi
@@ -1114,7 +1115,7 @@ fi
         ur.io/react/src/data/page-dates.js &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog, releases, content and page dates update" &&
-        git push
+        git_push_with_rebase_retry
     fi)
 error_trap 'ur.io changelog update push'
 
@@ -1129,28 +1130,28 @@ error_trap 'ur.io changelog update push'
     git add 'app/app/src/main/res/values*/strings.xml' &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
-        git push
+        git_push_with_rebase_retry
     fi)
 error_trap 'android localizations push'
 (cd $BUILD_HOME/apple &&
     git add app/network/Shared/Resources/Localizable.xcstrings &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
-        git push
+        git_push_with_rebase_retry
     fi)
 error_trap 'apple localizations push'
 (cd $BUILD_HOME/windows &&
     git add app/src/App/Strings &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
-        git push
+        git_push_with_rebase_retry
     fi)
 error_trap 'windows localizations push'
 (cd $BUILD_HOME/linux &&
     git add app/po &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
-        git push
+        git_push_with_rebase_retry
     fi)
 error_trap 'linux localizations push'
 
