@@ -31,12 +31,6 @@
 #                always had it. Unset, NOTHING changes: both halves build in
 #                one invocation exactly as before.
 #
-#                It exists so a CI can run the two halves as separate jobs —
-#                they use different base images (22.04 / 24.04) and the GUI
-#                half is the long pole, so daemon+gui in parallel roughly
-#                halves the per-arch wall clock. See
-#                build/.github/workflows/linux-release.yml.
-#
 #                A role-scoped invocation MUST be given its OWN OUT_DIR: the
 #                stale sweep below clears the WHOLE artifact set, not just this
 #                role's, so `ROLES=daemon ...` followed by `ROLES=gui ...` into

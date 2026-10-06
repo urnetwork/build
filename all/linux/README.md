@@ -126,7 +126,7 @@ that looks like a pass is worse than no test.
 | `build.sh` | host orchestration: stage SDK, `docker build`+`docker run` per arch **per role**, verify the artifact names |
 | `build-arch.sh` | in-container per-arch/per-role step: meson build → `meson test` (incl. the glibc-floor gate) → staging tree → the linux repo's packaging scripts → artifact-name asserts → `verify.sh` |
 | `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag. Independently runnable. |
-| `build-flatpak.sh` | host orchestration for the dedicated Flatpak image; `UR_FLATPAK_NATIVE=1` is the explicit CI-only native path |
+| `build-flatpak.sh` | host orchestration for the dedicated Flatpak image; `UR_FLATPAK_NATIVE=1` uses an already-installed native Linux toolchain instead |
 | `build-flatpak-container.sh` | installs/caches the GNOME runtime, copies read-only `/src` to ephemeral `/work`, and builds the bundle |
 
 ## Smoke-test the build env first
@@ -168,32 +168,25 @@ default `2.39`), `UR_REQUIRE_RPM` (default `false` — make a missing or failed
 `.rpm` fatal instead of a warning), `UR_SKIP_VERIFY`, `ARCHES`, `ROLES`.
 
 `ROLES` (default `daemon gui`, the same knob `setup.sh` has always had) picks
-which halves to build. It exists so the two can run as separate CI jobs — they
-are separate base images and the GUI half is the long pole — and the artifact
-assertions are scoped to the roles that actually ran. **A role-scoped
+which halves to build (they are separate base images, and the GUI half is the
+long pole); the artifact assertions are scoped to the roles that actually ran.
+**A role-scoped
 invocation needs its OWN `OUT_DIR`**: the stale-artifact sweep clears the whole
 set, not just this role's, so `ROLES=daemon` followed by `ROLES=gui` into one
 directory would leave only the AppImage.
 
 `../build-linux.sh` additionally takes `UR_SKIP_SDK_BUILD=1`, meaning "the cgo
-SDK output is already staged in `sdk/cgo/build/`; do not rebuild it". That is
-how CI builds the SDK once and fans the zip out to every `(role, arch)` leg
-without installing Go and zig on each of them. The per-arch `.so` and zip
-assertions still run either way, so a leg handed nothing fails exactly as a
-failed build would.
+SDK output is already staged in `sdk/cgo/build/`; do not rebuild it". The
+per-arch `.so` and zip assertions still run either way, so a run handed nothing
+fails exactly as a failed build would.
 
 Both defaults leave `run.sh`'s path byte-for-byte unchanged.
 
-### On GitHub Actions
+### In the release
 
-`.github/workflows/linux-release.yml` runs exactly the above on hosted runners:
-one shared SDK job, then one job per `(role, arch)` — each calling
-`all/build-linux.sh` — then a release job that publishes only if every leg is
-green. Each arch gets a runner of its own architecture (`ubuntu-24.04` /
-`ubuntu-24.04-arm`), so unlike the macOS host nothing is qemu-emulated.
-
-`build/all/build-linux.sh` (run.sh's linux build part) invokes this after the
-macOS app build; the resulting artifacts are uploaded to the GitHub release.
+Releases are built on our own hardware. `build/all/build-linux.sh` (run.sh's
+linux build part) invokes this on the build host after the macOS app build; the
+resulting artifacts are uploaded to the GitHub release.
 **There is no store submission.** Publishing the `.deb` to the apt repo is a
 manual follow-up, as is copying a nightly's Linux assets (same names) to the
 stable `urnetwork/linux` release the in-app updater reads. There is no zsync

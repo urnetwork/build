@@ -2686,11 +2686,9 @@ fi
 #
 # The degoogled build.gradle comments out every play-services dependency, but
 # the play and solana_dapp sources still import GoogleSignIn, LocationServices
-# and friends. So main pinned there cannot compile those flavors: every CI run
-# and every pull request against main fails the android job until the next
-# release moves the pin again. The `builder build ungoogle` commit is what
-# leaves it there, and it has been doing so every release -- it only became
-# visible when the android build+test workflow was added.
+# and friends. So main pinned there cannot compile those flavors for anyone
+# who builds from it, until the next release moves the pin again. The
+# `builder build ungoogle` commit is what leaves it there.
 #
 # The -ungoogle TAG still points at the degoogled tree, which is the point of
 # it: F-Droid builds from that tag. This restores only main, to the same commit
@@ -2700,8 +2698,8 @@ fi
 # `git diff --quiet && git diff --cached --quiet` on $BUILD_HOME (see the pull
 # near the top), and a submodule whose checkout disagrees with the recorded pin
 # reads as a dirty diff -- which would short-circuit that && chain and abort the
-# run at 'pull'. Fixing the pin without the checkout would trade a broken CI for
-# a broken build host.
+# run at 'pull'. Fixing the pin without the checkout would trade a broken main
+# for a broken build host.
 if [ "$ANDROID_RELEASE_COMMIT" ]; then
     (cd $BUILD_HOME/android && git checkout "$ANDROID_RELEASE_COMMIT")
     error_trap 'android restore release commit'
@@ -2715,7 +2713,7 @@ if [ "$ANDROID_RELEASE_COMMIT" ]; then
     error_trap 'restore android pin'
     builder_message "android pin restored to \`${ANDROID_RELEASE_COMMIT}\` (the \`${EXTERNAL_WARP_VERSION}\` release commit); the degoogled tree stays on the \`v${EXTERNAL_WARP_VERSION}-ungoogle\` tag"
 else
-    builder_message "warning: ANDROID_RELEASE_COMMIT is empty, so main is still pinned to the degoogled android tree. Every CI run against main will fail the android job until that is corrected."
+    builder_message "warning: ANDROID_RELEASE_COMMIT is empty, so main is still pinned to the degoogled android tree, which cannot build the play and solana_dapp flavors until that is corrected."
 fi
 
 # Upload releases to testing channels

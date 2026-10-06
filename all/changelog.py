@@ -294,8 +294,8 @@ AUDIENCES = {
     # channel actually reads is the AppStream <release><description> in
     # urnetwork/linux app/packaging/com.bringyour.network.metainfo.xml.in, which
     # GNOME Software, KDE Discover and the Flathub page all render. That field is
-    # restricted markup, a validator gates the build on it
-    # (.github/workflows/build.yml: `appstreamcli validate --no-net --pedantic`,
+    # restricted markup, a validator gates the build on it (app/meson.build's
+    # appstream-metainfo test: `appstreamcli validate --no-net --pedantic`,
     # where a WARNING is fatal), and so this audience gets its own renderer
     # rather than a different number.
     "linux": {
@@ -472,8 +472,8 @@ _QUIET = False
 
 def warn(msg):
     # --self-test drives the degradation ladder on purpose; its warnings are the
-    # expected outcome there, not news, and printing them makes a passing CI job
-    # look like a failing one.
+    # expected outcome there, not news, and printing them makes a passing
+    # self-test look like a failing one.
     if not _QUIET:
         print("changelog: %s" % msg, file=sys.stderr)
 
@@ -486,7 +486,7 @@ def git(repo, *args):
     """Run git in `repo`. Returns stdout, or None if git failed or is absent.
 
     Never raises: every caller has an API fallback or a skip path, because this
-    has to work in a shallow CI checkout as well as on the build host."""
+    has to work in a shallow checkout as well as on the build host."""
     try:
         p = subprocess.run(("git", "-C", repo) + args,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1086,9 +1086,9 @@ def render_store(lines, limit, lede, fallback, shared_from=None, boundary=None,
 # AppStream: the Linux release description
 #
 # This is not a store note with a different limit, it is a different LANGUAGE,
-# and a validator gates urnetwork/linux's build on it
-# (.github/workflows/build.yml: `appstreamcli validate --no-net --pedantic`,
-# where a WARNING is fatal, and app/meson.build runs the same check as a test).
+# and a validator gates urnetwork/linux's build on it (app/meson.build's
+# appstream-metainfo test: `appstreamcli validate --no-net --pedantic`, where a
+# WARNING is fatal).
 # Every rule below was checked against appstreamcli 1.1.3 rather than inferred:
 #
 #   * ONLY <p>, <ul>/<ol> and <li> are legal here. <b>, a nested <ul>, or raw
@@ -1216,12 +1216,11 @@ def appstream_problems(fragment):
     offline and with no dependency on appstreamcli being installed.
 
     This exists because the failure is REMOTE and LATE: the fragment is consumed
-    by urnetwork/linux, whose CI runs `appstreamcli validate --no-net --pedantic`
-    with warnings treated as failures, and whose meson build runs the same check
-    as a test. A malformed fragment would not break the release that generated
-    it -- it would break the next Linux build, in another repository, for
-    somebody who did not write it. Checking here turns that into a warning at
-    the point of generation.
+    by urnetwork/linux, whose meson build runs `appstreamcli validate --no-net
+    --pedantic` as a test, with warnings treated as failures. A malformed
+    fragment would not break the release that generated it -- it would break
+    the next Linux build, in another repository, for somebody who did not write
+    it. Checking here turns that into a warning at the point of generation.
 
     Returns a list of human-readable problems; empty means it would validate.
     Comments are deliberately not checked for anything: the validator only
@@ -1365,7 +1364,8 @@ def render_note(name, sections, args, token):
                   shared_from, boundary, app_limit=app_limit)
     if a["format"] == "appstream":
         # WARN, never raise. A fragment that would not validate is still better
-        # than losing the release, and urnetwork/linux's own CI is the backstop;
+        # than losing the release, and urnetwork/linux's meson test is the
+        # backstop;
         # this is here so the problem is named at the point it is created rather
         # than in another repository three steps later.
         for p in appstream_problems(text):
@@ -1405,8 +1405,8 @@ def fit_full(meta, sections, filtered_counts, unwalkable, args):
 def self_test():
     """Network-free checks of the parts that would silently do the wrong thing.
 
-    This is what CI runs: it needs no token, no rate limit and no clone, and it
-    pins the two behaviours that matter -- the noise filters match the exact
+    It needs no token, no rate limit and no clone, and it pins the two
+    behaviours that matter -- the noise filters match the exact
     strings run.sh writes, and the store budget is never exceeded."""
     ok = True
 
@@ -1578,8 +1578,9 @@ def self_test():
           polish("Tune(window): raise the quality window 2/6/12 -> 6/12/16")
           == "Raise the quality window 2/6/12 -> 6/12/16")
 
-    # AppStream. Everything here was checked against appstreamcli 1.1.3, which
-    # is what urnetwork/linux's CI runs; a WARNING there is a build failure.
+    # AppStream. Everything here was checked against appstreamcli 1.1.3, the
+    # validator urnetwork/linux's meson test runs; a WARNING there is a build
+    # failure.
     xml = render_appstream(lines, 1800, None, "- f", shared_from, "Under the hood")
     check("appstream fragment would validate", appstream_problems(xml) == [])
     check("appstream wraps bullets in <li>, never in \"- \"",

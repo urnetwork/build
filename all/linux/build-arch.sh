@@ -75,8 +75,7 @@
 #                     which is strictly worse than the status quo. So the
 #                     tolerance lives here, per artifact, and the .rpm runs
 #                     only after the contract artifacts are already on disk.
-#                     Set true to gate the release on it, which is what the
-#                     linux repo's own CI does (beta-build.yml UR_REQUIRE_RPM).
+#                     Set true to gate the release on it, as run.sh does.
 #   UR_REQUIRE_ARCH_PKG  same for the Arch .pkg.tar.zst, same default (false),
 #                     for exactly the same reason: a brand-new package must not
 #                     be able to take the four contracted assets off a release.
