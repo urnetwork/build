@@ -125,7 +125,7 @@ that looks like a pass is worse than no test.
 | `smoke-test.sh` | run inside a container by `setup.sh`; role-aware (`ROLE=daemon` checks nfpm/dpkg/systemd and asserts GTK is *absent*; `ROLE=gui` checks the GTK4 stack, the AppImage tools, and asserts webkitgtk is *absent*) |
 | `build.sh` | host orchestration: stage SDK, `docker build`+`docker run` per arch **per role**, verify the artifact names |
 | `build-arch.sh` | in-container per-arch/per-role step: meson build → `meson test` (incl. the glibc-floor gate) → staging tree → the linux repo's packaging scripts → artifact-name asserts → `verify.sh` |
-| `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag. Independently runnable. |
+| `verify.sh` | proves the artifacts *work*: AppImage extract + AppDir contents + dependency closure + headless launch under xvfb; `systemd-analyze verify`; `.deb` install/purge lifecycle; `install.sh` tarball round-trip; `.rpm` header metadata + arch tag; the split tunnel launcher (`/usr/bin/urnetwork-exclude`) in the `.deb`, the tarball and the `.rpm`, skipped for a linux tree that predates it. Independently runnable. |
 | `build-flatpak.sh` | host orchestration for the dedicated Flatpak image; `UR_FLATPAK_NATIVE=1` is the explicit CI-only native path |
 | `build-flatpak-container.sh` | installs/caches the GNOME runtime, copies read-only `/src` to ephemeral `/work`, and builds the bundle |
 
