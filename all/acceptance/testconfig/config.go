@@ -30,6 +30,7 @@ var (
 	phonePattern  = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
 	totpPattern   = regexp.MustCompile(`^[A-Za-z2-7 ]+$`)
 	unlockPattern = regexp.MustCompile(`^[0-9]{4,16}$`)
+	serialPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 )
 
 type Config struct {
@@ -49,6 +50,12 @@ type Android struct {
 	// it in an adb command argument; Android accepts it over the remote shell's
 	// standard input instead.
 	UnlockCode string `yaml:"unlock_code" json:"unlock_code" secret:"true"`
+	// PerformanceDeviceSerials is the adb serials of the phones reserved for the
+	// physical performance harness, separated by spaces. Acceptance never
+	// touches those phones and the performance harness uses only them, so the
+	// android runners refuse to run without it. It is optional here because
+	// only a host with those phones attached sets it.
+	PerformanceDeviceSerials string `yaml:"performance_device_serials" json:"performance_device_serials" optional:"true"`
 }
 
 type Lifecycle struct {
@@ -222,6 +229,20 @@ func (c *Config) Validate(ready bool) error {
 	}
 	if isConfiguredString(c.Android.UnlockCode) && !unlockPattern.MatchString(c.Android.UnlockCode) {
 		problems = append(problems, "android.unlock_code must be 4..16 decimal digits")
+	}
+	if isConfiguredString(c.Android.PerformanceDeviceSerials) {
+		seenSerials := map[string]bool{}
+		for _, serial := range strings.Fields(c.Android.PerformanceDeviceSerials) {
+			if !serialPattern.MatchString(serial) || strings.HasPrefix(serial, "REPLACE_ME") {
+				problems = append(problems, "android.performance_device_serials must be adb serials separated by spaces")
+				break
+			}
+			if seenSerials[serial] {
+				problems = append(problems, "android.performance_device_serials repeats a serial")
+				break
+			}
+			seenSerials[serial] = true
+		}
 	}
 	if ready && !c.Lifecycle.AllowAccountCreateDelete {
 		problems = append(problems, "lifecycle.allow_account_create_delete must be true")

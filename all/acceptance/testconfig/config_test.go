@@ -80,6 +80,50 @@ func TestLoadGetAndResolve(t *testing.T) {
 	}
 }
 
+// The reserved performance phones are read by path like the unlock code, and
+// a host without them still passes readiness.
+func TestPerformanceDeviceSerialsAreReadByPath(t *testing.T) {
+	configured := strings.Replace(configuredConfig(t), `android: {unlock_code: "010181"}`,
+		`android: {unlock_code: "010181", performance_device_serials: "perf-phone-a perf-phone-b"}`, 1)
+	config, err := Load(writeConfig(t, configured, 0o600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Validate(true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := config.Get("android.performance_device_serials"); err != nil || got != "perf-phone-a perf-phone-b" {
+		t.Fatalf("Get(android.performance_device_serials) = %q, %v", got, err)
+	}
+	unset, err := Load(writeConfig(t, configuredConfig(t), 0o600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unset.Validate(true); err != nil {
+		t.Fatalf("an unset android.performance_device_serials failed readiness: %v", err)
+	}
+	if got, err := unset.Get("android.performance_device_serials"); err != nil || got != "" {
+		t.Fatalf("unset Get(android.performance_device_serials) = %q, %v", got, err)
+	}
+	// a template placeholder is unconfigured, as for every other field
+	placeholder := strings.Replace(configuredConfig(t), `android: {unlock_code: "010181"}`,
+		`android: {unlock_code: "010181", performance_device_serials: REPLACE_ME}`, 1)
+	if _, err := Load(writeConfig(t, placeholder, 0o600)); err != nil {
+		t.Fatalf("a placeholder android.performance_device_serials failed to load: %v", err)
+	}
+}
+
+// A malformed or repeated serial is a configuration error, never a reservation.
+func TestPerformanceDeviceSerialsRejectMalformedValues(t *testing.T) {
+	for _, value := range []string{"perf-phone-a perf/phone-b", "perf-phone-a perf-phone-a", "perf-phone-a REPLACE_ME"} {
+		configured := strings.Replace(configuredConfig(t), `android: {unlock_code: "010181"}`,
+			fmt.Sprintf(`android: {unlock_code: "010181", performance_device_serials: %q}`, value), 1)
+		if _, err := Load(writeConfig(t, configured, 0o600)); err == nil || !strings.Contains(err.Error(), "android.performance_device_serials") {
+			t.Errorf("Load(%q) = %v, want an android.performance_device_serials error", value, err)
+		}
+	}
+}
+
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	if _, err := Load(writeConfig(t, configuredConfig(t)+"unknown: true\n", 0o600)); err == nil {
 		t.Fatal("unknown field was accepted")
