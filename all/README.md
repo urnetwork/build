@@ -18,6 +18,12 @@ Notifications and best-effort VirusTotal observations are not build components.
 `BUILD_TEST`, `CONNECT_IP_UPDATE`, and `WARP_SKIP_DEPLOY` keep their explicit
 opt-in/skip behavior; commented-out build targets remain disabled.
 
+The GitBook `docs` repository is retired and is no longer a release submodule.
+The current documentation and legal sources live in `$WARP_HOME/mmm/ur.io/docs`.
+The web build reads that corpus for ur.io and for the legacy plain-text legal
+documents; documentation generation and web checks remain required. Historical
+release tags retain their original `docs` submodule pins.
+
 The extension consumes the exact localizations version published by the same
 release. It has no npm SDK dependency: it builds against this run's `sdk/js`
 checkout. Before editing its lockfile, `run.sh` uses a new empty npm cache on

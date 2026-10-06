@@ -652,7 +652,6 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf sn)
     (cd $BUILD_HOME && rm -rf server)
     (cd $BUILD_HOME && rm -rf web)
-    (cd $BUILD_HOME && rm -rf docs)
     (cd $BUILD_HOME && rm -rf warp)
     (cd $BUILD_HOME && rm -rf glog)
     (cd $BUILD_HOME && rm -rf proxy)
@@ -733,8 +732,6 @@ error_trap 'pull sn'
 error_trap 'pull server'
 (cd $BUILD_HOME/web && git_main)
 error_trap 'pull web'
-(cd $BUILD_HOME/docs && git_main)
-error_trap 'pull docs'
 (cd $BUILD_HOME/warp && git_main)
 error_trap 'pull warp'
 (cd $BUILD_HOME/glog && git_main master)
@@ -1176,8 +1173,6 @@ error_trap 'sn prepare version branch'
 error_trap 'server prepare version branch'
 (cd $BUILD_HOME/web && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'web prepare branch'
-(cd $BUILD_HOME/docs && git checkout -b v${EXTERNAL_WARP_VERSION})
-error_trap 'docs prepare branch'
 (cd $BUILD_HOME/warp && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'warp prepare branch'
 (cd $BUILD_HOME/glog && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -1911,12 +1906,6 @@ error_trap 'linux push branch'
     git_commit &&
     git_tag)
 error_trap 'web push branch'
-
-
-(cd $BUILD_HOME/docs && 
-    git_commit &&
-    git_tag)
-error_trap 'docs push branch'
 
 
 (cd $BUILD_HOME/warp && 
