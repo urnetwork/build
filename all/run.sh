@@ -49,7 +49,7 @@
 #            signing keychain from ~/.identity.p12 + ~/.p12-pw (see the
 #            keychain note below and REMOTEBUILD.md option 1)
 # The macOS direct-download build (manual Developer ID signing) also needs the
-# two Developer ID provisioning profiles in ~/.provisionprofiles/ on the build
+# three Developer ID provisioning profiles in ~/.provisionprofiles/ on the build
 # host (see the provisioning profile note at macos_install_provisioning_profiles).
 #
 # The Windows build image is built once, out of band, by build/all/windows/setup.sh
@@ -264,21 +264,22 @@ macos_developer_id_identity () {
 # URnetworkDirect scheme signs MANUALLY (apple/app/ExportOptions-DeveloperID.plist
 # is signingStyle manual with a provisioningProfiles map), so its xcodebuild
 # archive/export never talk to the portal (no -allowProvisioningUpdates): the
-# two Developer ID profiles must already be installed on the build host. They
+# three Developer ID profiles must already be installed on the build host. They
 # live in ~/.provisionprofiles/ (one .provisionprofile each, chmod 600) and are
 # copied at startup (macos_install_provisioning_profiles) into Xcode's profile
 # directory under their UUID. Required profiles, by their portal Name:
-#   "URnetwork Download"           -> com.bringyour.urnetwork
-#   "URnetwork Extension Download" -> com.bringyour.urnetwork.extension
+#   "URnetwork Download"              -> com.bringyour.urnetwork
+#   "URnetwork Extension Download"    -> com.bringyour.urnetwork.extension
+#   "URnetwork Split Tunnel Download" -> com.bringyour.urnetwork.splittunnel
 # To (re)generate one in the Apple developer portal: Certificates, Identifiers
 # & Profiles -> Profiles -> + -> Distribution: "Developer ID" -> pick the App ID
 # above -> pick the "Developer ID Application" certificate (the one assembled
 # by all/make-apple-dist-identity.sh developer-id) -> name it exactly as above
 # -> download the .provisionprofile into ~/.provisionprofiles/ on this host.
 # Profiles expire (yearly). The gate below (macos_require_direct_profiles)
-# fails the build before anything is built when either profile is missing,
+# fails the build before anything is built when any profile is missing,
 # expired, or was not issued for the Developer ID Application identity.
-MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download")
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")
 MACOS_PROFILES_SOURCE_DIR="$HOME/.provisionprofiles"
 MACOS_PROFILES_INSTALL_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 
@@ -570,8 +571,8 @@ error_trap 'macos direct: provisioning profile install'
 
 # The macOS direct-download DMG (Apple section below) is signed with a
 # "Developer ID Application" identity: ~/.identity-devid.p12 imported above,
-# or one already in the login keychain. Prove it is present, and that both
-# Developer ID profiles are installed for it, before spending hours on the
+# or one already in the login keychain. Prove it is present, and that every
+# Developer ID profile is installed for it, before spending hours on the
 # builds ahead of it.
 MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
 error_trap 'macos direct: Developer ID Application identity'
@@ -2417,7 +2418,7 @@ builder_message "macos \`${EXTERNAL_WARP_VERSION}\` uploaded to App Store Connec
 # above is untouched. Signing is MANUAL (ExportOptions-DeveloperID.plist maps
 # each bundle id to its Developer ID profile), so the archive/export run
 # without -allowProvisioningUpdates and need the "Developer ID Application"
-# identity plus the two Developer ID profiles proved at startup
+# identity plus the three Developer ID profiles proved at startup
 # (macos_developer_id_identity, macos_require_direct_profiles; see the
 # provisioning profile note there), and the App Store Connect API key .p8
 # (APPLE_API_KEY_P8) for notarytool. Two assets: the stapled app zipped as

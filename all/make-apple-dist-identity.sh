@@ -27,11 +27,12 @@
 #                          and DMG (notarized, outside the Mac App Store).
 #       Writes ~/.identity-devid.p12 (friendly name "Developer ID
 #       Application") and verifies it the same way.
-#       The direct build signs MANUALLY, so this identity also needs its two
+#       The direct build signs MANUALLY, so this identity also needs its three
 #       Developer ID provisioning profiles on the build host, in
 #       ~/.provisionprofiles/ (run.sh validates and installs them at startup):
-#         "URnetwork Download"           -> com.bringyour.urnetwork
-#         "URnetwork Extension Download" -> com.bringyour.urnetwork.extension
+#         "URnetwork Download"              -> com.bringyour.urnetwork
+#         "URnetwork Extension Download"    -> com.bringyour.urnetwork.extension
+#         "URnetwork Split Tunnel Download" -> com.bringyour.urnetwork.splittunnel
 #       Regenerate them in the portal (yearly, or after a new certificate):
 #       Profiles -> + -> Distribution: Developer ID -> the App ID -> this
 #       Developer ID Application certificate -> name as above -> download the

@@ -5,7 +5,7 @@
 # Gatekeeper-assessed, and only then attached to the GitHub release: first the
 # stapled app as URnetwork-<version>-macos.zip (ditto --keepParent, the asset
 # the app's in-app updater fetches by name), then URnetwork-<version>-macos.dmg
-# for humans. Signing is manual: the two Developer ID
+# for humans. Signing is manual: the three Developer ID
 # profiles from ~/.provisionprofiles/ are installed and proved up front, and the
 # direct archive/export never use -allowProvisioningUpdates. The App Store block before it stays intact
 # (its pkg still uploads to App Store Connect and is still never published;
@@ -102,11 +102,11 @@ early_line=$(grep -n '^MACOS_DIRECT_IDENTITY=\$(macos_developer_id_identity)$' "
 first_build_line=$(grep -n '^warpctl stage version' "$run_sh" | head -n 1 | cut -d: -f1)
 [ "$early_line" -lt "$first_build_line" ] || fail "the early identity gate runs after the release has started"
 
-# manual signing: the two Developer ID profiles come from ~/.provisionprofiles/,
-# are installed under their UUID next to the identity import, and both names
-# are proved for the signing certificate before the release starts and again
+# manual signing: the three Developer ID profiles come from ~/.provisionprofiles/,
+# are installed under their UUID next to the identity import, and every name
+# is proved for the signing certificate before the release starts and again
 # in the region
-grep -q '^MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download")$' "$run_sh" || fail "required profile names changed"
+grep -q '^MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")$' "$run_sh" || fail "required profile names changed"
 grep -q '^MACOS_PROFILES_SOURCE_DIR="\$HOME/.provisionprofiles"$' "$run_sh" || fail "profiles are not read from ~/.provisionprofiles"
 grep -q '^MACOS_PROFILES_INSTALL_DIR="\$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"$' "$run_sh" || fail "profiles are not installed into Xcode's profile directory"
 install_fn=$(sed -n '/^macos_install_provisioning_profiles () {/,/^}/p' "$run_sh")
@@ -131,6 +131,7 @@ echo "$region" | grep -q '^macos_require_direct_profiles "\$MACOS_DIRECT_IDENTIT
 grep -q 'Profiles -> + -> Distribution: "Developer ID"' "$run_sh" || fail "run.sh does not document how to regenerate the profiles"
 grep -q '~/.provisionprofiles/' "$here/make-apple-dist-identity.sh" || fail "make-apple-dist-identity.sh does not document ~/.provisionprofiles/"
 grep -q 'URnetwork Extension Download' "$here/make-apple-dist-identity.sh" || fail "make-apple-dist-identity.sh does not name the profiles"
+grep -q 'URnetwork Split Tunnel Download' "$here/make-apple-dist-identity.sh" || fail "make-apple-dist-identity.sh does not name the split tunnel profile"
 
 # the install step and gate, run against fixture profiles with a stubbed
 # decoder: valid profiles land under their UUID and pass; an expired or
@@ -166,11 +167,19 @@ PLIST
 } > "$work/harness.zsh"
 write_profile "$work/src/download.provisionprofile" "URnetwork Download" 11111111-1111-1111-1111-111111111111 2099-01-01T00:00:00Z "$cert_b64"
 write_profile "$work/src/extension.provisionprofile" "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z "$cert_b64"
+write_profile "$work/src/splittunnel.provisionprofile" "URnetwork Split Tunnel Download" 44444444-4444-4444-4444-444444444444 2099-01-01T00:00:00Z "$cert_b64"
 zsh "$work/harness.zsh" macos_install_provisioning_profiles >/dev/null || fail "valid profiles did not install"
-[ -s "$work/inst/11111111-1111-1111-1111-111111111111.provisionprofile" ] && [ -s "$work/inst/22222222-2222-2222-2222-222222222222.provisionprofile" ] ||
+[ -s "$work/inst/11111111-1111-1111-1111-111111111111.provisionprofile" ] && [ -s "$work/inst/22222222-2222-2222-2222-222222222222.provisionprofile" ] &&
+  [ -s "$work/inst/44444444-4444-4444-4444-444444444444.provisionprofile" ] ||
   fail "profiles were not installed as <UUID>.provisionprofile"
 zsh "$work/harness.zsh" macos_require_direct_profiles "$cert_sha1" >/dev/null || fail "installed profiles did not pass the gate"
 if zsh "$work/harness.zsh" macos_require_direct_profiles FFFF >/dev/null; then fail "a profile for another certificate passed the gate"; fi
+# the direct app embeds the split tunnel system extension, which signs only with its own profile
+mv "$work/inst/44444444-4444-4444-4444-444444444444.provisionprofile" "$work/splittunnel.provisionprofile.saved"
+missing_split_tunnel=$(zsh "$work/harness.zsh" macos_require_direct_profiles "$cert_sha1" 2>&1) && fail "a missing split tunnel profile passed the gate"
+echo "$missing_split_tunnel" | grep -q 'message: error: provisioning profile "URnetwork Split Tunnel Download" is not installed' ||
+  fail "the missing split tunnel profile message does not name the profile: $missing_split_tunnel"
+mv "$work/splittunnel.provisionprofile.saved" "$work/inst/44444444-4444-4444-4444-444444444444.provisionprofile"
 write_profile "$work/src/extension.provisionprofile" "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2020-01-01T00:00:00Z "$cert_b64"
 expired=$(zsh "$work/harness.zsh" macos_install_provisioning_profiles 2>&1) && fail "an expired profile installed"
 echo "$expired" | grep -q "message: error: provisioning profile $work/src/extension.provisionprofile (\"URnetwork Extension Download\") expired on 2020-01-01T00:00:00Z" ||

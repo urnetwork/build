@@ -687,7 +687,7 @@ func macosDirectRegion(t *testing.T) string {
 // built, notarized, stapled and Gatekeeper-assessed, then published twice --
 // the updater zip (ditto --keepParent of the stapled app) first, the DMG
 // second -- each upload scanned. "scan" and "publish" therefore occur twice.
-var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "assess-app", "zip-asset", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.zip", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
+var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "profile:splittunnel", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "assess-app", "zip-asset", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.zip", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
 
 // The synthetic Developer ID Application certificate: the identity stub prints
 // its SHA-1 (as security find-identity does) and the healthy profile fixtures
@@ -696,7 +696,7 @@ const macosDirectCertificate = "synthetic developer id certificate"
 
 var macosDirectCertificateSha1 = fmt.Sprintf("%X", sha1.Sum([]byte(macosDirectCertificate)))
 
-// Manual signing: the two Developer ID profiles are already installed (plain
+// Manual signing: the three Developer ID profiles are already installed (plain
 // plist fixtures; the security stub "decodes" them by printing them).
 // DIRECT_PROFILE_MODE breaks the extension profile: missing, expired,
 // wrong-name or wrong-cert.
@@ -704,7 +704,7 @@ const macosDirectSetup = `
 APPLE_API_KEY_P8="$BUILD_HOME/AuthKey_synthetic-key.p8"
 printf 'synthetic p8\n' > "$APPLE_API_KEY_P8"
 NOTARY_STATUS="${NOTARY_STATUS:-Accepted}"
-MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download")
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")
 MACOS_PROFILES_SOURCE_DIR="$BUILD_HOME/provisionprofiles"
 MACOS_PROFILES_INSTALL_DIR="$BUILD_HOME/profiles"
 mkdir -p "$MACOS_PROFILES_INSTALL_DIR"
@@ -712,6 +712,7 @@ write_profile() {
     printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Name</key><string>%s</string><key>UUID</key><string>%s</string><key>ExpirationDate</key><date>%s</date><key>DeveloperCertificates</key><array><data>%s</data></array></dict></plist>\n' "$2" "$3" "$4" "$5" > "$MACOS_PROFILES_INSTALL_DIR/$1.provisionprofile"
 }
 write_profile download "URnetwork Download" 11111111-1111-1111-1111-111111111111 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64
+write_profile splittunnel "URnetwork Split Tunnel Download" 33333333-3333-3333-3333-333333333333 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64
 case "${DIRECT_PROFILE_MODE:-healthy}" in
     healthy) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
     missing) ;;
@@ -951,7 +952,7 @@ func TestRunMacosDirectRequiresDeveloperIdIdentity(t *testing.T) {
 	}
 }
 
-// Manual signing: without both Developer ID profiles installed, valid and
+// Manual signing: without every Developer ID profile installed, valid and
 // issued for the signing certificate, nothing is built.
 func TestRunMacosDirectRequiresDeveloperIdProfiles(t *testing.T) {
 	for _, mode := range []string{"missing", "expired", "wrong-name", "wrong-cert"} {
