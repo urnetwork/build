@@ -26,8 +26,7 @@
 #   ARCHES                 forwarded to linux/build.sh (default "amd64 arm64")
 #   ROLES                  forwarded to linux/build.sh: which halves to build,
 #                          subset of "daemon gui" (default both). See that
-#                          script's header — it is what lets a CI run the two
-#                          halves as separate jobs.
+#                          script's header.
 #   UR_REQUIRE_RPM         forwarded: make a missing/failed .rpm fatal
 #                          (default false — warn and carry on)
 #   UR_SKIP_SDK_BUILD      1 = the cgo SDK output is ALREADY in
@@ -35,12 +34,8 @@
 #                          URnetworkSdkLinux.zip); do not rebuild it. Default
 #                          0 — the release host always builds it here.
 #
-#                          It exists for CI (build/.github/workflows/
-#                          linux-release.yml), which builds the SDK ONCE in a
-#                          shared job and hands the zip to every (role, arch)
-#                          leg: four legs rebuilding a byte-identical .so would
-#                          each need Go, the zig cross toolchain and the 253 MB
-#                          sdk submodule, for ~2 minutes of duplicated work.
+#                          It packages an SDK built elsewhere without Go, the
+#                          zig cross toolchain or the 253 MB sdk submodule.
 #                          The output assertions below still run either way,
 #                          and THEY are what gates the packaging step — a
 #                          skipped build with nothing staged fails exactly as a
@@ -118,8 +113,8 @@ done
 # asymmetry matters because of where run.sh's uploads sit: they are all inside
 # the `then` branch of one `if build-linux.sh`, so a hard exit here would cost
 # the release its .deb, its tarball, its AppImage AND the SDK zip over one
-# missing file. UR_REQUIRE_RPM=true restores the gate, which is what the linux
-# repo's own CI runs with.
+# missing file. UR_REQUIRE_RPM=true restores the gate, which is what run.sh
+# sets.
 if [ ! -f "$BUILD_HOME/linux/packaging/make-rpm.sh" ]; then
   if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
     {
@@ -182,8 +177,8 @@ rm -f "$OUT_DIR"/*.deb "$OUT_DIR"/*.install.tar.gz "$OUT_DIR"/*.rpm \
 #
 # UR_SKIP_SDK_BUILD=1 short-circuits the gate TOGETHER WITH the build, and that
 # pairing is deliberate: with nothing to compile there is no module graph to
-# prepare, and demanding go.sum anyway would force every CI leg to check out the
-# 253 MB sdk submodule for a file it never opens.
+# prepare, and demanding go.sum anyway would force a packaging-only run to check
+# out the 253 MB sdk submodule for a file it never opens.
 if [ "${UR_SKIP_SDK_BUILD:-0}" = 1 ]; then
   echo ">>> UR_SKIP_SDK_BUILD=1 — using the sdk/cgo/build output already staged"
   echo "    (the per-arch .so and zip assertions below still run)"

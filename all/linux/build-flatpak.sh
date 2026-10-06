@@ -13,8 +13,8 @@
 # directory is the only writable host bind mount, and the daemon and AppImage
 # containers keep their normal confinement.
 #
-# UR_FLATPAK_NATIVE=1 retains a native-Linux path for GitHub Actions, where the
-# workflow explicitly installs and preflights flatpak/flatpak-builder/elfutils.
+# UR_FLATPAK_NATIVE=1 retains a native-Linux path, for a Linux host that
+# already has flatpak, flatpak-builder and elfutils installed.
 #
 # WHY ONE ARCH AND NOT TWO: flatpak-builder has no cross-compile mode. Docker
 # can emulate the requested architecture, but building the whole GTK4 stack a

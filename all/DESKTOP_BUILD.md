@@ -74,9 +74,6 @@ macOS run.sh                          Windows VM (arm64, ssh server)
   remotes (deploy key / credential helper).
 - **Signing on the VM:** Authenticode (app) + attestation submission (driver)
   run on the VM where the EV cert/token lives (see `windows/app/SIGNING.md`).
-- Alternative to a local VM: a remote Windows runner (GitHub Actions
-  `windows-latest`, Azure). Same `build.ps1`; the tradeoff is signing secrets
-  live in CI instead of a local VM.
 
 ## Linux: an Ubuntu 24.04 Docker container on the mac
 

@@ -22,8 +22,9 @@ audiences with very different limits:
   `char_limits['whatsNew']`) and Google Play rejects an over-length note outright.
   The generator packs whole bullets inside that budget, so it is never a store
   that does the cutting. It draws only on the components that ship inside the
-  Android artifact, and holds back commits that touched only CI, tests, docs or
-  build scripts -- those did not change the app anyone installed.
+  Android artifact, and holds back commits that touched only repository
+  configuration, tests, docs or build scripts -- those did not change the app
+  anyone installed.
 - **the full changelog**, in the GitHub release body. Every commit in every
   submodule, grouped by component, with the first paragraph of each commit body
   and a link to each commit. Budgeted against GitHub's 125,000-character release
@@ -63,7 +64,8 @@ all/changelog.py --self-test     # no network
 
 ## Build and deploy all
 
-`all/run.sh` runs daily:
+Builds run on our own hardware, through `all/run.sh`, which runs daily on the
+build host:
 - builds all clients and services from `main`
 - runs local tests
 - branches and tags repos for reproducible builds

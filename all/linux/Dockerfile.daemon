@@ -105,9 +105,8 @@ RUN set -eu; \
 
 # Fail at `docker build` if a base-image change ever drops the SELinux
 # packager, rather than 40 minutes into an emulated build inside make-rpm.sh's
-# die. Mirrors the same pre-flight in linux/.github/workflows/beta-build.yml —
-# the split between checkpolicy and semodule-utils is exactly the kind of thing
-# a distro rearranges between LTSes.
+# die. The split between checkpolicy and semodule-utils is exactly the kind of
+# thing a distro rearranges between LTSes.
 RUN set -eu; \
     for t in checkmodule semodule_package; do \
       command -v "$t" >/dev/null 2>&1 || { \

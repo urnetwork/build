@@ -71,6 +71,6 @@ UR_FIREFOX_SMOKE_BASELINE_COMMIT=cfa1b727893e1ed08754e27a0117b97c4aaee356 \
   node --test --test-concurrency=1 all/web/firefox-smoke.test.mjs
 ```
 
-Public registry installation and the extension's standalone registry-based
-CI remain separate: this helper is deliberately scoped to sibling-checkout
-ur.io acceptance and does not claim that an unpublished registry pin exists.
+Public registry installation remains separate: this helper is deliberately
+scoped to sibling-checkout ur.io acceptance and does not claim that an
+unpublished registry pin exists.

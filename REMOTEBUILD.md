@@ -60,9 +60,10 @@ See also the header note in `all/run.sh`.
 ## Ranked options (verified against macOS 26-era sources)
 
 1. **Best: dedicated per-run build keychain, created inside the build's own
-   process tree** — the officially documented GitHub Actions macOS pattern;
-   never touches login.keychain-db at all. **Implemented (2026-07-21): a header
-   block in `all/run.sh`, gated on `BUILD_APPLE_IDENTITY` (set it in the
+   process tree** — the documented per-run build keychain recipe (see Key
+   sources); never touches login.keychain-db at all. **Implemented
+   (2026-07-21): a header block in `all/run.sh`, gated on
+   `BUILD_APPLE_IDENTITY` (set it in the
    builder's `~/urnetwork/build.sh`, which can then drop its unlock +
    keep-alive).** One-time: export the signing
    identity to `identity.p12` (chmod 600) and create an App Store Connect API
