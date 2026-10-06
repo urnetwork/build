@@ -33,8 +33,8 @@ everywhere else.
     daemon built on 24.04 references `__isoc23_strtoll@GLIBC_2.38` (via
     nlohmann/json's number parser) and `arc4random@GLIBC_2.36`, so it would
     install on 22.04 and then fail to exec. Carries nfpm + dpkg + systemd +
-    the rpm toolchain, **no GTK** (22.04 does not package libgtkmm-4.0 at
-    all). 22.04 is independently the right host for the `.rpm`:
+    the rpm toolchain + zstd, **no GTK** (22.04 does not package libgtkmm-4.0
+    at all). 22.04 is independently the right host for the `.rpm`:
     `semodule_package` stamps the SELinux module with the *build* host's
     libsepol version and an older target refuses it, so jammy's libsepol 3.3
     → Fedora's 3.6+ is the safe direction.
@@ -69,7 +69,7 @@ everywhere else.
   `libURnetworkSdk.so` + `urnetwork_sdk.hpp`.
 - **Packaging scripts live in the linux repo, not here.** `build-arch.sh` runs
   the meson build + `meson install --destdir` into a staging tree, then invokes
-  `linux/packaging/{make-deb,make-install-tarball,make-rpm,make-appimage}.sh`
+  `linux/packaging/{make-deb,make-install-tarball,make-rpm,make-arch,make-appimage}.sh`
   with `VERSION`, `ARCH`, `STAGING_DIR`, `OUT_DIR`, `APP_DIR`, `SDK_DIR` in the
   environment. A missing script or a wrongly-named artifact fails the build
   loudly — nothing is produced silently. The exceptions are the `.rpm` and the
@@ -79,12 +79,13 @@ everywhere else.
   one is never left in `OUT_DIR`: `make-rpm.sh` and `make-arch.sh` write into a
   scratch directory, and only a package that its script built and checked is
   moved to `OUT_DIR`, where the upload globs look.
-- **The daemon's three packages come out of one staging tree.** `make-deb.sh`,
-  `make-install-tarball.sh` and `make-rpm.sh` all run in the same `ROLE=daemon`
-  container against the same `meson install --destdir` output (via the linux
-  repo's `assemble_daemon_root()`), so they cannot ship different daemons. That
-  is why the `.rpm` gets no container of its own: `make-rpm.sh` is nfpm-based,
-  and nfpm is already installed here for the `.deb`.
+- **The daemon's four packages come out of one staging tree.** `make-deb.sh`,
+  `make-install-tarball.sh`, `make-rpm.sh` and `make-arch.sh` all run in the
+  same `ROLE=daemon` container against the same `meson install --destdir`
+  output (via the linux repo's `assemble_daemon_root()`), so they cannot ship
+  different daemons. That is why the `.rpm` and the Arch package get no
+  container of their own: `make-rpm.sh` and `make-arch.sh` are nfpm-based, and
+  nfpm is already installed here for the `.deb`.
 - **The packaging scripts run with the CWD set to `OUT_DIR`.** Historically
   load-bearing: `appimagetool` wrote its `.zsync` into the *current working
   directory*, not next to the AppImage it was told to produce. The AppImage no
@@ -225,10 +226,12 @@ channel (GitHub Releases can't serve the multi-range requests zsync needs —
   the container has no FUSE. `docker build --no-cache` refreshes them.
 - `nfpm` **is** baked into `Dockerfile.daemon` (v2.47, pinned and
   checksum-verified against the release's `checksums.txt` rather than trusting
-  goreleaser's apt repo). Both `make-deb.sh` and `make-rpm.sh` are nfpm-based,
-  so it is a build dependency, not a convenience. `dpkg` is still installed —
-  `verify.sh` needs it for the install/purge lifecycle.
+  goreleaser's apt repo). `make-deb.sh`, `make-rpm.sh` and `make-arch.sh` are
+  all nfpm-based, so it is a build dependency, not a convenience. `dpkg` is
+  still installed — `verify.sh` needs it for the install/purge lifecycle.
 - The `.rpm` is built but **never installed** anywhere in this pipeline.
   `rpm -qp` is a pure file query; the scriptlets (`%post`'s
   `semodule -X 200 -i`, the systemd preset) are unexecuted until a Fedora host
-  runs them. A green build here is not a green install.
+  runs them. A green build here is not a green install. The same holds for the
+  Arch package: `tar` reads it, and its `.INSTALL` hooks are unexecuted until
+  pacman runs them on an Arch host.

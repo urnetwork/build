@@ -14,7 +14,7 @@ can verify a build on each platform before committing.
 
 | Platform | Script | Toolchain (macOS host) | Output |
 |---|---|---|---|
-| Linux | `build-linux.sh` | zig (cgo cross) + Docker (Ubuntu 22.04 daemon / 24.04 GUI) | `*.deb`, `*.install.tar.gz`, `*.rpm`, `*.AppImage` + `.zsync` (amd64, arm64) |
+| Linux | `build-linux.sh` | zig (cgo cross) + Docker (Ubuntu 22.04 daemon / 24.04 GUI) | `*.deb`, `*.install.tar.gz`, `*.rpm`, `*.pkg.tar.zst`, `*.AppImage` (amd64, arm64) |
 | Windows | `build-windows.sh` | QEMU/HVF Windows VM | `*.msi` (x64, arm64) |
 | Android (F-Droid) | `build-fdroid.sh` | Docker (F-Droid buildserver) | github/ungoogle `*.apk` |
 
@@ -130,13 +130,13 @@ off a `v<version>` branch otherwise). The F-Droid build takes its version from
   `warp.version`/`warp.version_code`). See the `build-fdroid.sh` FIXME re: Apple
   M4 + Docker.
 
-## Linux — deb + install tarball + AppImage
+## Linux — deb + install tarball + rpm + Arch package + AppImage
 
 Cross-builds the cgo SDK `.so`s natively (zig), then builds the daemon `.deb`,
-the daemon `install.sh` tarball, and the GUI AppImage (+ `.zsync`) in a plain
-Ubuntu 24.04 Docker container (arm64 native, amd64 under qemu emulation) —
-meson build + the linux repo's packaging scripts; artifact names are normative
-in `linux/MIGRATION.md`.
+the daemon `install.sh` tarball, the daemon `.rpm` and Arch `.pkg.tar.zst`, and
+the GUI AppImage in Ubuntu Docker containers (22.04 for the daemon, 24.04 for
+the GUI; arm64 native, amd64 under qemu emulation) — meson build + the linux
+repo's packaging scripts; artifact names are normative in `linux/MIGRATION.md`.
 
 ```bash
 SRC_HOME=/Users/you/urnetwork \
@@ -150,9 +150,11 @@ OUT_DIR=/tmp/linux-out \
   build; the cgo SDK still cross-builds both arches (only the packaging step is
   limited).
 - Output: `urnetwork-daemon_<v>_<arch>.deb`,
-  `urnetwork-daemon-<v>-<arch>.install.tar.gz`, and
-  `URnetwork-<v>-<arch>.AppImage` + `.AppImage.zsync` in `OUT_DIR` (default
-  `$BUILD_HOME/out/desktop/linux`).
+  `urnetwork-daemon-<v>-<arch>.install.tar.gz`,
+  `urnetwork-daemon-<v>.<rpmarch>.rpm`,
+  `urnetwork-daemon-<v>-<pkgarch>.pkg.tar.zst` (`<rpmarch>` and `<pkgarch>` are
+  `x86_64`/`aarch64`), and `URnetwork-<v>-<arch>.AppImage` in `OUT_DIR`
+  (default `$BUILD_HOME/out/desktop/linux`). The AppImage has no `.zsync`.
 
 ## Windows — MSI
 

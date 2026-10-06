@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Per-arch build + package + verify step for the URnetwork Linux app. Runs
-# INSIDE the urnetwork-linux-builder container (Ubuntu 24.04, root), invoked by
-# build.sh:
+# inside the urnetwork-linux-builder-<role> container (root; one image per role,
+# below), invoked by build.sh:
 #
 #   /src     the linux repo root (app/ + packaging/), mounted READ-ONLY
 #   /out     OUT_DIR, writable — the release artifacts land here
@@ -11,10 +11,11 @@
 #
 # TWO IMAGES, ONE SCRIPT. The halves cannot share a build image:
 #   ROLE=daemon runs on Ubuntu 22.04 (Dockerfile.daemon), whose glibc 2.35 IS
-#     the floor nfpm.yaml declares. -Dgui=disabled; produces the .deb and the
-#     install tarball. 22.04 has no libgtkmm-4.0 at all.
+#     the floor nfpm.yaml declares. -Dgui=disabled; produces the .deb, the
+#     install tarball, the .rpm and the Arch package. 22.04 has no
+#     libgtkmm-4.0 at all.
 #   ROLE=gui runs on Ubuntu 24.04 (Dockerfile.gui), the oldest Ubuntu with
-#     GTK4 + libadwaita. -Dgui=enabled; produces the AppImage + .zsync.
+#     GTK4 + libadwaita. -Dgui=enabled; produces the AppImage.
 # Measured 2026-08-05 (arm64): a daemon built on 24.04 references GLIBC_2.38,
 # so a single-image build cannot honestly declare the 2.35 floor — the app's
 # `glibc-floor` meson test fails it, which is the gate working.
@@ -41,16 +42,16 @@
 #   make-install-tarball.sh -> urnetwork-daemon-<version>-<arch>.install.tar.gz (ROLE=daemon)
 #   make-rpm.sh             -> urnetwork-daemon-<version>.<rpmarch>.rpm       (ROLE=daemon)
 #   make-arch.sh            -> urnetwork-daemon-<version>-<pkgarch>.pkg.tar.zst (ROLE=daemon)
-# The Arch package, like the .rpm, does not carry ${ARCH} verbatim either:
-# <pkgarch> is x86_64/aarch64. Its name IS exact — make-arch.sh composes it from
-# VERSION and the mapped arch and writes nothing else.
-#   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage + .zsync   (ROLE=gui)
+#   make-appimage.sh        -> URnetwork-<version>-<arch>.AppImage            (ROLE=gui)
+# The AppImage has no .zsync sidecar: it embeds no update information.
 #
-# NOTE the .rpm is the one name that does not carry ${ARCH} verbatim: rpm has
-# its own arch spelling, so <rpmarch> is x86_64/aarch64 while the ASSET arch
-# stays Debian-spelled (amd64/arm64) everywhere else. The name is still exact,
-# not a glob — make-rpm.sh only emits the mangled canonical NVR under
-# UR_RPM_CANONICAL_NAME=1, which this pipeline never sets.
+# The .rpm and the Arch package are the names that do not carry ${ARCH}
+# verbatim: rpm and pacman have their own arch spelling, so <rpmarch> and
+# <pkgarch> are x86_64/aarch64 while the asset arch stays Debian-spelled
+# (amd64/arm64) everywhere else. The names are still exact, not globs:
+# make-rpm.sh and make-arch.sh emit their canonical names only under
+# UR_RPM_CANONICAL_NAME=1 and UR_ARCH_CANONICAL_NAME=1, which this pipeline
+# never sets.
 #
 # Env knobs:
 #   UR_GLIBC_FLOOR    daemon glibc floor asserted by meson's `glibc-floor` test
@@ -64,24 +65,19 @@
 #                     glibc per the excludelist. So the GUI requires a 24.04+
 #                     host while the daemon runs on 22.04.
 #   UR_REQUIRE_RPM    make a missing or failed .rpm fatal (default false: warn
-#                     and carry on). Default is deliberate. run.sh's own
-#                     warn-and-continue does NOT provide this tolerance: its
-#                     uploads live INSIDE the `then` branch of a single
-#                     `if build-linux.sh`, so one non-zero exit anywhere in the
-#                     linux leg skips EVERY linux asset — the .deb, the
-#                     tarball, the AppImage and the SDK zip included. A fatal
-#                     rpm step would therefore turn "the new package broke"
-#                     into "the release shipped no linux artifacts at all",
-#                     which is strictly worse than the status quo. So the
-#                     tolerance lives here, per artifact, and the .rpm runs
+#                     and carry on). The default is for standalone builds,
+#                     where a broken newer package must not cost the build
+#                     the artifacts it does have. run.sh sets this and
+#                     UR_REQUIRE_ARCH_PKG to true, and stops the release on
+#                     a failed build before any upload (error_trap), so a
+#                     release never ships without either package. The
+#                     tolerance is per artifact, and the .rpm runs
 #                     only after the contract artifacts are already on disk.
 #                     Set true to gate the release on it, which is what the
 #                     linux repo's own CI does (beta-build.yml UR_REQUIRE_RPM).
 #   UR_REQUIRE_ARCH_PKG  same for the Arch .pkg.tar.zst, same default (false),
-#                     for exactly the same reason: a brand-new package must not
-#                     be able to take the four contracted assets off a release.
-#                     With either knob, a failed package never reaches /out:
-#                     see build_optional_package.
+#                     for the same reason. With either knob, a failed package
+#                     never reaches /out: see build_optional_package.
 #   UR_SKIP_VERIFY=1  build + package only, skip verify.sh
 #   UR_CONTAINER_ROOT for the build repo's tests only (all/linux_build_arch_test.go):
 #                     a scratch directory standing in for the container's /,
@@ -149,10 +145,10 @@ if [ "${#missing[@]}" -gt 0 ]; then
 fi
 
 # make-rpm.sh is preflighted too — knowing in seconds beats finding out after a
-# qemu-emulated meson build — but SOFTLY, unlike the three above. It is the
-# newest script in linux/packaging, so a checkout that legitimately predates it
-# must still be able to produce the artifacts it does have; see UR_REQUIRE_RPM
-# in the header for why one missing script must not cost the release its .deb.
+# qemu-emulated meson build — but softly, unlike the ones above. It is newer
+# than they are, so a checkout that predates it must still be able to produce
+# the artifacts it does have in a standalone build; a release sets
+# UR_REQUIRE_RPM=true and stops here instead (see the header).
 build_rpm=1
 if [ "${ROLE}" = daemon ] && [ ! -f "${rpm_script}" ]; then
   if [ "${UR_REQUIRE_RPM:-false}" = true ]; then
@@ -281,8 +277,8 @@ expect_artifact() {
 # script writes into a scratch OUT_DIR under /work, which is also its cwd, and
 # what it wrote moves to /out only when it exited 0 and wrote <artifact>. So a
 # package that failed its own payload check, or one written under another name,
-# never reaches /out, where build.sh, run.sh and linux-build.yml pick up every
-# *.rpm and *.pkg.tar.zst.
+# never reaches /out, where build.sh and run.sh pick up every *.rpm and
+# *.pkg.tar.zst.
 build_optional_package() {
   local script="$1" name="$2" scratch
   scratch="${work}/out-$(basename "${script}" .sh)"

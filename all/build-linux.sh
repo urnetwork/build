@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Build the URnetwork Linux artifacts from the LOCAL working tree: the cgo SDK
 # zip (sdk/cgo cross-build via zig, native on this macOS host) and, per arch
-# (amd64 + arm64, Ubuntu 24.04 container via linux/build.sh):
+# (amd64 + arm64, Ubuntu 22.04 and 24.04 containers via linux/build.sh):
 #   urnetwork-daemon_<version>_<arch>.deb
 #   urnetwork-daemon-<version>-<arch>.install.tar.gz
 #   urnetwork-daemon-<version>.<rpmarch>.rpm (rpmarch = x86_64|aarch64)
-#   URnetwork-<version>-<arch>.AppImage (+ .AppImage.zsync)
+#   urnetwork-daemon-<version>-<pkgarch>.pkg.tar.zst (pkgarch = x86_64|aarch64)
+#   URnetwork-<version>-<arch>.AppImage (no .zsync)
 #
 # This is the linux build part of run.sh, extracted so it can also run
 # standalone. It uses the local branches AS-IS — no pulls, no checkouts, no
@@ -19,7 +20,7 @@
 #                          from the v<version> branch of $BUILD_HOME/linux)
 #   WARP_VERSION           internal version, e.g. 2026.7.6+985989570 (default:
 #                          EXTERNAL_WARP_VERSION with the last '-' as a '+')
-#   OUT_DIR                where the deb/tarball/rpm/AppImage artifacts land;
+#   OUT_DIR                where the deb/tarball/rpm/Arch/AppImage artifacts land;
 #                          existing ones in it are removed so the caller never
 #                          picks up stale ones
 #                          (default: ${BUILD_OUT:-$BUILD_HOME/out}/desktop/linux)
@@ -113,11 +114,11 @@ for _p in packaging/make-deb.sh packaging/make-install-tarball.sh packaging/make
   exit 1
 done
 
-# make-rpm.sh is preflighted here too, but SOFTLY — deliberately unlike the
-# three above. It is the newest script in linux/packaging, so a checkout that
-# legitimately predates it must still produce the artifacts it does have. The
-# asymmetry matters because of where run.sh's uploads sit: they are all inside
-# the `then` branch of one `if build-linux.sh`, so a hard exit here would cost
+# make-rpm.sh is preflighted here too, but softly, unlike the three above. It
+# is newer than they are, so a checkout that predates it must still produce
+# the artifacts it does have in a standalone build. make-arch.sh below gets the
+# same treatment under UR_REQUIRE_ARCH_PKG. A release sets both. When run.sh's
+# uploads sat in one `if build-linux.sh`, a hard exit here would have cost
 # the release its .deb, its tarball, its AppImage AND the SDK zip over one
 # missing file. UR_REQUIRE_RPM=true restores the gate, which is what the linux
 # repo's own CI runs with.
@@ -241,11 +242,11 @@ if [ ! -s "$SDK_ZIP" ]; then
   exit 1
 fi
 
-# Deb + install tarball + rpm + AppImage — built per arch in the Ubuntu
-# containers (meson build + the linux repo's packaging scripts); arm64 native,
-# amd64 under qemu emulation. The .deb, the tarball and the .rpm all come out
-# of the same staging tree in the same ROLE=daemon container, so they cannot
-# ship different daemons. See linux/README.md.
+# Deb + install tarball + rpm + Arch package + AppImage — built per arch in the
+# Ubuntu containers (meson build + the linux repo's packaging scripts); arm64
+# native, amd64 under qemu emulation. The .deb, the tarball, the .rpm and the
+# Arch package all come out of the same staging tree in the same ROLE=daemon
+# container, so they cannot ship different daemons. See linux/README.md.
 echo ">>> building the linux deb/tarball/rpm/AppImage artifacts ($EXTERNAL_WARP_VERSION)"
 LINUX_DIR="$BUILD_HOME/linux" \
 SDK_ZIP="$SDK_ZIP" \

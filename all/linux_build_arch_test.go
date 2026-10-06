@@ -4,9 +4,9 @@
 // tests run it outside one: UR_CONTAINER_ROOT stands a scratch tree in for the
 // container's /, a fake meson stages an install tree, and fake packaging
 // scripts write the artifact names the linux repo's scripts write. They pin
-// what a failed .rpm or Arch package leaves in /out, where build.sh, run.sh
-// and linux-build.yml pick up every *.rpm and *.pkg.tar.zst. Nothing here
-// needs Docker, meson or nfpm.
+// what a failed .rpm or Arch package leaves in /out, where build.sh and run.sh
+// pick up every *.rpm and *.pkg.tar.zst. Nothing here needs Docker, meson or
+// nfpm.
 
 package allbuild
 

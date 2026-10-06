@@ -1,9 +1,10 @@
-# Desktop build pipeline (Windows MSI + Linux deb/rpm/AppImage)
+# Desktop build pipeline (Windows MSI + Linux deb/rpm/Arch/AppImage/Flatpak)
 
 How `all/run.sh` on the macOS build server produces the Windows MSI and the
-Linux artifacts (daemon `.deb` + `.rpm` + `install.sh` tarball, GUI AppImage +
-`.zsync` — names normative in `linux/MIGRATION.md`), and the answers to the
-"what runs where" questions.
+Linux artifacts (daemon `.deb` + `.rpm` + Arch `.pkg.tar.zst` + `install.sh`
+tarball, GUI AppImage, and a Flatpak for the build machine's architecture —
+names normative in `linux/MIGRATION.md`), and the answers to the "what runs
+where" questions.
 
 ## What builds natively on macOS, and what doesn't
 
@@ -13,13 +14,13 @@ Linux artifacts (daemon `.deb` + `.rpm` + `install.sh` tarball, GUI AppImage +
 | SDK Linux `.so` (amd64+arm64) | **Yes** | `sdk/cgo` cross-compiles via `zig cc` (pins the 22.04 glibc floor) |
 | Linux headless core (`cmd/urnetworkd`) | **Yes** | pure Go, `CGO_ENABLED=0`, cross-compiles |
 | **Windows app MSI** (WinUI 3 C++, WDK driver, WiX) | **No** | MSVC, WinUI 3, the WDK, and WiX are Windows-only |
-| **Linux artifacts** (GTK4 GUI AppImage + daemon deb/tarball) | **No (natively)** | the GTK GUI needs cgo+GTK4 for the linux target; deb/AppImage assembly needs a Linux userland |
+| **Linux artifacts** (GTK4 GUI AppImage + daemon deb/tarball/rpm/Arch package) | **No (natively)** | the GTK GUI needs cgo+GTK4 for the linux target; package and AppImage assembly needs a Linux userland |
 
 So the **Linux** SDK `.so` is cross-built on the mac (zig) and shipped **into**
 the Linux container build. The **Windows** SDK DLL builds inside the Windows VM
 (Go + llvm-mingw), alongside the app — the mac needs no Windows toolchain.
 Either way the final *bundles* each need their own OS: a Windows host for the
-MSI, a Linux container for the deb/tarball/AppImage.
+MSI, Linux containers for the daemon packages and the AppImage.
 
 ## Windows: an ARM Windows 11 VM on the Apple Silicon mac
 
@@ -78,32 +79,38 @@ macOS run.sh                          Windows VM (arm64, ssh server)
   `windows-latest`, Azure). Same `build.ps1`; the tradeoff is signing secrets
   live in CI instead of a local VM.
 
-## Linux: an Ubuntu 24.04 Docker container on the mac
+## Linux: Ubuntu Docker containers on the mac
 
-The Linux artifacts build in a plain `ubuntu:24.04` container per target arch
-(arm64 native on Apple Silicon; amd64 under Docker's qemu emulation) — no
-Launchpad, no VM. Per arch, `all/linux/build-arch.sh` runs the meson build,
-`meson install --destdir`s a staging tree, and then invokes the packaging
-scripts the **linux repo** ships (`linux/packaging/*`, `linux/app/scripts/*`) to
-produce the daemon `.deb`, the `.rpm`, the `install.sh` tarball, and the GUI
-AppImage + `.zsync`. The artifact filenames are normative
+The Linux artifacts build in Ubuntu containers per target arch (the daemon half
+on `ubuntu:22.04`, the GUI half on `ubuntu:24.04`; arm64 native on Apple
+Silicon, amd64 under Docker's qemu emulation) — no Launchpad, no VM. Per arch,
+`all/linux/build-arch.sh` runs the meson build, `meson install --destdir`s a
+staging tree, and then invokes the packaging scripts the **linux repo** ships
+(`linux/packaging/*`, `linux/app/scripts/*`) to produce the daemon `.deb`, the
+`.rpm`, the Arch `.pkg.tar.zst`, the `install.sh` tarball, and the GUI
+AppImage (no `.zsync`). The artifact filenames are normative
 (`linux/MIGRATION.md`); the pipeline fails loudly on a missing packaging script
 or a wrongly-named output rather than uploading nothing silently. Details:
 `all/linux/README.md`.
 
-The daemon's three packages (`.deb`, tarball, `.rpm`) are all built in the
-**same** `ROLE=daemon` container from the **same** `meson install --destdir`
-tree, so they cannot ship different daemons. `make-rpm.sh` is nfpm-based — no
-`rpmbuild`, no `mock` — which is why the `.rpm` needs no image of its own; it
+The daemon's four packages (`.deb`, tarball, `.rpm`, Arch `.pkg.tar.zst`) are
+all built in the **same** `ROLE=daemon` container from the **same**
+`meson install --destdir` tree, so they cannot ship different daemons.
+`make-rpm.sh` and `make-arch.sh` are nfpm-based — no `rpmbuild`, no `mock`, no
+`makepkg` — which is why neither package needs an image of its own. The `.rpm`
 needs only `rpm` (for the payload assertion) plus `checkpolicy` +
-`semodule-utils` (for the SELinux policy module the Fedora path requires),
-all three added to `Dockerfile.daemon`.
+`semodule-utils` (for the SELinux policy module the Fedora path requires), and
+the Arch package needs only `zstd` (for its payload assertion), all added to
+`Dockerfile.daemon`.
 
 **RPM and Arch packages are required by `run.sh`.** It unconditionally passes
 `UR_REQUIRE_RPM=true` and `UR_REQUIRE_ARCH_PKG=true` to the existing Linux builder.
 The standalone script's defaults remain unchanged, but a release must not continue
 with a missing or failed package. Run-level output checks also require nonempty
 artifacts for every selected role/architecture and the existing single Flatpak.
+Either way a failed `.rpm` or Arch package never reaches the output directory:
+`build-arch.sh` moves a package there only after its script built and checked
+it.
 
 ## run.sh flow (added after the macOS app build)
 
@@ -168,14 +175,15 @@ The pipeline **builds the bundles and attaches them to the GitHub release**; a
 human then publishes them:
 
 - **Windows Store:** upload the MSI(s) to the Partner Center EXE/MSI listing.
-- **Linux:** no store. The `.deb`/`.rpm`/tarball/AppImage ship from the release
-  page; publishing the `.deb` to the signed apt repo and re-hosting the
-  AppImage + `.zsync` on the self-hosted update endpoint (GitHub Releases can't
-  serve the multi-range requests zsync needs — `linux/APPIMAGE.md` §11f) are
-  manual follow-ups. A dnf repo is a further one, and needs more than hosting:
-  `gpgcheck=1` verifies the signature embedded in the **rpm header**, which the
-  detached `.asc` beside the artifact does not provide (`make-rpm.sh` emits one
-  when `UR_RPM_SIGN_KEY_FILE` is set).
+- **Linux:** no store. The `.deb`/`.rpm`/Arch package/tarball/AppImage/Flatpak
+  ship from the release page; publishing the `.deb` to the signed apt repo is a
+  manual follow-up, as is copying a nightly's Linux assets (same names) to the
+  stable `urnetwork/linux` release the in-app updater reads. There is no zsync
+  channel (GitHub Releases can't serve the multi-range requests zsync needs —
+  `linux/APPIMAGE.md` §11f). A dnf repo is a further follow-up, and needs more
+  than hosting: `gpgcheck=1` verifies the signature embedded in the **rpm
+  header**, which the detached `.asc` beside the artifact does not provide
+  (`make-rpm.sh` emits one when `UR_RPM_SIGN_KEY_FILE` is set).
 
 Automated submission (the `msstore` CLI on the VM; apt-repo/update-endpoint
 publishing in the pipeline) is a later step — wire it in once the listings +
