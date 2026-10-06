@@ -70,11 +70,13 @@ stays Debian-spelled everywhere else.
   `linux/packaging/{make-deb,make-install-tarball,make-rpm,make-appimage}.sh`
   with `VERSION`, `ARCH`, `STAGING_DIR`, `OUT_DIR`, `APP_DIR`, `SDK_DIR` in the
   environment. A missing script or a wrongly-named artifact fails the build
-  loudly — nothing is produced silently. The one exception is the `.rpm`: it is
-  warn-and-continue by default (`UR_REQUIRE_RPM=true` gates on it), because the
-  `.deb`, the tarball, the AppImage **and** the SDK zip all upload from inside
-  one `if build-linux.sh` in `run.sh` — a fatal rpm step would cost the release
-  every Linux asset rather than one.
+  loudly — nothing is produced silently. The exceptions are the `.rpm` and the
+  Arch package: each is warn-and-continue by default, so a newer package cannot
+  cost a build its contracted artifacts (`UR_REQUIRE_RPM=true` and
+  `UR_REQUIRE_ARCH_PKG=true` make them fatal, and `run.sh` sets both). A failed
+  one is never left in `OUT_DIR`: `make-rpm.sh` and `make-arch.sh` write into a
+  scratch directory, and only a package that its script built and checked is
+  moved to `OUT_DIR`, where the upload globs look.
 - **The daemon's three packages come out of one staging tree.** `make-deb.sh`,
   `make-install-tarball.sh` and `make-rpm.sh` all run in the same `ROLE=daemon`
   container against the same `meson install --destdir` output (via the linux
@@ -87,7 +89,9 @@ stays Debian-spelled everywhere else.
   longer embeds update information (the Linux GUI updates through its in-app
   checker, `linux/app/src/UpdateChecker.cpp`, against the stable
   `urnetwork/linux` releases), so no `.zsync` is produced and `build-arch.sh`
-  fails if one appears; the cwd stays in `OUT_DIR` regardless.
+  fails if one appears; the cwd stays in `OUT_DIR` regardless. `make-rpm.sh`
+  and `make-arch.sh` run in their scratch directory instead, which is their
+  `OUT_DIR` and their cwd.
 
 ## Verification
 

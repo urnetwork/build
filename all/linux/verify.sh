@@ -433,8 +433,9 @@ sec "5b. .rpm (metadata only)"
 #
 # One payload path is checked anyway, the split tunnel launcher, so that the
 # .deb, the tarball and the .rpm are held to it alike. make-rpm.sh lists it too,
-# but its failure is warn-and-continue in build-arch.sh and leaves the .rpm in
-# OUT_DIR, where run.sh's upload glob still finds it.
+# and build-arch.sh keeps an .rpm that failed that check out of OUT_DIR, but
+# make-rpm.sh skips its check where rpm is absent, and this script also runs
+# standalone against any OUT_DIR.
 #
 # There is NO install test, on purpose. `rpm -i` on Ubuntu would create an
 # rpmdb on a dpkg-owned filesystem and STILL not exercise what matters: %post's
