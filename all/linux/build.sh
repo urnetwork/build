@@ -52,6 +52,7 @@
 #   UR_REQUIRE_RPM    make a missing/failed .rpm fatal (default false: warn and
 #                     carry on, so a bad rpm never costs the release the .deb,
 #                     the tarball or the AppImage — see build-arch.sh's header)
+#   UR_REQUIRE_ARCH_PKG  the same for the Arch .pkg.tar.zst (default false)
 #   UR_SKIP_VERIFY=1  build + package only, skip the verification stage
 #
 # SPDX-License-Identifier: MPL-2.0
@@ -146,7 +147,7 @@ for arch in ${ARCHES}; do
       -v "${here}/verify.sh:/verify.sh:ro" \
       -e ARCH="${arch}" -e VERSION="${VERSION}" -e ROLE="${role}" \
       -e UR_GLIBC_FLOOR -e UR_GLIBC_CEILING -e UR_SKIP_VERIFY \
-      -e UR_REQUIRE_RPM \
+      -e UR_REQUIRE_RPM -e UR_REQUIRE_ARCH_PKG \
       "${image_base}-${role}:${arch}" \
       bash /build-arch.sh
   done
@@ -207,7 +208,9 @@ for arch in ${ARCHES}; do
   # Same treatment for the Arch package, and for the same reason: it is not a
   # release contract yet, and build-arch.sh already tolerates it per-artifact.
   pkg_name="urnetwork-daemon-${VERSION}-${rpm_arch}.pkg.tar.zst"
-  if [ -n "${rpm_arch}" ] && [ -f "${OUT_DIR}/${pkg_name}" ]; then
+  if ! have_role daemon; then
+    : # ROLE=gui only — the Arch package comes out of the daemon container too
+  elif [ -n "${rpm_arch}" ] && [ -f "${OUT_DIR}/${pkg_name}" ]; then
     : # present
   elif [ "${UR_REQUIRE_ARCH_PKG:-false}" = true ]; then
     echo "ERROR: no ${pkg_name} after the ${arch} build and UR_REQUIRE_ARCH_PKG=true" >&2

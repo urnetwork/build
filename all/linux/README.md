@@ -171,7 +171,8 @@ OUT_DIR=/tmp/urnetwork-linux-out \
 Env knobs: `UR_GLIBC_FLOOR` (daemon floor, default `2.35` — must match
 nfpm.yaml's `Depends: libc6`), `UR_GLIBC_CEILING` (the AppImage's own gate,
 default `2.39`), `UR_REQUIRE_RPM` (default `false` — make a missing or failed
-`.rpm` fatal instead of a warning), `UR_SKIP_VERIFY`, `ARCHES`, `ROLES`.
+`.rpm` fatal instead of a warning), `UR_REQUIRE_ARCH_PKG` (the same for the Arch
+package), `UR_SKIP_VERIFY`, `ARCHES`, `ROLES`.
 
 `ROLES` (default `daemon gui`, the same knob `setup.sh` has always had) picks
 which halves to build. It exists so the two can run as separate CI jobs — they
