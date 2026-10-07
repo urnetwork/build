@@ -19,7 +19,7 @@
 #            Cloudflare egress geofeeds as reviewed VPN address lists
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
-# (optional) BUILD_URIO_CHANGELOG=0 skips the GitHub-API-backed release-body
+# (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
 #            and store notes; unset or 1 generates them
 # (optional) BUILD_URIO_SITE_CHANGELOG=0 skips the ur.io /changelog source
 #            refresh (its own GitHub API walk). The site's freshness gate then
@@ -1231,8 +1231,8 @@ error_trap 'android edit settings'
 # When enabled, the attempted generator and its requested release inputs are
 # required. Failed generation must not silently substitute pending.txt or earlier
 # generated notes. BUILD_URIO_CHANGELOG=0 skips this generator only; the ur.io
-# /changelog refresh above has its own switch. GITHUB_API_KEY raises the API limit here too;
-# every repo walked is public, so that token is optional.
+# /changelog refresh above has its own switch. This generator uses local Git
+# and has a hard zero-request API budget, independent of the exported token.
 #
 # THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
 # shows no changelog for this app at all today. fdroiddata's
@@ -1276,6 +1276,7 @@ if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
     builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
     python3 "$BUILD_HOME/all/changelog.py" \
         --repo "$BUILD_HOME" \
+        --api-limit 0 \
         --to worktree \
         --to-label "v${EXTERNAL_WARP_VERSION}" \
         --lede "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \

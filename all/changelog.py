@@ -98,10 +98,9 @@
 # NO DEPENDENCIES, ON PURPOSE
 # stdlib only, python3 only. It has to run on the macOS build host (python3 comes
 # with the Xcode command line tools, which that host has by definition) and on a
-# GitHub runner, with no pip step in either place. GITHUB_API_KEY is used when
-# run.sh exports it, but every repo walked here is public (all 17 submodules plus
-# build; sn lives under urfoundation), so an anonymous run works too -- at the
-# lower anonymous rate limit.
+# GitHub runner, with no pip step in either place. Local Git supplies commit
+# ranges and changed paths. API fallback is disabled by default; --api-limit
+# explicitly budgets all fallback attempts if a manual run needs remote history.
 #
 #   all/changelog.py --from v2026.8.21-1025339670 --to v2026.8.21-1025613560
 #   all/changelog.py --to worktree --store-out store.txt --full-out full.md
@@ -512,12 +511,23 @@ class ApiError(Exception):
     pass
 
 
+_API_LIMIT = 0
+_API_REQUESTS = 0
+_API_STOP = None
+
+
+def configure_api(limit):
+    global _API_LIMIT, _API_REQUESTS, _API_STOP
+    _API_LIMIT, _API_REQUESTS, _API_STOP = limit, 0, None
+    _FILES_CACHE.clear()
+
+
 def api_get(path, token, retries=3):
     """GET an API path and parse the JSON. Retries transient failures only.
 
-    403/429 with a rate-limit body is retried with backoff; 404 and other 4xx are
-    permanent and raise immediately, because retrying a wrong SHA just wastes the
-    rate limit we are already short of."""
+    Every attempt spends the shared run budget. Stop the entire run's API usage
+    on 403/429 or a depleted allowance; never retry a rate limit."""
+    global _API_REQUESTS, _API_STOP
     url = path if path.startswith("http") else API + path
     headers = {
         "Accept": "application/vnd.github+json",
@@ -528,13 +538,24 @@ def api_get(path, token, retries=3):
         headers["Authorization"] = "Bearer " + token
     delay = 2.0
     for attempt in range(retries):
+        if _API_STOP:
+            raise ApiError(_API_STOP)
+        if _API_REQUESTS >= _API_LIMIT:
+            raise ApiError("API request budget exhausted (%d/%d)" %
+                           (_API_REQUESTS, _API_LIMIT))
+        _API_REQUESTS += 1
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
+                if r.headers.get("X-RateLimit-Remaining") == "0":
+                    _API_STOP = "GitHub API allowance exhausted; further requests disabled"
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")[:400]
-            transient = e.code in (403, 429, 500, 502, 503, 504)
+            if e.code in (403, 429):
+                _API_STOP = "GitHub HTTP %d; further requests disabled" % e.code
+                raise ApiError(_API_STOP)
+            transient = e.code in (500, 502, 503, 504)
             if not transient or attempt == retries - 1:
                 raise ApiError("HTTP %d %s: %s" % (e.code, url, body))
             warn("HTTP %d on %s, retrying in %.0fs" % (e.code, url, delay))
@@ -669,7 +690,53 @@ def previous_release_tag(repo, to_ref):
 # walking one component's commit range
 # ---------------------------------------------------------------------------
 
-def compare(slug, base, head, token):
+def local_repository(repo):
+    top = git(repo, "rev-parse", "--show-toplevel")
+    return top is not None and os.path.realpath(top.strip()) == os.path.realpath(repo)
+
+
+def local_compare(repo, base, head):
+    """Use the same base..head set as GitHub, including diverged releases.
+
+    Shallow histories cannot prove the range is complete, so use the bounded
+    API fallback rather than silently publishing a partial walk. No fetches.
+    """
+    if not local_repository(repo) or git(repo, "rev-parse", "--is-shallow-repository") != "false\n":
+        return None
+    for ref in (base, head):
+        if git(repo, "cat-file", "-e", "%s^{commit}" % ref) is None:
+            return None
+    out = git(repo, "log", "--reverse", "--date-order", "--format=%H%x00%P%x00%B%x00",
+              "%s..%s" % (base, head), "--")
+    if out is None:
+        return None
+    parts = out.split("\0")
+    commits = []
+    for i in range(0, len(parts) - 1, 3):
+        commits.append({"sha": parts[i].strip(),
+                        "parents": [{"sha": p} for p in parts[i + 1].split()],
+                        "commit": {"message": parts[i + 2].rstrip("\n")}})
+    return commits
+
+
+def local_commit_files(repo, sha):
+    if not local_repository(repo):
+        return None
+    # Verify the object: diff-tree can otherwise treat a shallow boundary as a
+    # root commit. Only trust roots in a complete checkout.
+    if git(repo, "rev-parse", "--is-shallow-repository") != "false\n":
+        return None
+    parents = git(repo, "show", "-s", "--format=%P", sha, "--")
+    if parents is None:
+        return None
+    # GitHub's commit file list compares merges against the first parent.
+    refs = (parents.split()[0], sha) if parents.split() else (sha,)
+    out = git(repo, "diff-tree", "--root", "--no-commit-id", "--name-only",
+              "--no-renames", "-r", "-z", *refs, "--")
+    return None if out is None else [p for p in out.split("\0") if p]
+
+
+def compare(slug, base, head, token, repo=None):
     """Every commit in base..head, oldest first, as GitHub reports them.
 
     PAGINATION IS NOT OPTIONAL. /compare caps its `commits` array at 250 (and at
@@ -683,6 +750,10 @@ def compare(slug, base, head, token):
     moved submodules report diverged with behind_by 1 on a typical adjacent pair.
     Only the `commits` array (the ahead side) is read, so that is harmless -- but
     treating diverged as an error would skip nearly every component."""
+    if repo is not None:
+        commits = local_compare(repo, base, head)
+        if commits is not None:
+            return commits
     commits, page = [], 1
     while True:
         d = api_get("/repos/%s/compare/%s...%s?per_page=100&page=%d"
@@ -800,7 +871,8 @@ def render_full(meta, sections, filtered_counts, unwalkable, body_mode, body_lim
                   len(sections), "" if len(sections) == 1 else "s"))
     out.append("")
     if not sections:
-        out.append("_No component changed between these two releases._")
+        out.append("_No component history could be listed; see Not walked below._"
+                   if unwalkable else "_No component changed between these two releases._")
         out.append("")
     for s in sections:
         shown = s["commits"]
@@ -937,6 +1009,10 @@ def store_bullets(sections, app_names, shared_names=(), token=None, path_check=F
                 # Linux tail while apple and windows correctly held it back.
                 files_key = (s["slug"], c["sha"])
                 files = _FILES_CACHE.get(files_key)
+                if files is None and s.get("repo"):
+                    files = local_commit_files(s["repo"], c["sha"])
+                    if files is not None:
+                        _FILES_CACHE[files_key] = files
                 if files is None and looked_up < max_candidates:
                     looked_up += 1
                     try:
@@ -947,6 +1023,7 @@ def store_bullets(sections, app_names, shared_names=(), token=None, path_check=F
                         # relevant.
                         warn("%s %s: %s (keeping it)" % (s["slug"], c["sha"][:9], e))
                         files = []
+                        _FILES_CACHE[files_key] = files
                 if files and all(STORE_NONSHIPPING_PATHS.search(f) for f in files):
                     held_back["CI, test, docs or build files only"] = \
                         held_back.get("CI, test, docs or build files only", 0) + 1
@@ -1282,7 +1359,7 @@ def build(args, token):
                          "pass --from explicitly")
     from_label, from_pins, _ = resolve_ref(repo, from_ref, token)
 
-    names = order_components(set(to_pins) | {"build"})
+    names = order_components(set(to_pins) | set(from_pins) | {"build"})
     sections, unwalkable, filtered_counts = [], [], {}
     active = [f for f in args.filters.split(",") if f]
     for f in active:
@@ -1294,7 +1371,14 @@ def build(args, token):
         head = to_pins.get(name)
         base = from_pins.get(name)
         slug = to_repos.get(name)
-        if not head or not slug:
+        if not slug:
+            continue
+        if not head:
+            # Still configured but absent from the worktree: do not confuse a
+            # missing checkout with an unchanged component or a removed module.
+            if base:
+                unwalkable.append((name, slug, base, base,
+                                   "current checkout unavailable; release pin could not be read"))
             continue
         if not base:
             # A submodule added since the `from` release: there is no range to
@@ -1304,7 +1388,8 @@ def build(args, token):
         if base == head:
             continue
         try:
-            commits = compare(slug, base, head, token)
+            component_repo = repo if name == "build" else os.path.join(repo, name)
+            commits = compare(slug, base, head, token, repo=component_repo)
         except ApiError as e:
             warn("%s: %s" % (name, e))
             unwalkable.append((name, slug, base, head, "could not be walked (%s)" % e))
@@ -1323,15 +1408,15 @@ def build(args, token):
         # back oldest-first, so this reverse is the only ordering decision here.
         kept.reverse()
         sections.append({"name": name, "slug": slug, "base": base,
-                         "head": head, "commits": kept})
+                         "head": head, "commits": kept, "repo": component_repo})
 
     meta = {"from_label": from_label, "to_label": args.to_label or to_label}
     full = fit_full(meta, sections, filtered_counts, unwalkable, args)
 
     # Render the note --audience selected, plus -- when --notes-dir was
     # given -- every storefront that has a file of its own. One walk, four notes:
-    # the ranges are already in memory and commit_files() is cached, so the extra
-    # storefronts cost no API requests that the first one did not already make.
+    # the ranges are already in memory and file lists are shared across notes.
+    # Any API fallback is bounded by the whole-run request cap.
     wanted = [args.audience]
     if args.notes_dir:
         wanted += [n for n in sorted(AUDIENCES)
@@ -1767,14 +1852,14 @@ def main(argv=None):
                    help="hold subjects shorter than N characters out of the store "
                         "note (default: %(default)s; 0 disables)")
     p.add_argument("--store-candidates", type=int, default=40, metavar="N",
-                   help="how many store candidates to look up file paths for, per "
-                        "note (default: %(default)s; one API request each, and a "
-                        "commit another note already looked up costs nothing). A "
-                        "span long enough to exhaust this renders the same either "
-                        "way for the same command line, but a note rendered "
-                        "alongside others may filter more of its shared tail than "
-                        "the same note rendered on its own, because the others "
-                        "warmed the cache")
+                   help="maximum remote file-list candidates per note (default: "
+                        "%(default)s), also bounded by --api-limit. Local Git "
+                        "file lists and lists cached by other notes are free")
+    p.add_argument("--api-limit", type=int, default=0, metavar="N",
+                   help="maximum GitHub API requests for the entire run, including "
+                        "retries (default: 0). Local Git is always preferred; "
+                        "missing history is reported and unchecked store candidates "
+                        "are kept when this budget is exhausted")
     p.add_argument("--store-fallback", default="- Bug and performance fixes.",
                    help="what the store note says when no commit qualifies")
     p.add_argument("--self-test", action="store_true",
@@ -1783,6 +1868,9 @@ def main(argv=None):
 
     if args.self_test:
         return self_test()
+    if args.api_limit < 0:
+        p.error("--api-limit must be nonnegative")
+    configure_api(args.api_limit)
 
     args.lede_text = None
     if args.lede and os.path.exists(args.lede):
@@ -1793,26 +1881,8 @@ def main(argv=None):
             args.lede_text = raw
 
     token = api_token()
-    if not token:
-        warn("no GITHUB_API_KEY/GITHUB_TOKEN; walking anonymously (every repo is public)")
-        if args.store_path_check:
-            # SAY THIS LOUDLY, because the degradation is silent otherwise and
-            # it lands in the artifact a user reads. The store path check needs
-            # one extra API call per candidate commit to see which files it
-            # touched, and anonymous callers get 60 requests/hour -- so on any
-            # real span those lookups start returning 403. commit_files() then
-            # fails OPEN by design (a missed lookup must never delete somebody's
-            # work), which means the commit is KEPT. The note stays truthful but
-            # gets less relevant: measured on a one-week span, anonymous led with
-            # "Tighten the job timeouts" and "Add a build-and-test workflow",
-            # while the same span with a token held 6 CI/test/docs-only commits
-            # back and led with the shipping changes instead.
-            warn("  the store note holds CI/test/docs-only commits back by "
-                 "looking up each commit's files, and that lookup is rate "
-                 "limited to 60/hour without a token. Expect build-only commits "
-                 "to survive into the note. Export GITHUB_API_KEY (run.sh "
-                 "already does) or pass --no-store-path-check to skip the check "
-                 "deliberately rather than by accident.")
+    if args.api_limit and not token:
+        warn("API fallback enabled without a token; the shared request cap still applies")
 
     full, notes, sections, filtered, unwalkable, meta = build(args, token)
     selected = notes[args.audience]
@@ -1854,6 +1924,7 @@ def main(argv=None):
     if not args.store_out and not args.full_out and not args.notes_dir:
         sys.stdout.write(full)
 
+    warn("GitHub API requests: %d/%d" % (_API_REQUESTS, _API_LIMIT))
     warn("%d component(s), %d commit(s), %d filtered as builder noise, %d unwalkable"
          % (len(sections), sum(len(s["commits"]) for s in sections),
             sum(filtered.values()), len(unwalkable)))

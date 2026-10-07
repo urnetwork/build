@@ -52,8 +52,15 @@ ur.io desktop release metadata refresh or the content-date record
 remains enabled, set `BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full
 changelog from the GitHub release body while retaining the generated store notes.
 
-Run it by hand for any pair of releases -- it is deterministic, and it needs no
-token for these repos because they are all public:
+Release-body and store-note generation reads commit ranges and changed files
+from local Git, with **zero GitHub API requests**. Missing component history is
+listed under “Not walked”; candidates whose file lists are unavailable are kept.
+The separate ur.io website generator is unaffected. For a manual run in an
+incomplete checkout, `--api-limit N` explicitly permits at most N fallback
+requests across all components, notes, and retries. A 403/429 stops further API
+requests immediately. `all/run.sh` explicitly passes `--api-limit 0`.
+
+Run it by hand for any pair of releases:
 
 ```
 all/changelog.py --from v2026.8.21-1025339670 --to v2026.8.21-1025613560
