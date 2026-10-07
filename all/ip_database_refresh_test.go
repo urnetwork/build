@@ -15,12 +15,12 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, s
 	t.Helper()
 	dir := t.TempDir()
 	buildHome, warpHome := filepath.Join(dir, "build tree"), filepath.Join(dir, "config owner")
-	for _, path := range []string{filepath.Join(buildHome, "server", "v2026"), filepath.Join(warpHome, "root"), filepath.Join(warpHome, "vault"), filepath.Join(warpHome, "config", "main")} {
+	for _, path := range []string{filepath.Join(buildHome, "server", "v2026"), filepath.Join(warpHome, "root"), filepath.Join(warpHome, "vault"), filepath.Join(warpHome, "config", "main", "arindb-subscribers")} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, path := range []string{filepath.Join(warpHome, "vault", "mm-geoip.yml"), filepath.Join(warpHome, "vault", "arin.yml"), filepath.Join(warpHome, "config", "main", "arindb.yml")} {
+	for _, path := range []string{filepath.Join(warpHome, "vault", "mm-geoip.yml"), filepath.Join(warpHome, "vault", "arin.yml"), filepath.Join(warpHome, "config", "main", "arindb.yml"), filepath.Join(warpHome, "config", "main", "arindb-subscribers", "catalog.yml")} {
 		if err := os.WriteFile(path, []byte("synthetic test input\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestReleaseRefreshesIpDatabasesFromVersionedServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"update\n", "--timeout\n2h\n", "--geoip-config\n" + filepath.Join(warpHome, "vault", "mm-geoip.yml") + "\n", "--credentials\n" + filepath.Join(warpHome, "vault", "arin.yml") + "\n", "--rules\n" + filepath.Join(warpHome, "config", "main", "arindb.yml") + "\n"} {
+	for _, want := range []string{"update\n", "--timeout\n2h\n", "--geoip-config\n" + filepath.Join(warpHome, "vault", "mm-geoip.yml") + "\n", "--credentials\n" + filepath.Join(warpHome, "vault", "arin.yml") + "\n", "--rules\n" + filepath.Join(warpHome, "config", "main", "arindb.yml") + "\n", "--subscriber-catalog\n" + filepath.Join(warpHome, "config", "main", "arindb-subscribers", "catalog.yml") + "\n"} {
 		if !strings.Contains(string(args), want) {
 			t.Errorf("refresh lost explicit input %q", want)
 		}
@@ -107,8 +107,8 @@ func TestReleaseRefreshesIpDatabasesFromVersionedServer(t *testing.T) {
 	if !strings.Contains(string(events), "message:GeoLite2 and ARIN databases refreshed for `1.2.3-4`: registration and subscriber augmentation applied; unavailable evidence: asdb") {
 		t.Fatalf("release message lost the update summary: %s", events)
 	}
-	if strings.Contains(string(args), "--subscriber-catalog") || strings.Contains(string(args), "--relay-geofeeds") {
-		t.Fatalf("absent catalog or relay opt-in produced flags: %s", args)
+	if strings.Contains(string(args), "--relay-geofeeds") {
+		t.Fatalf("absent relay opt-in produced a flag: %s", args)
 	}
 	// The evidence directory stays in the build output; it is never config.
 	if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", "subscriber-evidence")); !os.IsNotExist(err) {
@@ -258,5 +258,62 @@ func TestReleaseIpDatabaseUpdateRejectsUnreadableConfiguredCatalog(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "events")); !os.IsNotExist(err) {
 		t.Fatal("unreadable catalog started the release tools")
+	}
+}
+
+// A missing default must never turn the normal full release into a
+// registration-only build. Check before any tool or output directory starts.
+func TestReleaseIpDatabaseUpdateRequiresDefaultCatalog(t *testing.T) {
+	for _, kind := range []string{"missing", "directory", "broken-symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			dir, warpHome, command := ipDatabaseRefreshFixture(t, false)
+			catalog := filepath.Join(warpHome, "config", "main", "arindb-subscribers", "catalog.yml")
+			if err := os.Remove(catalog); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "directory":
+				if err := os.Mkdir(catalog, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "broken-symlink":
+				if err := os.Symlink(filepath.Join(dir, "absent-reviewed-catalog.yml"), catalog); err != nil {
+					t.Fatal(err)
+				}
+			}
+			output, err := command.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "ARIN_SUBSCRIBER_CATALOG_FILE") {
+				t.Fatalf("invalid default catalog was not refused: %v %s", err, output)
+			}
+			for _, path := range []string{filepath.Join(dir, "events"), filepath.Join(dir, "args"), filepath.Join(dir, "build tree", "out")} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("invalid default catalog started tools or staging: %s", path)
+				}
+			}
+		})
+	}
+}
+
+// An explicit reviewed catalog remains supported without a default file.
+func TestReleaseIpDatabaseUpdateUsesExplicitCatalogWithoutDefault(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false)
+	defaultCatalog := filepath.Join(warpHome, "config", "main", "arindb-subscribers", "catalog.yml")
+	if err := os.Remove(defaultCatalog); err != nil {
+		t.Fatal(err)
+	}
+	catalog := filepath.Join(dir, "reviewed override.yml")
+	if err := os.WriteFile(catalog, []byte("synthetic reviewed override\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command.Env = append(command.Env, "ARIN_SUBSCRIBER_CATALOG_FILE="+catalog)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("explicit catalog failed: %v %s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--subscriber-catalog\n"+catalog+"\n") || strings.Contains(string(args), defaultCatalog) {
+		t.Fatalf("explicit catalog was not preserved: %s", args)
 	}
 }

@@ -10,11 +10,11 @@
 # GEOIP_CONF_FILE defaults to $WARP_HOME/vault/mm-geoip.yml (MaxMind YAML)
 # ARIN_CREDENTIALS_FILE defaults to $WARP_HOME/vault/arin.yml (replacement key)
 # ARIN_RULES_FILE defaults to $WARP_HOME/config/$BUILD_ENV/arindb.yml (reviewed rules)
-# (optional) ARIN_SUBSCRIBER_CATALOG_FILE defaults to
+# ARIN_SUBSCRIBER_CATALOG_FILE defaults to
 #            $WARP_HOME/config/$BUILD_ENV/arindb-subscribers/catalog.yml (reviewed
-#            subscriber operators); when present, arindbctl update also pins fresh
-#            routing, RPKI, registry, cloud, VPN and label evidence and publishes
-#            the augmented database. When absent the resource is registration only.
+#            subscriber operators). The refresh requires this readable catalog,
+#            pins fresh routing, RPKI, registry, cloud, VPN and label evidence,
+#            and publishes the augmented database.
 # (optional) ARIN_RELAY_GEOFEEDS=1 also pins the Apple Private Relay and
 #            Cloudflare egress geofeeds as reviewed VPN address lists
 # (optional) SLACK_WEBHOOK
@@ -2808,8 +2808,8 @@ builder_message "android fdroid tag \`v${EXTERNAL_WARP_VERSION}-fdroid\` pushed"
 # config. Ordinary local builds may keep using their existing cache; this is
 # the explicit all-release refresh workflow, not a service startup gate.
 # arindbctl update refreshes GeoLite2 and ARIN, builds the registration
-# database and, with a reviewed subscriber catalog, pins fresh evidence, runs
-# the subscriber augmentation, audits the catalog and validates the result
+# database, pins fresh evidence for the required reviewed subscriber catalog,
+# runs the subscriber augmentation, audits the catalog and validates the result
 # against RIPE Atlas. Only GeoLite2, ARIN and the RIS routing snapshots are
 # required; other evidence that is unavailable upstream is left out and named
 # in arindb/update-manifest.json and the release message.
@@ -2832,15 +2832,13 @@ refresh_ip_databases () {
     fi
     local -a update_args
     update_args=()
-    if [ -n "${ARIN_SUBSCRIBER_CATALOG_FILE:-}" ] && { [ ! -f "$subscriber_catalog" ] || [ ! -r "$subscriber_catalog" ]; }; then
-        # An explicitly configured catalog that cannot be read is an error,
-        # never a silent fallback to a registration-only resource.
+    if [ ! -f "$subscriber_catalog" ] || [ ! -r "$subscriber_catalog" ]; then
+        # Every full release retains the reviewed subscriber identities.
+        # A missing default or override must not drop their augmentation.
         print -u2 -- "IP refresh requires readable ARIN_SUBSCRIBER_CATALOG_FILE: $subscriber_catalog"
         return 1
     fi
-    if [ -f "$subscriber_catalog" ] && [ -r "$subscriber_catalog" ]; then
-        update_args+=(--subscriber-catalog "$subscriber_catalog")
-    fi
+    update_args+=(--subscriber-catalog "$subscriber_catalog")
     if [ "${ARIN_RELAY_GEOFEEDS:-0}" = 1 ]; then
         update_args+=(--relay-geofeeds)
     fi
