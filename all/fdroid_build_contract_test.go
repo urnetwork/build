@@ -56,14 +56,14 @@ func TestFdroidContainerExportsInstalledGoToSdkBuild(t *testing.T) {
 	}
 
 	writeExecutable(t, filepath.Join(fakeGoRoot, "bin", "go"), `#!/bin/sh
-printf '%s\n' 'go version go1.27.1 linux/amd64'
+printf '%s\n' 'go version go1.27.2 linux/amd64'
 `)
 	pathLog := filepath.Join(tempDir, "gradle-path")
 	writeExecutable(t, filepath.Join(androidApp, "gradlew"), `#!/bin/sh
 set -eu
 [ "$*" = "clean buildSdk assembleGithub" ]
 printf '%s\n' "$PATH" > "$FDROID_PATH_LOG"
-[ "$(/bin/sh -c 'go version')" = "go version go1.27.1 linux/amd64" ]
+[ "$(/bin/sh -c 'go version')" = "go version go1.27.2 linux/amd64" ]
 `)
 
 	// Remove every directory that already supplies Go while retaining the

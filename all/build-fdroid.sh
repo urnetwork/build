@@ -55,7 +55,7 @@ container_build() {
     sudo apt-get update
     sudo apt-get install -y -t trixie openjdk-21-jdk-headless
     sudo update-alternatives --auto java
-    curl -L https://go.dev/dl/go1.27.1.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/
+    curl -L https://go.dev/dl/go1.27.2.linux-amd64.tar.gz | sudo tar -xz -C /usr/local/
     # The buildserver image does not promise a system Go. The archive above is
     # installed outside Debian's default PATH, and Gradle's Exec task preserves
     # this environment when it launches the SDK Makefile. Put the pinned tool
@@ -89,10 +89,10 @@ container_build() {
     go_version=$(go version 2> /dev/null || true)
     if [ "$go_version" == "" ]; then
         echo "go check: go will use /usr/local/go ($(/usr/local/go/bin/go version))"
-    elif [[ "$go_version" =~ "go version go1.27.1" ]]; then
+    elif [[ "$go_version" =~ "go version go1.27.2" ]]; then
         echo "go check: go will use $(command -v go) ($go_version)"
     else
-        echo "go check: system go must either be 1.27.1 or not installed"
+        echo "go check: system go must either be 1.27.2 or not installed"
         exit 1
     fi
     java_version=$(java -version 2>&1 || true)
