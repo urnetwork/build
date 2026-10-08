@@ -42,21 +42,23 @@ for the ABI-split APKs and fdroidserver matches changelog files by exact
 filename, so a base-code-only file means F-Droid shows no changelog at all.
 
 Set `BUILD_URIO_CHANGELOG=0` to skip this release-body/store-note generator.
-The ur.io website `/changelog` refresh has its own switch,
-`BUILD_URIO_SITE_CHANGELOG=0`, because sharing one flag froze the public
-changelog at 2026.9.14 while the notes were off: with the site refresh skipped,
-the `check-changelog-fresh` gate that runs after the desktop release refresh
-fails unless `ALLOW_STALE_CHANGELOG=1` is set as well. Neither flag skips the
-ur.io desktop release metadata refresh or the content-date record
-(`content-dates.mjs`), which the same release commit carries. When generation
+The ur.io website uses its committed changelog and desktop release metadata;
+the build does not refresh either through the GitHub API. Refresh them with
+the standalone `mmm/ur.io/react/scripts/generate-changelog.mjs` and
+`generate-releases.mjs` maintenance scripts and commit their outputs separately.
+The local `check-changelog-fresh` gate still requires the committed changelog
+to cover the desktop downloads the site advertises. Content and page dates
+are still generated locally and committed during the release. When generation
 remains enabled, set `BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full
 changelog from the GitHub release body while retaining the generated store notes.
 
 Release-body and store-note generation reads commit ranges and changed files
 from local Git, with **zero GitHub API requests**. Missing component history is
 listed under “Not walked”; candidates whose file lists are unavailable are kept.
-The separate ur.io website generator is unaffected. For a manual run in an
-incomplete checkout, `--api-limit N` explicitly permits at most N fallback
+The standalone ur.io website generators still query GitHub when run manually.
+GitHub release creation, artifact upload and finalization remain enabled.
+For a manual release-note run in an incomplete checkout, `--api-limit N`
+explicitly permits at most N fallback
 requests across all components, notes, and retries. A 403/429 stops further API
 requests immediately. `all/run.sh` explicitly passes `--api-limit 0`.
 

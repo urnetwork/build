@@ -28,12 +28,9 @@ func TestRunGeneratedPushIntegratesConcurrentMainCommit(t *testing.T) {
 		},
 		{
 			repository: "mmm",
-			start:      "# Push the changelog and the desktop releases",
+			start:      "# Push the content and page dates",
 			end:        "# push the regenerated localizations",
 			paths: []string{
-				"ur.io/react/src/data/changelog.js",
-				"ur.io/react/src/data/changelog-version.js",
-				"ur.io/react/src/data/releases.js",
 				"ur.io/react/src/data/content-dates.js",
 				"ur.io/react/src/data/page-dates.js",
 			},

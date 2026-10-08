@@ -254,11 +254,6 @@ func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
 	}
 }
 
-// The ur.io /changelog source refresh has its own switch; the desktop release
-// refresh follows it.
-const siteChangelogStart = `if [ "${BUILD_URIO_SITE_CHANGELOG:-1}" = 1 ]; then`
-const siteChangelogEnd = `builder_message "updating the generated ur.io desktop releases"`
-
 // The release-note generator starts with its BUILD_URIO_CHANGELOG gate: a region
 // cut from inside that if block does not parse.
 const releaseNotesStart = `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
@@ -267,8 +262,7 @@ const releaseNotesStart = `if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
 // Every attempted generator is a gate; committed or pending content is not a failed-run stand-in.
 func TestRunReleaseInputGenerationFailuresAreFatal(t *testing.T) {
 	for _, source := range []string{
-		componentRegion(t, siteChangelogStart, siteChangelogEnd),
-		componentRegion(t, `builder_message "updating the generated ur.io desktop releases"`, "# regenerate every app's strings"),
+		componentRegion(t, "# The per-URL content-date record", "# regenerate every app's strings"),
 		componentRegion(t, releaseNotesStart, "# metadata -- THE OTHER THREE STOREFRONTS"),
 	} {
 		setup := `BUILD_CHANGELOG_STORE="$BUILD_HOME/store.txt"
@@ -285,33 +279,43 @@ printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt
 	}
 }
 
-// The ur.io changelog API walk is strict by default and when explicitly enabled,
-// while its host override skips only that generator and lets the release continue.
-// Turning the release notes off must not freeze the site changelog.
-func TestRunUrioChangelogGate(t *testing.T) {
-	source := componentRegion(t, siteChangelogStart, siteChangelogEnd)
+// Site metadata is a committed input even when the retired refresh flag is set.
+// Only the offline freshness check may run, and a failed check still stops release.
+func TestRunUrioMetadataUsesCommittedInputsAndChecksFreshness(t *testing.T) {
+	start := "error_trap 'connect ip update'\nfi"
+	source := strings.TrimPrefix(componentRegion(t, start, "# The per-URL content-date record"), start)
+	setup := `
+node() {
+    [[ "$*" == react/scripts/check-changelog-fresh.mjs ]] || {
+        record_component_step unexpected-metadata-refresh
+        return 51
+    }
+    record_component_step freshness
+}
+curl() { record_component_step unexpected-api-query; return 52; }
+`
 	for _, testCase := range []struct {
 		name      string
 		overrides []string
 	}{
 		{name: "default", overrides: []string{"BUILD_URIO_SITE_CHANGELOG="}},
-		{name: "enabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=1"}},
+		{name: "retired flag enabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=1"}},
+		{name: "retired flag disabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=0"}},
 		{name: "release notes disabled", overrides: []string{"BUILD_URIO_SITE_CHANGELOG=", "BUILD_URIO_CHANGELOG=0"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			result := runComponent(t, source, "", append([]string{"FAIL_STEP=generate"}, testCase.overrides...)...)
-			if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
-				t.Fatalf("failed ur.io changelog generator was masked: %+v", result)
+			for _, failure := range []string{"", "freshness"} {
+				result := runComponent(t, source, setup, append([]string{"FAIL_STEP=" + failure}, testCase.overrides...)...)
+				want, wantExit := "freshness\nrelease-continued\n", 0
+				if failure != "" {
+					want, wantExit = "freshness\n", 37
+				}
+				if result.exitCode != wantExit || strings.ReplaceAll(result.events, "message\n", "") != want {
+					t.Fatalf("ur.io metadata preflight = %+v, want exit %d and events %q", result, wantExit, want)
+				}
 			}
 		})
 	}
-
-	t.Run("disabled", func(t *testing.T) {
-		result := runComponent(t, source, "", "FAIL_STEP=generate", "BUILD_URIO_SITE_CHANGELOG=0")
-		if result.exitCode != 0 || strings.Contains(result.events, "generate\n") || !strings.Contains(result.events, "release-continued") {
-			t.Fatalf("disabled ur.io changelog generator was invoked or stopped the release: %+v", result)
-		}
-	})
 }
 
 // A zero-exit generator must still produce all requested nonempty release metadata.

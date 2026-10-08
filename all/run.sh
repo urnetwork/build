@@ -4,7 +4,7 @@
 # WARP_HOME
 # APPLE_API_KEY
 # APPLE_API_ISSUER
-# GITHUB_API_KEY
+# GITHUB_API_KEY (release creation, artifact uploads and finalization)
 # (optional) BUILD_OUT
 # The all-release IP refresh requires geoipupdate and these readable inputs:
 # GEOIP_CONF_FILE defaults to $WARP_HOME/vault/mm-geoip.yml (MaxMind YAML)
@@ -21,11 +21,8 @@
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
 #            and store notes; unset or 1 generates them
-# (optional) BUILD_URIO_SITE_CHANGELOG=0 skips the ur.io /changelog source
-#            refresh (its own GitHub API walk). The site's freshness gate then
-#            fails unless ALLOW_STALE_CHANGELOG=1 is also set: a stale
-#            /changelog must be an explicit decision, never a side effect of
-#            turning the release notes off (which froze it at 2026.9.14)
+# The ur.io changelog and desktop release metadata are committed inputs.
+# Refresh them separately from this build; no GitHub metadata API walk runs here.
 # (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
 #            TWINE_PASSWORD/PYPI_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY,
 #            CARGO_REGISTRY_TOKEN, MAVEN_CENTRAL_USERNAME/PASSWORD plus
@@ -766,40 +763,10 @@ if [ "$CONNECT_IP_UPDATE" ]; then
     error_trap 'connect ip update'
 fi
 
-# Refresh the committed ur.io changelog sources while mmm is still on main.
-# This is release synchronization, not site compilation: doing it here makes
-# the generated source part of repository history before the web build consumes
-# it. GITHUB_API_KEY raises the GitHub API limit for the release walk. The stage
-# remains strict and default-enabled; BUILD_URIO_SITE_CHANGELOG=0 is an explicit
-# host override for builds that must avoid this GitHub API walk. It is a separate
-# switch from BUILD_URIO_CHANGELOG (the release-body/store notes): sharing one
-# flag froze the public /changelog at 2026.9.14 while the notes were off.
-if [ "${BUILD_URIO_SITE_CHANGELOG:-1}" = 1 ]; then
-    builder_message "updating the generated ur.io changelog"
-    (cd $WARP_HOME/mmm/ur.io &&
-        CHANGELOG_STRICT=1 \
-        GITHUB_TOKEN="$GITHUB_API_KEY" \
-        node react/scripts/generate-changelog.mjs)
-    error_trap 'ur.io changelog update'
-else
-    builder_message "skipping the generated ur.io changelog update (BUILD_URIO_SITE_CHANGELOG disabled)"
-fi
-
-# The install pages' desktop downloads: per platform, the newest STABLE
-# release of that platform's app repository (urnetwork/windows MSIs,
-# urnetwork/linux daemon deb + AppImage, urnetwork/apple DMG), the same
-# releases the in-app updaters poll. This repository's releases are nightlies;
-# a human publishes a stable one by copying a nightly's assets, under the same
-# names, to the app repository. A repository with no stable release yet is a
-# platform without a download, not a failure; strict mode fails only on API,
-# network and parse errors. This attempted refresh is required, just like the
-# changelog generator.
-builder_message "updating the generated ur.io desktop releases"
-(cd $WARP_HOME/mmm/ur.io &&
-    RELEASES_STRICT=1 \
-    GITHUB_TOKEN="$GITHUB_API_KEY" \
-    node react/scripts/generate-releases.mjs)
-error_trap 'ur.io releases update'
+# Consume the committed ur.io changelog and desktop download metadata.
+# Their standalone generators query GitHub and belong to separate maintenance;
+# a release build must not spend API requests refreshing these inputs.
+builder_message "using committed ur.io changelog and desktop release metadata"
 
 # The site must not ship a /changelog older than the desktop release it
 # advertises: the gate fails when LATEST_VERSION trails the newest stable
@@ -1102,22 +1069,18 @@ if [ "$CONNECT_IP_UPDATE" ]; then
 fi
 
 
-# Push the changelog and the desktop releases generated before the tests to
-# mmm main, stamped with the release version. Stage only their source files;
-# the web build derives the public markdown and llms assets from these
-# committed inputs.
+# Push the content and page dates generated before the tests to mmm main,
+# stamped with the release version. The changelog and desktop release metadata
+# are maintained separately and must not be staged by this build.
 (cd $WARP_HOME/mmm &&
     git add \
-        ur.io/react/src/data/changelog.js \
-        ur.io/react/src/data/changelog-version.js \
-        ur.io/react/src/data/releases.js \
         ur.io/react/src/data/content-dates.js \
         ur.io/react/src/data/page-dates.js &&
     if ! git diff --cached --quiet; then
-        git commit -m "${EXTERNAL_WARP_VERSION} ur.io changelog, releases, content and page dates update" &&
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io content and page dates update" &&
         git_push_with_rebase_retry
     fi)
-error_trap 'ur.io changelog update push'
+error_trap 'ur.io content and page dates update push'
 
 
 # push the regenerated localizations (generated before the tests above) to each
@@ -1231,7 +1194,7 @@ error_trap 'android edit settings'
 # When enabled, the attempted generator and its requested release inputs are
 # required. Failed generation must not silently substitute pending.txt or earlier
 # generated notes. BUILD_URIO_CHANGELOG=0 skips this generator only; the ur.io
-# /changelog refresh above has its own switch. This generator uses local Git
+# website consumes separately maintained metadata. This generator uses local Git
 # and has a hard zero-request API budget, independent of the exported token.
 #
 # THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
@@ -2140,7 +2103,7 @@ $a"
     # took, and drops the section with a warning rather than risking the release.
     #
     # BUILD_URIO_CHANGELOG=0 disables the release-body/store notes (the ur.io
-    # /changelog refresh is switched separately). With
+    # website consumes separately maintained metadata). With
     # generation enabled, BUILD_RELEASE_BODY_CHANGELOG= remains the narrower
     # switch that omits only this release-body section (see README).
     if [ ! "$1" ] && [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ "${BUILD_RELEASE_BODY_CHANGELOG:-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
@@ -2163,8 +2126,8 @@ Full changelog: [changelogs/${BUILD_NOTES_PREFIX}_Full.md](https://github.com/ur
 $(cat "$RELEASE_NOTE_SIMPLE")"
         fi
         # THE FULL TEXT STAYS, FOLDED. ur.io's site changelog is generated by
-        # walking these release bodies (`node react/scripts/generate-changelog.mjs`,
-        # near the top of this script) from a repo this one cannot see, so
+        # walking these release bodies during separate website maintenance,
+        # from a repo this one cannot see, so
         # replacing the text with a link would quietly starve a public website of
         # its content. <details> collapses it in the GitHub UI -- uncluttered to
         # read, still present to scrape. Drop the fold once someone has confirmed

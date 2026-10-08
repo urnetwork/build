@@ -20,7 +20,7 @@ import (
 // (git_main refuses a dirty tree) fails, and the release would ship a table no
 // commit records.
 const connectIpUpdatePushStart = `# push the connect IP table update`
-const connectIpUpdatePushEnd = `# Push the changelog and the desktop releases`
+const connectIpUpdatePushEnd = `# Push the content and page dates`
 
 var connectGeneratedTables = []string{
 	"ip_blocker_block.go",
