@@ -2313,6 +2313,29 @@ bug_fix_clean_ipa () {
     fi
 }
 
+# hdiutil's -srcfolder auto-size leaves too little working space for APFS
+# atomic copies: the release has hit ENOSPC inside the image even with ample
+# host disk space. Budget from the larger of allocated/apparent source usage
+# (sparse/compressed files must not be undercounted), another payload's worth
+# of copy-on-write headroom, and 128 MiB for filesystem metadata. Keep a
+# 256 MiB floor for small images. Unused space is compressed in the UDZO.
+macos_dmg_size_mb () {
+    local allocated apparent source_kib size_mb
+    allocated=$(du -sk "$1") || return $?
+    apparent=$(du -Ask "$1") || return $?
+    allocated=${allocated%%[[:space:]]*}
+    apparent=${apparent%%[[:space:]]*}
+    if [[ "$allocated" != <-> || "$apparent" != <-> ]]; then
+        builder_message "error: cannot measure macOS DMG source size: $1" >&2
+        return 1
+    fi
+    source_kib=$allocated
+    if (( apparent > source_kib )); then source_kib=$apparent; fi
+    size_mb=$(( (2 * source_kib + 1023) / 1024 + 128 ))
+    if (( size_mb < 256 )); then size_mb=256; fi
+    echo "$size_mb"
+}
+
 # macos_notarize_and_staple <path> — submit an .app (zipped for the upload) or
 # a .dmg to Apple's notary service with the App Store Connect API key, wait for
 # the verdict, require "Accepted" (a non-accepted verdict is a failure even
@@ -2453,7 +2476,8 @@ github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip" "$BUILD_HOM
     mkdir -p build/direct-dmg &&
     ditto build/direct/URnetwork.app build/direct-dmg/URnetwork.app &&
     ln -s /Applications build/direct-dmg/Applications &&
-    hdiutil create -volname URnetwork -srcfolder build/direct-dmg -ov -format UDZO "build/$MACOS_DIRECT_DMG" &&
+    MACOS_DIRECT_DMG_SIZE_MB=$(macos_dmg_size_mb build/direct-dmg) &&
+    hdiutil create -size "${MACOS_DIRECT_DMG_SIZE_MB}m" -volname URnetwork -srcfolder build/direct-dmg -ov -format UDZO "build/$MACOS_DIRECT_DMG" &&
     require_build_artifacts "build/$MACOS_DIRECT_DMG" &&
     codesign --force --timestamp --sign "$MACOS_DIRECT_IDENTITY" "build/$MACOS_DIRECT_DMG" &&
     macos_notarize_and_staple "build/$MACOS_DIRECT_DMG" &&

@@ -782,6 +782,10 @@ xcrun() {
     if [[ "$step" == notarize-* ]]; then printf '  id: synthetic\n  status: %s\n' "$NOTARY_STATUS"; fi
 }
 hdiutil() {
+    if [[ "$1 $2 $3" != "create -size 256m" ]]; then
+        printf 'unexpected-dmg-size\n' >> "$event_log"
+        return 41
+    fi
     record_component_step dmg || return $?
     case "$DIRECT_DMG_MODE" in
         complete) printf 'new dmg\n' > "${@: -1}" ;;
@@ -809,7 +813,7 @@ func runMacosDirect(t *testing.T, setup string, overrides ...string) componentRe
 	if _, err := exec.LookPath("plutil"); err != nil {
 		t.Skip("the macOS direct download profile gate reads profiles with plutil")
 	}
-	helperNames := []string{"macos_developer_id_identity", "macos_notarize_and_staple", "macos_profile_value", "macos_profile_problem", "macos_profile_signs_with", "macos_require_direct_profiles"}
+	helperNames := []string{"macos_developer_id_identity", "macos_dmg_size_mb", "macos_notarize_and_staple", "macos_profile_value", "macos_profile_problem", "macos_profile_signs_with", "macos_require_direct_profiles"}
 	helpers := componentFunctions(t, helperNames...)
 	for _, name := range helperNames {
 		if !strings.Contains(helpers, name+" () {") {
