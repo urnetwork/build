@@ -2877,14 +2877,16 @@ error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 # template ids into config/main/onboarding.yml, not here with the other
 # services (built here, the release's config predated that commit).
 #
-# --config_restart=no: the rollout redeploys every block, so each block takes
-# the new config together with its new service version instead of restarting
-# for the config first. warp/config-updater/Makefile writes config-updater.yml
-# into the config version and warpctl's run worker (holdConfigVersion, run.go)
-# holds a block only while its service version is older than the config's; a
-# block whose deploy landed before the config reached its host restarts for it
-# as usual. A run that skips deployment builds the image now, for a rollout
-# run later by hand.
+# --config_restart=no: the rollout redeploys every block it can, so each block
+# takes the new config together with its new service version instead of
+# restarting for the config first. warp/config-updater/Makefile writes
+# config-updater.yml into the config version, and warpctl's run worker
+# (holdConfigVersion, run.go) then restarts no running block for it, whatever
+# its service version: a block that --only-older skips, such as a newer
+# hand-deployed build, takes the config at its next deploy. A block already on
+# exactly this release's version (its deploy landed before the config reached
+# its host) restarts once for it, as before. A run that skips deployment builds
+# the image now, for a rollout run later by hand.
 build_config_updater () {
     (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile --config_restart=no)
     error_trap 'warpctl build config-updater'

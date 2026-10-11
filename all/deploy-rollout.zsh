@@ -74,7 +74,8 @@ warp_rollout() {
     # Request the complete config rollout before any service-image rollout.
     # run.sh builds this config-updater with --config_restart=no, so landing
     # the config restarts nothing: each block takes it with its own wave
-    # below (see build_config_updater in run.sh).
+    # below, and a block the waves skip (--only-older) takes it at its next
+    # deploy (see build_config_updater in run.sh).
     warp_rollout_deploy config-updater 100 || return $?
     warp_rollout_deploy grafana 100 || return $?
 
