@@ -20,9 +20,16 @@ opt-in/skip behavior; commented-out build targets remain disabled.
 
 The GitBook `docs` repository is retired and is no longer a release submodule.
 The current documentation and legal sources live in `$WARP_HOME/mmm/ur.io/docs`.
-The web build reads that corpus for ur.io and for the legacy plain-text legal
-documents; documentation generation and web checks remain required. Historical
-release tags retain their original `docs` submodule pins.
+The mmm service's build (`$WARP_HOME/mmm/mmm`, the nginx front for the sites
+whose source lives in mmm) reads that corpus for ur.io; documentation
+generation and the web and mmm checks remain required. Historical release tags
+retain their original `docs` submodule pins.
+
+The mmm service builds from `$WARP_HOME/mmm` on main, with no release branch,
+beside the web build. Its Go module's warp replacement is pinned to this
+release's `warp` submodule through a temporary workspace. The rollout deploys
+mmm first in every wave, so no load balancer routes the mmm hostnames before
+mmm's blocks run.
 
 The extension consumes the exact localizations version published by the same
 release. It has no npm SDK dependency: it builds against this run's `sdk/js`

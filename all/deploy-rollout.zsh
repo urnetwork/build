@@ -21,7 +21,7 @@ warp_rollout_deploy() {
     case "$service" in
         config-updater|lb|proxy|gossip|alt)
             ;;
-        grafana|taskworker|api|connect|web|app|mcp)
+        grafana|taskworker|api|connect|mmm|web|app|mcp)
             deploy_args+=(--only-older)
             success_suffix=" (only older)"
             ;;
@@ -63,7 +63,10 @@ warp_rollout() {
     local percent
     local service
 
-    staged_services=(lb taskworker api connect web app mcp)
+    # mmm goes first in every wave. The load balancer routes the mmm sites'
+    # hostnames to mmm (vault services.yml v26), so each wave starts mmm's
+    # blocks before it brings any lb onto that routing (mmm/mmm/PLAN.md).
+    staged_services=(mmm lb taskworker api connect web app mcp)
     # Gossip has no status route, while Alt and Proxy intentionally bypass the
     # load balancer. Without --only-older, a cumulative rollout would retag and
     # restart already selected unobservable blocks in every later wave.

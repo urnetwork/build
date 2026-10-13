@@ -9,53 +9,83 @@ import (
 	"testing"
 )
 
-func TestRunWebChecksFailBeforeReleaseWork(t *testing.T) {
+// ur.xyz's checks run in web and ur.io's in the mmm service; either failing
+// stops the release before any app or service work.
+func TestRunWebAndMmmChecksFailBeforeReleaseWork(t *testing.T) {
 	source := componentRegion(t, "error_trap 'localizations codegen'", "# Gradle evaluates")
 	setup := `
-mkdir -p "$BUILD_HOME/web/web"
+mkdir -p "$BUILD_HOME/web/web" "$WARP_HOME/mmm/mmm"
 make() {
-    [[ "$PWD" == "$BUILD_HOME/web/web" && "$*" == check ]] || return 51
-    [[ "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
-    record_component_step web-checks
+    [[ "$*" == check && "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
+    case "$PWD" in
+        "$BUILD_HOME/web/web") record_component_step web-checks ;;
+        "$WARP_HOME/mmm/mmm") record_component_step mmm-checks ;;
+        *) return 51 ;;
+    esac
 }
 `
-	for _, failure := range []string{"", "web-checks"} {
-		t.Run("failure="+failure, func(t *testing.T) {
-			result := runComponent(t, source, setup, "FAIL_STEP="+failure)
-			want := "web-checks\nrelease-continued\n"
-			wantExit := 0
-			if failure != "" {
-				want, wantExit = "web-checks\n", 37
-			}
-			if result.exitCode != wantExit || strings.ReplaceAll(result.events, "message\n", "") != want {
-				t.Fatalf("web preflight result = %+v, want exit %d and events %q", result, wantExit, want)
+	for _, testCase := range []struct {
+		failure  string
+		want     string
+		wantExit int
+	}{
+		{"", "web-checks\nmmm-checks\nrelease-continued\n", 0},
+		{"web-checks", "web-checks\n", 37},
+		{"mmm-checks", "web-checks\nmmm-checks\n", 37},
+	} {
+		t.Run("failure="+testCase.failure, func(t *testing.T) {
+			result := runComponent(t, source, setup, "FAIL_STEP="+testCase.failure)
+			if result.exitCode != testCase.wantExit || strings.ReplaceAll(result.events, "message\n", "") != testCase.want {
+				t.Fatalf("site preflight result = %+v, want exit %d and events %q", result, testCase.wantExit, testCase.want)
 			}
 		})
 	}
 }
 
-func TestRunDisablesWebChecksOnlyForFinalWebBuild(t *testing.T) {
+// The final web and mmm image builds skip the checks that already ran, and mmm
+// builds against this release's warp through a workspace, not the developer's
+// checkout its go.mod names. None of those settings outlive their command.
+func TestRunDisablesSiteChecksOnlyForFinalWebAndMmmBuilds(t *testing.T) {
 	source := componentRegion(t, `(cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0`, `(cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)`)
 	setup := `
 WEB_BUILD_CHECKS=caller-value
 URNETWORK_ROOT=caller-root
 BUILD_ENV=main
+mkdir -p "$WARP_HOME/mmm/mmm"
+printf 'module github.com/urnetwork/mmm/mmm\n\ngo 1.25.0\n\nrequire github.com/urnetwork/warp v0.0.0\n' > "$WARP_HOME/mmm/mmm/go.mod"
 warpctl() {
-    [[ "$*" == 'build main web/web/Makefile' ]] || return 51
     [[ "$WEB_BUILD_CHECKS" == 0 && "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
-    record_component_step web-image
+    case "$*" in
+        'build main web/web/Makefile')
+            [[ -z "${GOWORK:-}" ]] || return 54
+            record_component_step web-image
+            ;;
+        "build main $WARP_HOME/mmm/mmm/Makefile")
+            [[ "$(<"$GOWORK")" == "go 1.25.0
+
+use $WARP_HOME/mmm/mmm
+
+replace github.com/urnetwork/warp => $BUILD_HOME/warp" ]] || return 55
+            print -r -- "$GOWORK" > "$BUILD_HOME/gowork-path"
+            record_component_step mmm-image
+            ;;
+        *)
+            return 51
+            ;;
+    esac
 }
 `
 	source += `
-[[ "$WEB_BUILD_CHECKS" == caller-value && "$URNETWORK_ROOT" == caller-root ]] || exit 53
+[[ "$WEB_BUILD_CHECKS" == caller-value && "$URNETWORK_ROOT" == caller-root && -z "${GOWORK:-}" ]] || exit 53
+[[ ! -e "$(<"$BUILD_HOME/gowork-path")" ]] || exit 56
 `
 	result := runComponent(t, source, setup)
-	if result.exitCode != 0 || strings.ReplaceAll(result.events, "message\n", "") != "web-image\nrelease-continued\n" {
-		t.Fatalf("final web settings leaked outside the build command: %+v", result)
+	if result.exitCode != 0 || strings.ReplaceAll(result.events, "message\n", "") != "web-image\nmmm-image\nrelease-continued\n" {
+		t.Fatalf("final site build settings are wrong or leaked outside their build commands: %+v", result)
 	}
 }
 
-func TestRunWebChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T) {
+func TestRunSiteChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +96,12 @@ func TestRunWebChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T)
 		"error_trap 'ur.io content dates update'",
 		"error_trap 'localizations codegen'",
 		"error_trap 'web build checks'",
+		"error_trap 'mmm build checks'",
 		"error_trap 'build bootstrap warpctl'",
 		`warpctl stage version next release --message="$HOST build all"`,
 		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile`,
+		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile"`,
+		`source "$BUILD_HOME/all/deploy-rollout.zsh"`,
 	} {
 		at := strings.Index(source, step)
 		if at <= previous || strings.Count(source, step) != 1 {
