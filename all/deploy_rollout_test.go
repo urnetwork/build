@@ -193,7 +193,8 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 		deployEvent("grafana", 100, true),
 		deployMessage("grafana", 100, true),
 	}
-	services := []string{"lb", "taskworker", "api", "connect", "web", "app", "mcp"}
+	// mmm leads every wave, so no lb routes the mmm sites before mmm runs.
+	services := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp"}
 	for _, percent := range []int{25, 50, 75, 100} {
 		for _, service := range services {
 			onlyOlder := service != "lb"

@@ -805,12 +805,17 @@ builder_message "generating app localizations from the shared store"
 error_trap 'localizations codegen'
 
 # Build both sites with their complete check batteries before any app or
-# service release work. The final web build regenerates release artifacts but
-# does not repeat these checks. Bind the site's locale generator to this run's
-# localization checkout, including when mmm lives outside BUILD_HOME.
+# service release work: ur.xyz through web, and ur.io through the mmm service
+# (mmm/mmm, the nginx front for the sites whose source lives in mmm). The final
+# web and mmm builds regenerate release artifacts but do not repeat these
+# checks. Bind each site's locale generator to this run's localization
+# checkout, including when mmm lives outside BUILD_HOME.
 builder_message "checking web builds after localization updates"
 (cd "$BUILD_HOME/web/web" && URNETWORK_ROOT="$BUILD_HOME" make check)
 error_trap 'web build checks'
+builder_message "checking mmm builds after localization updates"
+(cd "$WARP_HOME/mmm/mmm" && URNETWORK_ROOT="$BUILD_HOME" make check)
+error_trap 'mmm build checks'
 
 # Gradle evaluates Android's version fields even for dependency reports and
 # reads them through the sibling warpctl binary. Bootstrap that fresh checkout
@@ -2935,6 +2940,26 @@ builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 (cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
+
+# The mmm service is the nginx front for the sites whose source lives in mmm
+# (mmm/mmm/PLAN.md). It builds from the mmm checkout pulled above, on main with
+# no release branch, and warpctl names an image after its Makefile's directory,
+# so this publishes the service mmm. Its module replaces warp with ../../warp,
+# which from $WARP_HOME/mmm is the developer's warp checkout rather than this
+# release's, so a workspace outside both checkouts pins it to the release's
+# warp. mmm's Makefile and ur.io's astro build read WEB_BUILD_CHECKS by that
+# name.
+mmm_go_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-mmm-gowork.XXXXXX")
+error_trap 'mmm go workspace'
+printf 'go %s\n\nuse %s\n\nreplace github.com/urnetwork/warp => %s\n' \
+    "$(awk '$1 == "go" { print $2; exit }' "$WARP_HOME/mmm/mmm/go.mod")" \
+    "$WARP_HOME/mmm/mmm" \
+    "$BUILD_HOME/warp" > "$mmm_go_work_dir/go.work"
+error_trap 'mmm go workspace'
+(cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
+error_trap 'warpctl build mmm'
+rm -rf "$mmm_go_work_dir"
+builder_message "service mmm \`${EXTERNAL_WARP_VERSION}\` available"
 
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)
 error_trap 'warpctl build web/manager'
