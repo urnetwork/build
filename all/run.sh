@@ -1074,13 +1074,40 @@ if [ "$CONNECT_IP_UPDATE" ]; then
 fi
 
 
-# Push the content and page dates generated before the tests to mmm main,
-# stamped with the release version. The changelog and desktop release metadata
-# are maintained separately and must not be staged by this build.
+# Push the content and page dates together with the site outputs regenerated
+# by ur.io/astro's preflight: docs/API and their public mirrors, examples, stats,
+# legal/pricing, app locales, agent/feed files and image/font derivatives. Leaving
+# any of these dirty prevents the bounded rebase retry after a concurrent push.
+# Keep this scope explicit: source files (including the separately maintained
+# changelog and desktop release metadata) and original media are not outputs.
+# A preexisting staged edit belongs to its author, not this generated commit.
 (cd $WARP_HOME/mmm &&
-    git add \
+    if ! git diff --cached --quiet; then
+        builder_message 'error: mmm has preexisting staged changes; preserve them before the generated site commit'
+        exit 1
+    fi &&
+    git add -- \
+        ur.io/api/bringyour.yml \
+        ur.io/react/src/data/blog-media-accessibility.js \
         ur.io/react/src/data/content-dates.js \
-        ur.io/react/src/data/page-dates.js &&
+        ur.io/react/src/data/page-dates.js \
+        ur.io/react/src/data/docs.js \
+        ur.io/react/src/data/docs-api-groups.js \
+        ur.io/react/src/data/docs-assets.js \
+        ur.io/react/src/data/docs-seo.js \
+        ur.io/react/src/data/docs-i18n \
+        ur.io/react/src/data/openapi.js \
+        ur.io/react/src/data/examples.js \
+        ur.io/react/src/data/networkStats.js \
+        ur.io/react/src/data/legal.js \
+        ur.io/react/src/data/pricing.js \
+        ur.io/react/src/i18n/app \
+        ur.io/react/src/styles/fonts.generated.css \
+        ur.io/{react,astro}/public/{docs-assets,docs-md,blog-md,fonts/subsets} \
+        ur.io/{react,astro}/public/{about,agents,changelog,install,products}.md \
+        ur.io/{react,astro}/public/{llms.txt,llms-full.txt,openapi.yml} \
+        ur.io/{react,astro}/public/{blog,ar/blog,de/blog,es/blog,ru/blog,zh/blog}/rss.xml \
+        ur.io/{react,astro}/public/images/home-hero-{768,1024,1440,2048}.webp &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} ur.io content and page dates update" &&
         git_push_with_rebase_retry
