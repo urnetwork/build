@@ -17,6 +17,11 @@
 #            and publishes the augmented database.
 # (optional) ARIN_RELAY_GEOFEEDS=1 also pins the Apple Private Relay and
 #            Cloudflare egress geofeeds as reviewed VPN address lists
+# (optional) ARIN_PREVIOUS_DATABASE_FILE names the arin.mmdb the ARIN canary
+#            compares the new build against, instead of the database the
+#            $BUILD_ENV config selects now. Set it to the last good database
+#            after a bad release (the baseline pin) and clear it once a good
+#            release ships (server arindbctl/ARINDB.md, "Dual-database canary").
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
@@ -2853,6 +2858,16 @@ refresh_ip_databases () {
         update_args+=(--relay-geofeeds)
     fi
     local config_root="$WARP_HOME/config"
+    # The canary copies the previously selected database beside the new build
+    # as arin-old.mmdb: exactly the file a $BUILD_ENV process opens before
+    # this release is added, or the operator's pin. A copy arindbctl refuses
+    # never fails the release; the update summary says the release ships
+    # without a canary.
+    if [ -n "${ARIN_PREVIOUS_DATABASE_FILE:-}" ]; then
+        update_args+=(--previous-database "$ARIN_PREVIOUS_DATABASE_FILE")
+    else
+        update_args+=(--previous-config "$config_root" --previous-env "$BUILD_ENV")
+    fi
     local geoip_target="$config_root/all/mmdb/$WARP_VERSION"
     local arin_target="$config_root/all/arindb/$WARP_VERSION"
     if [ -e "$geoip_target" ] || [ -L "$geoip_target" ] || [ -e "$arin_target" ] || [ -L "$arin_target" ]; then

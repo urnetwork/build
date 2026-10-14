@@ -29,8 +29,12 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, s
 	if err := os.WriteFile(fake, []byte(`#!/bin/sh
 printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS"
 [ "$1" = update ] || exit 8
+previous=no
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output ]; then shift; target="$1"; fi
+  case "$1" in
+    --output) shift; target="$1" ;;
+    --previous-config|--previous-database) previous=yes ;;
+  esac
   shift
 done
 mkdir -p "$target/mmdb"
@@ -38,12 +42,17 @@ printf 'synthetic geolite\n' > "$target/mmdb/geolite2.mmdb"
 [ "$IP_DATABASE_TEST_FAIL" = no ] || exit 7
 mkdir -p "$target/arindb"
 printf 'synthetic arin\n' > "$target/arindb/arin.mmdb"
+# the canary copy, which a refused copy leaves out
+if [ "$previous" = yes ] && [ "${IP_DATABASE_TEST_COPY:-yes}" = yes ]; then
+  printf 'synthetic previous arin\n' > "$target/arindb/arin-old.mmdb"
+  printf '{}\n' > "$target/arindb/manifest-old.json"
+fi
 printf 'synthetic places\n' > "$target/mmdb/places.yml"
 printf '{}\n' > "$target/mmdb/manifest.json"
 printf '{}\n' > "$target/arindb/manifest.json"
 mkdir -p "$target/subscriber-evidence"
 printf 'synthetic evidence\n' > "$target/subscriber-evidence/catalog.yml"
-printf 'registration and subscriber augmentation applied; unavailable evidence: asdb\n' > "$target/update-summary.txt"
+printf '%s\n' "${IP_DATABASE_TEST_SUMMARY:-registration and subscriber augmentation applied; unavailable evidence: asdb}" > "$target/update-summary.txt"
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -315,5 +324,68 @@ func TestReleaseIpDatabaseUpdateUsesExplicitCatalogWithoutDefault(t *testing.T) 
 	}
 	if !strings.Contains(string(args), "--subscriber-catalog\n"+catalog+"\n") || strings.Contains(string(args), defaultCatalog) {
 		t.Fatalf("explicit catalog was not preserved: %s", args)
+	}
+}
+
+// The canary's previous database is exactly what the release's environment
+// selects now: the runner names the config root and environment, before this
+// release's version exists, and publishes arindbctl's copy with the release.
+func TestReleaseIpDatabaseRefreshCopiesThePreviousSelectionForward(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--previous-config\n"+filepath.Join(warpHome, "config")+"\n--previous-env\nmain\n") || strings.Contains(string(args), "--previous-database") {
+		t.Fatalf("refresh did not name the selected previous database: %s", args)
+	}
+	for _, name := range []string{"arin-old.mmdb", "manifest-old.json"} {
+		if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", name)); err != nil {
+			t.Fatalf("the release lost the canary copy %s: %v", name, err)
+		}
+	}
+}
+
+// After a bad release the operator pins the last good database; the pin
+// replaces the selection rather than adding to it.
+func TestReleaseIpDatabaseRefreshPinsThePreviousDatabase(t *testing.T) {
+	pinned := filepath.Join(t.TempDir(), "last good", "arin.mmdb")
+	dir, _, command := ipDatabaseRefreshFixture(t, false, "ARIN_PREVIOUS_DATABASE_FILE="+pinned)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--previous-database\n"+pinned+"\n") || strings.Contains(string(args), "--previous-config") || strings.Contains(string(args), "--previous-env") {
+		t.Fatalf("the pin was not passed alone: %s", args)
+	}
+}
+
+// A copy arindbctl refuses ships the release without a canary: the release
+// still publishes and pushes, and its message says so.
+func TestReleaseIpDatabaseRefreshShipsWithoutACanaryWhenTheCopyIsRefused(t *testing.T) {
+	summary := "registration and subscriber augmentation applied; no canary: previous database refused (the copied bytes do not have the previous manifest's SHA-256)"
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false, "IP_DATABASE_TEST_COPY=no", "IP_DATABASE_TEST_SUMMARY="+summary)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("a refused copy failed the release: %v\n%s", err, output)
+	}
+	release := filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4")
+	if _, err := os.Stat(filepath.Join(release, "arin.mmdb")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(release, "arin-old.mmdb")); !os.IsNotExist(err) {
+		t.Fatal("a refused copy was published")
+	}
+	events, err := os.ReadFile(filepath.Join(dir, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(events), "push\n") || !strings.Contains(string(events), "no canary: previous database refused") {
+		t.Fatalf("the release did not publish or did not say it ships without a canary: %s", events)
 	}
 }
