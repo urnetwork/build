@@ -1,6 +1,7 @@
 #!/usr/bin/env zsh
 
-# Deploy one rollout step and preserve Warpctl's status before reporting success.
+# Promote one rollout step without waiting for version convergence, and preserve
+# Warpctl's status before reporting success.
 # Config-updater, lb, transparent proxy, statusless Gossip, and unexposed Alt
 # blocks cannot observe their live versions through per-block LB status routes,
 # so Warpctl deliberately rejects --only-older for those services.
@@ -17,6 +18,7 @@ warp_rollout_deploy() {
         "$service"
         "$WARP_VERSION"
         "--percent=$percent"
+        --timeout 0
     )
     case "$service" in
         config-updater|lb|proxy|gossip|alt)

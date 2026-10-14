@@ -3051,6 +3051,8 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
 
     # BUILD_HOME is the build repository root (set from this script's parent
     # above), so the rollout implementation is directly under all/.
+    # Its deploy commands use --timeout 0 to promote versions without waiting
+    # for convergence; rollout samples and stage waits still run between waves.
     source "$BUILD_HOME/all/deploy-rollout.zsh"
     error_trap 'load warp service rollout'
     warp_rollout

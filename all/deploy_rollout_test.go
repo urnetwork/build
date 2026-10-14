@@ -153,7 +153,7 @@ func runRollout(t *testing.T, environment ...string) rolloutResult {
 // Format the fake process boundary exactly as the shell harness records it.
 func deployEvent(service string, percent int, onlyOlder bool) string {
 	event := fmt.Sprintf(
-		"warpctl\tdeploy\tmain\t%s\t2026.9.3+1036806790\t--percent=%d",
+		"warpctl\tdeploy\tmain\t%s\t2026.9.3+1036806790\t--percent=%d\t--timeout\t0",
 		service,
 		percent,
 	)
@@ -177,8 +177,9 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 	)
 }
 
-// Assert the complete cumulative rollout order, every only-older boundary, and
-// the single pass for services whose running versions cannot be sampled.
+// Assert the complete cumulative rollout order, zero convergence timeout on
+// every deploy, every only-older boundary, and the single pass for services
+// whose running versions cannot be sampled.
 func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing.T) {
 	result := runRollout(t)
 	if result.exitCode != 0 {
