@@ -25,11 +25,12 @@
 # (optional) ARIN_CANARY_DECISION_FILE names a copy of the canary decision the
 #            $BUILD_ENV score export published ({arindb_canary_decision}).
 #            Without the pin, the copy then follows the database the decision
-#            serves: a fallback's database is pinned automatically, and a
+#            protects: a fallback's database is pinned automatically, and a
 #            decision that cannot be followed (unreadable, older than six
-#            hours, or serving a database no release directory holds) pauses
-#            the GeoLite2 and ARIN refresh for this release. Unset, the copy
-#            is not gated and the release message says so.
+#            hours, or protecting a database no release directory holds)
+#            pauses the ARIN refresh for this release while GeoLite2 still
+#            refreshes; the release message says so. Unset, the copy is not
+#            gated and the release message says so.
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
@@ -2882,12 +2883,12 @@ refresh_ip_databases () {
     # The canary copies the previously selected database beside the new build
     # as arin-old.mmdb: exactly the file a $BUILD_ENV process opens before
     # this release is added, or the operator's pin. With the published canary
-    # decision, the copy follows the database the decision serves, so a
+    # decision, the copy follows the database the decision protects, so a
     # rejected latest never becomes the next release's baseline, and a
-    # decision it cannot follow pauses the refresh. A copy arindbctl refuses
-    # never fails the release; the update summary says the release ships
-    # without a canary.
-    local copy_note=''
+    # decision it cannot follow pauses the ARIN refresh while GeoLite2 still
+    # refreshes. A copy arindbctl refuses never fails the release; the update
+    # summary says the release ships without a canary.
+    local copy_note='' arin_pause=''
     if [ -n "${ARIN_PREVIOUS_DATABASE_FILE:-}" ]; then
         update_args+=(--previous-database "$ARIN_PREVIOUS_DATABASE_FILE")
     elif [ -n "${ARIN_CANARY_DECISION_FILE:-}" ]; then
@@ -2904,16 +2905,38 @@ refresh_ip_databases () {
                 ;;
             "pin "?*)
                 update_args+=(--previous-database "${baseline#pin }")
-                copy_note=" (canary baseline pinned to the served ${baseline#pin })"
+                copy_note=" (canary baseline pinned to the protected ${baseline#pin })"
                 ;;
             *)
-                builder_message "GeoLite2 and ARIN refresh paused for \`${EXTERNAL_WARP_VERSION}\`: ${baseline#pause }"
-                return 0
+                arin_pause="${baseline#pause }"
                 ;;
         esac
     else
         update_args+=(--previous-config "$config_root" --previous-env "$BUILD_ENV")
         copy_note=' (canary copy-forward not gated: ARIN_CANARY_DECISION_FILE is unset)'
+    fi
+    if [ -n "$arin_pause" ]; then
+        # The canary decision cannot be followed, so no ARIN database is
+        # published and the previous ARIN release stays selected. GeoLite2
+        # refreshes on its own.
+        "$ipdb_work/arindbctl" geolite2 refresh \
+            --geoip-config "$geoip_config" \
+            --output "$ipdb_work/geolite2" \
+            --timeout 2h || return $?
+        if [ -e "$geoip_target" ] || [ -L "$geoip_target" ]; then
+            print -u2 -- "GeoLite2 refresh version appeared during generation; nothing published"
+            return 1
+        fi
+        mkdir -p -- "$config_root/all/mmdb" || return $?
+        mv -- "$ipdb_work/geolite2" "$geoip_target" || return $?
+        (cd "$config_root" &&
+            git add -- "all/mmdb/$WARP_VERSION" &&
+            if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION"; then
+                git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 database" -- "all/mmdb/$WARP_VERSION" &&
+                git_push_with_rebase_retry
+            fi) || return $?
+        builder_message "GeoLite2 database refreshed for \`${EXTERNAL_WARP_VERSION}\`. ARIN refresh paused, so the previous ARIN release stays selected: ${arin_pause}"
+        return 0
     fi
     # Nothing is published unless every required database validates. The
     # subscriber evidence, registration base, audit and validation stay in

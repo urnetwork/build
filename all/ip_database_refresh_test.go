@@ -32,6 +32,21 @@ if [ "$1" = canary-baseline ]; then
   printf '%s\n' "${IP_DATABASE_TEST_BASELINE:-copy}"
   exit "${IP_DATABASE_TEST_BASELINE_STATUS:-0}"
 fi
+if [ "$1" = geolite2 ]; then
+  printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS.geolite2"
+  [ "$2" = refresh ] || exit 9
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --output) shift; target="$1" ;;
+    esac
+    shift
+  done
+  mkdir -p "$target"
+  printf 'synthetic geolite\n' > "$target/geolite2.mmdb"
+  printf 'synthetic places\n' > "$target/places.yml"
+  printf '{}\n' > "$target/manifest.json"
+  exit 0
+fi
 printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS"
 [ "$1" = update ] || exit 8
 previous=no
@@ -395,12 +410,12 @@ func TestReleaseIpDatabaseRefreshShipsWithoutACanaryWhenTheCopyIsRefused(t *test
 	}
 }
 
-// With the published canary decision the copy follows the database it serves,
-// from the selected Server's arindbctl: the selection copies as before, a
-// fallback's database is pinned, and a decision it cannot follow, or a failing
-// answer, pauses the refresh without failing the release. The operator's pin
-// wins over the decision, and without a decision the release says the copy
-// was not gated.
+// With the published canary decision the copy follows the database it
+// protects, from the selected Server's arindbctl: the selection copies as
+// before, a fallback's database is pinned, and a decision it cannot follow, or
+// a failing answer, pauses the ARIN refresh without failing the release while
+// GeoLite2 still refreshes. The operator's pin wins over the decision, and
+// without a decision the release says the copy was not gated.
 func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
 	decisionEnv := func(dir string) string {
 		path := filepath.Join(dir, "decision.json")
@@ -414,17 +429,18 @@ func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
 		env       []string
 		pinned    bool
 		published bool
+		paused    bool
 		update    string
 		message   string
 	}{
 		{name: "the selection is served", env: []string{"IP_DATABASE_TEST_BASELINE=copy"}, published: true,
 			update: "--previous-config\n", message: "registration and subscriber augmentation applied; unavailable evidence: asdb"},
 		{name: "a fallback is served", env: []string{"IP_DATABASE_TEST_BASELINE=pin /served/arin.mmdb"}, published: true,
-			update: "--previous-database\n/served/arin.mmdb\n", message: "(canary baseline pinned to the served /served/arin.mmdb)"},
-		{name: "a decision it cannot follow", env: []string{"IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1"},
-			message: "message:GeoLite2 and ARIN refresh paused for `1.2.3-4`: the canary decision is version 2, not 1"},
-		{name: "a failing answer", env: []string{"IP_DATABASE_TEST_BASELINE=copy", "IP_DATABASE_TEST_BASELINE_STATUS=3"},
-			message: "message:GeoLite2 and ARIN refresh paused for `1.2.3-4`: arindbctl canary-baseline failed"},
+			update: "--previous-database\n/served/arin.mmdb\n", message: "(canary baseline pinned to the protected /served/arin.mmdb)"},
+		{name: "a decision it cannot follow", env: []string{"IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1"}, paused: true,
+			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: the canary decision is version 2, not 1"},
+		{name: "a failing answer", env: []string{"IP_DATABASE_TEST_BASELINE=copy", "IP_DATABASE_TEST_BASELINE_STATUS=3"}, paused: true,
+			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: arindbctl canary-baseline failed"},
 		{name: "the operator's pin", env: []string{"IP_DATABASE_TEST_BASELINE=pause never asked", "ARIN_PREVIOUS_DATABASE_FILE=/pinned/arin.mmdb"},
 			pinned: true, published: true, update: "--previous-database\n/pinned/arin.mmdb\n"},
 	} {
@@ -451,6 +467,19 @@ func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
 		events, _ := os.ReadFile(filepath.Join(dir, "events"))
 		if c.message != "" && !strings.Contains(string(events), c.message) {
 			t.Errorf("%s: events %q lack %q", c.name, events, c.message)
+		}
+		// a pause still publishes GeoLite2, and only GeoLite2
+		_, geolite2 := os.Stat(filepath.Join(warpHome, "config", "all", "mmdb", "1.2.3+4", "geolite2.mmdb"))
+		if geolite2 != nil {
+			t.Errorf("%s: GeoLite2 was not published: %v", c.name, geolite2)
+		}
+		geolite2Args, geolite2Err := os.ReadFile(filepath.Join(dir, "args.geolite2"))
+		if c.paused != (geolite2Err == nil) {
+			t.Errorf("%s: GeoLite2-only refresh ran=%t, want %t", c.name, geolite2Err == nil, c.paused)
+		}
+		if c.paused && (!strings.Contains(string(geolite2Args), "geolite2\nrefresh\n--geoip-config\n"+filepath.Join(warpHome, "vault", "mm-geoip.yml")+"\n") ||
+			!strings.Contains(string(events), "git:commit -m 1.2.3-4 GeoLite2 database -- all/mmdb/1.2.3+4\n") || strings.Contains(string(events), "all/arindb/1.2.3+4")) {
+			t.Errorf("%s: a pause did not publish GeoLite2 alone: args %q events %q", c.name, geolite2Args, events)
 		}
 	}
 	// without a decision the copy is not gated, and the release says so
