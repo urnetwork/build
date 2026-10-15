@@ -27,6 +27,11 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, s
 	}
 	fake := filepath.Join(dir, "fake-arindbctl")
 	if err := os.WriteFile(fake, []byte(`#!/bin/sh
+if [ "$1" = canary-baseline ]; then
+  printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS.baseline"
+  printf '%s\n' "${IP_DATABASE_TEST_BASELINE:-copy}"
+  exit "${IP_DATABASE_TEST_BASELINE_STATUS:-0}"
+fi
 printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS"
 [ "$1" = update ] || exit 8
 previous=no
@@ -387,5 +392,76 @@ func TestReleaseIpDatabaseRefreshShipsWithoutACanaryWhenTheCopyIsRefused(t *test
 	}
 	if !strings.Contains(string(events), "push\n") || !strings.Contains(string(events), "no canary: previous database refused") {
 		t.Fatalf("the release did not publish or did not say it ships without a canary: %s", events)
+	}
+}
+
+// With the published canary decision the copy follows the database it serves,
+// from the selected Server's arindbctl: the selection copies as before, a
+// fallback's database is pinned, and a decision it cannot follow, or a failing
+// answer, pauses the refresh without failing the release. The operator's pin
+// wins over the decision, and without a decision the release says the copy
+// was not gated.
+func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
+	decisionEnv := func(dir string) string {
+		path := filepath.Join(dir, "decision.json")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "ARIN_CANARY_DECISION_FILE=" + path
+	}
+	for _, c := range []struct {
+		name      string
+		env       []string
+		pinned    bool
+		published bool
+		update    string
+		message   string
+	}{
+		{name: "the selection is served", env: []string{"IP_DATABASE_TEST_BASELINE=copy"}, published: true,
+			update: "--previous-config\n", message: "registration and subscriber augmentation applied; unavailable evidence: asdb"},
+		{name: "a fallback is served", env: []string{"IP_DATABASE_TEST_BASELINE=pin /served/arin.mmdb"}, published: true,
+			update: "--previous-database\n/served/arin.mmdb\n", message: "(canary baseline pinned to the served /served/arin.mmdb)"},
+		{name: "a decision it cannot follow", env: []string{"IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1"},
+			message: "message:GeoLite2 and ARIN refresh paused for `1.2.3-4`: the canary decision is version 2, not 1"},
+		{name: "a failing answer", env: []string{"IP_DATABASE_TEST_BASELINE=copy", "IP_DATABASE_TEST_BASELINE_STATUS=3"},
+			message: "message:GeoLite2 and ARIN refresh paused for `1.2.3-4`: arindbctl canary-baseline failed"},
+		{name: "the operator's pin", env: []string{"IP_DATABASE_TEST_BASELINE=pause never asked", "ARIN_PREVIOUS_DATABASE_FILE=/pinned/arin.mmdb"},
+			pinned: true, published: true, update: "--previous-database\n/pinned/arin.mmdb\n"},
+	} {
+		dir, warpHome, command := ipDatabaseRefreshFixture(t, false, c.env...)
+		command.Env = append(command.Env, decisionEnv(dir))
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s: refresh failed: %v\n%s", c.name, err, output)
+		}
+		baselineArgs, baselineErr := os.ReadFile(filepath.Join(dir, "args.baseline"))
+		if c.pinned != os.IsNotExist(baselineErr) {
+			t.Errorf("%s: canary-baseline asked=%t, want %t", c.name, baselineErr == nil, !c.pinned)
+		}
+		if !c.pinned && !strings.Contains(string(baselineArgs), "canary-baseline\n--decision\n"+filepath.Join(dir, "decision.json")+"\n--previous-config\n"+filepath.Join(warpHome, "config")+"\n--previous-env\nmain\n") {
+			t.Errorf("%s: canary-baseline args %q", c.name, baselineArgs)
+		}
+		args, argsErr := os.ReadFile(filepath.Join(dir, "args"))
+		_, published := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", "arin.mmdb"))
+		if c.published != (published == nil) || c.published != (argsErr == nil) {
+			t.Errorf("%s: published=%v update=%v, want published %t", c.name, published, argsErr, c.published)
+		}
+		if c.published && !strings.Contains(string(args), c.update) {
+			t.Errorf("%s: update args %q lack %q", c.name, args, c.update)
+		}
+		events, _ := os.ReadFile(filepath.Join(dir, "events"))
+		if c.message != "" && !strings.Contains(string(events), c.message) {
+			t.Errorf("%s: events %q lack %q", c.name, events, c.message)
+		}
+	}
+	// without a decision the copy is not gated, and the release says so
+	dir, _, command := ipDatabaseRefreshFixture(t, false)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "args.baseline")); !os.IsNotExist(err) {
+		t.Fatal("canary-baseline was asked without a decision")
+	}
+	if events, _ := os.ReadFile(filepath.Join(dir, "events")); !strings.Contains(string(events), "(canary copy-forward not gated: ARIN_CANARY_DECISION_FILE is unset)") {
+		t.Fatalf("an ungated copy was not reported: %s", events)
 	}
 }
