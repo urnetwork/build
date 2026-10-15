@@ -160,6 +160,9 @@ func deployEvent(service string, percent int, onlyOlder bool) string {
 	if onlyOlder {
 		event += "\t--only-older"
 	}
+	if service == "mmm" {
+		event += "\t--initialize-unset"
+	}
 	return event
 }
 
@@ -168,6 +171,9 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 	suffix := ""
 	if onlyOlder {
 		suffix = " (only older)"
+	}
+	if service == "mmm" {
+		suffix = " (only older; initialize unset)"
 	}
 	return fmt.Sprintf(
 		"message\tmain[%d%%] %s `2026.9.3-1036806790` deployed%s",
@@ -243,6 +249,7 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 		exitCode int
 	}{
 		{service: "config-updater", percent: 100, exitCode: 37},
+		{service: "mmm", percent: 25, exitCode: 43},
 		{service: "lb", percent: 50, exitCode: 38},
 		{service: "proxy", percent: 100, exitCode: 39},
 		{service: "gossip", percent: 100, exitCode: 40},
@@ -266,7 +273,7 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 			)
 			continue
 		}
-		expectedLast := deployEvent(test.service, test.percent, false)
+		expectedLast := deployEvent(test.service, test.percent, test.service == "mmm")
 		if len(result.events) == 0 {
 			t.Errorf("%s %d%% failure recorded no events", test.service, test.percent)
 			continue

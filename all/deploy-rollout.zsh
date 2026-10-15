@@ -23,7 +23,14 @@ warp_rollout_deploy() {
     case "$service" in
         config-updater|lb|proxy|gossip|alt)
             ;;
-        grafana|taskworker|api|connect|mmm|web|app|mcp)
+        mmm)
+            # New MMM blocks have no selector or old-LB status route. The
+            # opt-in initializes only absent records, then recognizes this
+            # release's completed initialization in later cumulative waves.
+            deploy_args+=(--only-older --initialize-unset)
+            success_suffix=" (only older; initialize unset)"
+            ;;
+        grafana|taskworker|api|connect|web|app|mcp)
             deploy_args+=(--only-older)
             success_suffix=" (only older)"
             ;;
