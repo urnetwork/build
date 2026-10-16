@@ -117,7 +117,7 @@ class CanonicalEntrypoint(unittest.TestCase):
                         "RECOVERY_FIXTURE": str(cls.root), "NVM_DIR": str(cls.root/"nvm"),
                         "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C"}
         cls.env = dict(cls.base_env, WARP_HOME=str(cls.root), BRINGYOUR_HOME=str(cls.build),
-                       BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="",
+                       BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="", WARP_SKIP_DEPLOY="1",
                        BUILD_URIO_CHANGELOG="0", CONNECT_IP_UPDATE="1", BUILD_APPLE_IDENTITY="1",
                        BUILD_OUT=str(cls.home/"Google Drive/My Drive/URnetwork/Build"), NPM_TOKEN="synthetic-only",
                        SDK_PACKAGE_CHANNEL="nightly", FDROID_VERSION_CODE_OFFSETS="0 2 3", STAGE_SECONDS="60",
@@ -213,7 +213,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         first_events=(self.root/"events").read_text().splitlines()
         self.assertEqual(first_events.count("make:build/sdk/build"),1)
         self.assertEqual(first_events.count("sdk-mobile"),1)
-        self.assertIn("preflight:main-lan",first_events)
+        self.assertNotIn("preflight:main-lan",first_events)  # wrapper explicitly skips deployment
         self.assertFalse([e for e in first_events if e.startswith("FORBIDDEN")],first_events)
         self.write(self.root/"allow-mobile","dependency restored")
         second=self.invoke("--resume",VERSION)
@@ -222,7 +222,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         events=(self.root/"events").read_text().splitlines()
         self.assertEqual(events.count("make:build/sdk/build"),1,events)
         self.assertEqual(events.count("sdk-mobile"),2,events)
-        self.assertEqual(events.count("preflight:main-lan"),2,events)
+        self.assertEqual(events.count("preflight:main-lan"),0,events)
         self.assertFalse([e for e in events if e.startswith("FORBIDDEN")],events)
         manifests=list((self.root/".release-checkpoints").glob("*/manifest.json"))
         self.assertEqual([p.parent.name for p in manifests],[VERSION])

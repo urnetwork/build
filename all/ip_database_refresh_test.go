@@ -29,7 +29,7 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, s
 	if err := os.WriteFile(fake, []byte(`#!/bin/sh
 if [ "$1" = canary-baseline ]; then
   printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS.baseline"
-  printf '%s\n' "${IP_DATABASE_TEST_BASELINE:-copy}"
+  printf '%s\n' "${IP_DATABASE_TEST_BASELINE-copy}"
   exit "${IP_DATABASE_TEST_BASELINE_STATUS:-0}"
 fi
 if [ "$1" = geolite2 ]; then
@@ -439,6 +439,12 @@ func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
 			update: "--previous-database\n/served/arin.mmdb\n", message: "(canary baseline pinned to the protected /served/arin.mmdb)"},
 		{name: "a decision it cannot follow", env: []string{"IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1"}, paused: true,
 			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: the canary decision is version 2, not 1"},
+		{name: "an empty answer", env: []string{"IP_DATABASE_TEST_BASELINE="}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
+		{name: "an empty pause reason", env: []string{"IP_DATABASE_TEST_BASELINE=pause "}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
+		{name: "an unknown answer", env: []string{"IP_DATABASE_TEST_BASELINE=unexpected"}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
 		{name: "a failing answer", env: []string{"IP_DATABASE_TEST_BASELINE=copy", "IP_DATABASE_TEST_BASELINE_STATUS=3"}, paused: true,
 			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: arindbctl canary-baseline failed"},
 		{name: "the operator's pin", env: []string{"IP_DATABASE_TEST_BASELINE=pause never asked", "ARIN_PREVIOUS_DATABASE_FILE=/pinned/arin.mmdb"},
@@ -467,6 +473,17 @@ func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
 		events, _ := os.ReadFile(filepath.Join(dir, "events"))
 		if c.message != "" && !strings.Contains(string(events), c.message) {
 			t.Errorf("%s: events %q lack %q", c.name, events, c.message)
+		}
+		// Both outcomes retain a complete publication for the release checkpoint.
+		checkpoint := filepath.Join(dir, "build tree", "out", "ip-databases", "release-1.2.3+4")
+		for _, name := range []string{"summary.txt", "mmdb/geolite2.mmdb"} {
+			if _, err := os.Stat(filepath.Join(checkpoint, name)); err != nil {
+				t.Errorf("%s: missing checkpoint output %s: %v", c.name, name, err)
+			}
+		}
+		_, arinCheckpoint := os.Stat(filepath.Join(checkpoint, "arindb", "arin.mmdb"))
+		if c.published != (arinCheckpoint == nil) {
+			t.Errorf("%s: checkpoint ARIN=%v, want published %t", c.name, arinCheckpoint, c.published)
 		}
 		// a pause still publishes GeoLite2, and only GeoLite2
 		_, geolite2 := os.Stat(filepath.Join(warpHome, "config", "all", "mmdb", "1.2.3+4", "geolite2.mmdb"))

@@ -3090,6 +3090,10 @@ refresh_ip_databases () {
     # refreshes. A copy arindbctl refuses never fails the release; the update
     # summary says the release ships without a canary.
     local copy_note='' arin_pause=''
+    # A paused ARIN refresh deliberately publishes no new ARIN directory.
+    # Retain the actual publication in one fixed checkpoint directory so
+    # resume verifies either outcome without requiring a nonexistent file.
+    local ipdb_checkpoint="$ipdb_out/release-$WARP_VERSION"
     if [ -n "${ARIN_PREVIOUS_DATABASE_FILE:-}" ]; then
         update_args+=(--previous-database "$ARIN_PREVIOUS_DATABASE_FILE")
     elif [ -n "${ARIN_CANARY_DECISION_FILE:-}" ]; then
@@ -3108,8 +3112,11 @@ refresh_ip_databases () {
                 update_args+=(--previous-database "${baseline#pin }")
                 copy_note=" (canary baseline pinned to the protected ${baseline#pin })"
                 ;;
-            *)
+            "pause "?*)
                 arin_pause="${baseline#pause }"
+                ;;
+            *)
+                arin_pause='unrecognized canary-baseline response'
                 ;;
         esac
     else
@@ -3136,6 +3143,9 @@ refresh_ip_databases () {
                 git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 database" -- "all/mmdb/$WARP_VERSION" &&
                 git_push_with_rebase_retry
             fi) || return $?
+        mkdir -- "$ipdb_checkpoint" || return $?
+        cp -R -- "$geoip_target" "$ipdb_checkpoint/mmdb" || return $?
+        print -r -- "ARIN paused: $arin_pause" > "$ipdb_checkpoint/summary.txt" || return $?
         builder_message "GeoLite2 database refreshed for \`${EXTERNAL_WARP_VERSION}\`. ARIN refresh paused, so the previous ARIN release stays selected: ${arin_pause}"
         return 0
     fi
@@ -3171,14 +3181,18 @@ refresh_ip_databases () {
     if [ -r "$ipdb_work/bundle/update-summary.txt" ]; then
         update_summary=$(<"$ipdb_work/bundle/update-summary.txt")
     fi
+    mkdir -- "$ipdb_checkpoint" || return $?
+    cp -R -- "$geoip_target" "$ipdb_checkpoint/mmdb" || return $?
+    cp -R -- "$arin_target" "$ipdb_checkpoint/arindb" || return $?
+    print -r -- "${update_summary:-no update summary}${copy_note}" > "$ipdb_checkpoint/summary.txt" || return $?
     builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${update_summary:-no update summary}${copy_note}"
 }
 
-if release_build ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"; then
+if release_build ip-databases "${BUILD_OUT:-$BUILD_HOME/out}/ip-databases/release-$WARP_VERSION"; then
 refresh_ip_databases
 error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 release_transition ip-databases
-release_complete ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"
+release_complete ip-databases "${BUILD_OUT:-$BUILD_HOME/out}/ip-databases/release-$WARP_VERSION"
 fi
 
 # The config-updater image carries this release's config, so on the deploy

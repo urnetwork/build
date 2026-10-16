@@ -88,7 +88,7 @@ class Checkpoints(unittest.TestCase):
         self.assertEqual(self.invoke("complete", "apple", target), 0)
         return target
 
-    def run_image_stage(self, service, outcome):
+    def checkpoint_boundary(self):
         # Execute the actual canonical image-stage block and shell helpers.
         # Git/toolchain inspection is the only state-manager fake here; the
         # inherited kernel lock, effect journal, atomic writes and caches are
@@ -106,6 +106,10 @@ state.tool_snapshot=lambda *args:expected["toolchain"]
 sys.argv=sys.argv[1:]
 sys.exit(state.main())
 ''')
+        return boundary
+
+    def run_image_stage(self, service, outcome):
+        self.checkpoint_boundary()
         source = (HERE / "run.sh").read_text()
         match = re.search(r'(?ms)^if release_build image-' + re.escape(service) + r' .*?^builder_message "service ' + re.escape(service) + r' .*?\n', source)
         self.assertIsNotNone(match, service)
@@ -140,6 +144,54 @@ warpctl() {
                            FIXTURE_PYTHON=sys.executable, FIXTURE_SERVICE=service, FIXTURE_OUTCOME=outcome)
         return subprocess.run(["/bin/zsh", "-c", body + match[0]], env=environment,
                               pass_fds=(self.fd,), capture_output=True, text=True, timeout=15)
+
+    def test_canary_pin_and_decision_are_immutable_resume_inputs(self):
+        for key in ("ARIN_PREVIOUS_DATABASE_FILE", "ARIN_CANARY_DECISION_FILE"):
+            with self.subTest(key=key), mock.patch.dict(os.environ, {key: str(self.workspace / key)}):
+                with self.assertRaises(state.Refusal):
+                    self.invoke("validate")
+                unavailable = state.environment_snapshot()
+                path = Path(os.environ[key])
+                path.write_bytes(b"first canary input")
+                first = state.environment_snapshot()
+                self.assertNotEqual(first, unavailable)
+                path.write_bytes(b"replacement canary input")
+                self.assertNotEqual(state.environment_snapshot(), first)
+                self.assertNotIn("replacement canary input", json.dumps(state.environment_snapshot()))
+
+    def test_paused_arin_canonical_stage_completes_and_resumes_geolite_alone(self):
+        self.checkpoint_boundary()
+        source = (HERE / "run.sh").read_text()
+        stage = re.search(r'(?ms)^if release_build ip-databases .*?^fi\n', source)
+        self.assertIsNotNone(stage)
+        body = r'''
+source "$BUILD_HOME/all/release-checkpoints.zsh"
+python3() { "$FIXTURE_PYTHON" -B "$WARP_HOME/checkpoint-boundary.py" "$@"; }
+error_trap() { local result=$?; if (( result != 0 )); then exit "$result"; fi; }
+refresh_ip_databases() {
+    print refreshed >> "$WARP_HOME/refresh-events"
+    mkdir -p "$BUILD_OUT/ip-databases/release-$WARP_VERSION/mmdb"
+    print geolite > "$BUILD_OUT/ip-databases/release-$WARP_VERSION/mmdb/GeoLite2-City.mmdb"
+    print 'ARIN paused: no current baseline' > "$BUILD_OUT/ip-databases/release-$WARP_VERSION/summary.txt"
+}
+'''
+        environment = dict(os.environ, WARP_HOME=str(self.workspace), BUILD_HOME=str(HERE.parent),
+                           BUILD_OUT=str(self.workspace / "out"), WARP_VERSION=VERSION,
+                           EXTERNAL_WARP_VERSION=VERSION, FIXTURE_PYTHON=sys.executable)
+        def run():
+            return subprocess.run(["/bin/zsh", "-c", body + stage[0]], env=environment,
+                                  pass_fds=(self.fd,), capture_output=True, text=True, timeout=15)
+        first = run()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertEqual(self.manifest()["stages"]["ip-databases"]["state"], "complete")
+        artifact = self.workspace / "out" / "ip-databases" / ("release-" + VERSION)
+        self.assertFalse((artifact / "arindb").exists())
+        shutil.rmtree(artifact)
+        resumed = run()
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        self.assertIn("reuse ip-databases: verified", resumed.stderr)
+        self.assertEqual((artifact / "mmdb" / "GeoLite2-City.mmdb").read_text(), "geolite\n")
+        self.assertEqual((self.workspace / "refresh-events").read_text().splitlines(), ["refreshed"])
 
     def test_interrupted_canonical_image_stage_never_retries_an_absent_pending_push(self):
         first = self.run_image_stage("api", "killed")

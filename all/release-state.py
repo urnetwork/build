@@ -38,6 +38,7 @@ OPTIONS = ("BUILD_TEST", "WARP_SKIP_DEPLOY", "BUILD_URIO_CHANGELOG",
            "WINDOWS_BUILD_ARCHITECTURES", "SDK_PACKAGE_CHANNEL", "SDK_GPG_KEY_ID",
            "SDK_CONAN_REMOTE_URL", "ARIN_RELAY_GEOFEEDS", "GEOIP_CONF_FILE",
            "ARIN_CREDENTIALS_FILE", "ARIN_RULES_FILE", "ARIN_SUBSCRIBER_CATALOG_FILE",
+           "ARIN_PREVIOUS_DATABASE_FILE", "ARIN_CANARY_DECISION_FILE",
            "WARP_MAIN_DOMAIN", "WARP_MAIN_LAN_HOST", "FDROID_VERSION_CODE_OFFSETS",
            "STAGE_SECONDS",
            "SDKROOT", "DEVELOPER_DIR", "ANDROID_HOME", "ANDROID_NDK_HOME")
@@ -464,7 +465,19 @@ def deployment_snapshot(workspace):
 
 
 def environment_snapshot():
-    return {"options": {key: os.environ.get(key, "") for key in OPTIONS},
+    # The canary inputs are explicit copies/pins outside the config tree. A
+    # resume must not silently select different bytes at the same pathname.
+    canary_inputs = {}
+    for key in ("ARIN_PREVIOUS_DATABASE_FILE", "ARIN_CANARY_DECISION_FILE"):
+        path = os.environ.get(key, "")
+        if path:
+            try:
+                canary_inputs[key] = digest(Path(path).read_bytes())
+            except OSError:
+                # An unreadable decision intentionally pauses ARIN; preserve
+                # that outcome while still detecting a newly readable copy.
+                canary_inputs[key] = "unavailable"
+    return {"canary_inputs": canary_inputs, "options": {key: os.environ.get(key, "") for key in OPTIONS},
             "publishers": {key: bool(os.environ.get(key, "").strip()) for key in AUTH}}
 
 
