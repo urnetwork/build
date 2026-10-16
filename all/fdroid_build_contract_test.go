@@ -39,6 +39,48 @@ func writeExecutable(t *testing.T, path, contents string) {
 	}
 }
 
+func TestFdroidHostUsesTwelveGiBMemoryCap(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf 'vfixture-ungoogle\\n'\n")
+	writeExecutable(t, filepath.Join(bin, "docker"), `#!/bin/sh
+set -eu
+if [ "$1" = pull ]; then exit 0; fi
+[ "$1" = run ]
+printf '%s\n' "$@" > "$FDROID_DOCKER_ARGS"
+`)
+	command := exec.Command("bash", filepath.Join(rolloutRoot(t), "build-fdroid.sh"))
+	command.Env = []string{
+		"PATH=" + bin + ":/usr/bin:/bin",
+		"WARP_HOME=" + root,
+		"BUILD_HOME=" + filepath.Join(root, "build"),
+		"FDROID_DOCKER_ARGS=" + filepath.Join(root, "docker-args"),
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("F-Droid host phase failed at fake Docker boundary: %v\n%s", err, output)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "docker-args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := strings.Split(strings.TrimSpace(string(data)), "\n")
+	count := 0
+	for _, arg := range arguments {
+		if strings.HasPrefix(arg, "--memory=") {
+			count++
+			if arg != "--memory=12g" {
+				t.Fatalf("memory cap = %q, want fixed 12 GiB", arg)
+			}
+		}
+	}
+	if count != 1 || !strings.Contains(string(data), "--oom-kill-disable\n") || arguments[len(arguments)-1] != "container-build" {
+		t.Fatalf("unexpected F-Droid container resource/entrypoint contract: %q", arguments)
+	}
+}
+
 // Reproduce the production base-image condition: no `go` is initially on
 // PATH, while the downloaded tool exists under /usr/local/go. The fake Gradle
 // process launches another /bin/sh, matching the gradle -> make -> go process
@@ -87,7 +129,12 @@ printf '%s\n' "$PATH" > "$FDROID_PATH_LOG"
 
 	harness := `
 set -euo pipefail
-sudo() { return 0; }
+sudo() {
+    # Consume pipe input like tee/tar. Returning before echo writes would
+    # nondeterministically inject SIGPIPE into this PATH-only fixture.
+    case "$1" in tee|tar) /bin/cat >/dev/null ;; esac
+    return 0
+}
 curl() { return 0; }
 sdkmanager() { return 0; }
 keytool() { return 0; }
