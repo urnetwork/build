@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import importlib.util
 
 HERE = Path(__file__).resolve().parent
@@ -36,7 +37,9 @@ if name=="python3":
     if args and pathlib.Path(args[0]).name=="release-publication.py":
         event("publication:"+args[1])
         if args[1]=="release": print(json.dumps({"id":42})); sys.exit(0)
-        if args[1]=="asset": sys.exit(89) # Stop at the next real boundary, after both SDK stages.
+        if args[1]=="asset":
+            # First stop after the SDK stages, then allow the real CLI stages.
+            sys.exit(0 if (root/"allow-cli-publication").exists() else 89)
         raise SystemExit("unexpected publication operation")
     os.execv("PYTHON",["PYTHON",*args])
 elif name=="git":
@@ -51,7 +54,9 @@ elif name=="go":
         event("sdk-mobile")
         if not (root/"allow-mobile").exists(): sys.exit(37)
     elif args[:1]==["build"] and "-o" in args:
-        event("preflight-build")
+        if pathlib.Path.cwd().parent==root/"build/sn/v2026/cli":
+            event("cli-build:"+pathlib.Path.cwd().name+":"+os.environ["GOOS"]+"/"+os.environ["GOARCH"])
+        else: event("preflight-build")
         put(args[args.index("-o")+1],b"#!/bin/sh\nexit 0\n")
     else: event("FORBIDDEN-GO:"+" ".join(args)); sys.exit(92)
 elif name=="make":
@@ -156,7 +161,16 @@ class CanonicalEntrypoint(unittest.TestCase):
             repo=cls.root/name
             repo.mkdir(parents=True,exist_ok=True)
             cls.write(repo/"tracked-input",name)
-            cls.write(repo/".gitignore", "build/\ncgo/\njs/\npackaging/\nwarpctl/build/\nv2026/\n")
+            if name=="build/sn":
+                # SN's release fork must keep its sources visible. Its scoped
+                # CLI output rules are independently tested in SN itself;
+                # never hide this whole v2026 tree with the fixture default.
+                cls.write(repo/".gitignore", "/build/\n")
+                for pkg in ("miner", "validator", "snclaim"):
+                    cls.write(repo/f"v2026/cli/{pkg}/.gitignore", "/build/\n")
+                    cls.write(repo/f"v2026/cli/{pkg}/main.go", "package main\n")
+            else:
+                cls.write(repo/".gitignore", "build/\ncgo/\njs/\npackaging/\nwarpctl/build/\nv2026/\n")
             cls.commit_repo(repo)
         cls.write(cls.build/".gitignore", "".join(name+"/\n" for name in modules)+"changelogs/\n")
         cls.commit_repo(cls.build)
@@ -179,6 +193,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         spec=importlib.util.spec_from_file_location("entrypoint_state", cls.build/"all/release-state.py")
         state=importlib.util.module_from_spec(spec)
         spec.loader.exec_module(state)
+        cls.state=state
         for name,paths in {"web":[cls.build/"web/web/build/preview.ur.xyz"],"mmm":[cls.root/"mmm/mmm/build/preview.ur.io",cls.root/"mmm/mmm/build/lag.dev"]}.items():
             for path in paths: cls.write(path/"index.html","passed candidate output")
             cls.write(directory/(name+"-candidate.json"),json.dumps({"gate":name+" make check (WEB_BUILD_CHECKS=1)","outputs":state.outputs(paths),"sources":{"synthetic":"passed candidate input"}}))
@@ -229,6 +244,54 @@ class CanonicalEntrypoint(unittest.TestCase):
         value=json.loads(manifests[0].read_text())
         self.assertEqual(value["stages"]["sdk"]["state"],"complete")
         self.assertEqual(value["stages"]["sdk-mobile"]["state"],"complete")
+        self.write(self.root/"allow-cli-publication", "synthetic publication boundary ready")
+        third=self.invoke("--resume",VERSION)
+        # All three canonical SN CLI stages finish; stop at the next make.
+        self.assertEqual(third.returncode,93,third.stdout+third.stderr)
+        value=json.loads(manifests[0].read_text())
+        events=(self.root/"events").read_text().splitlines()
+        cli_events=[event for event in events if event.startswith("cli-build:")]
+        for pkg,count in (("miner",12),("validator",4),("snclaim",4)):
+            self.assertEqual(sum(event.startswith("cli-build:"+pkg+":") for event in cli_events),count)
+            self.assertEqual(value["stages"]["cli-"+pkg]["state"],"complete")
+        self.assertIn("make:build/server/v2026/bringyourctl",events)
+        self.assertFalse([event for event in events if event.startswith("FORBIDDEN")],events)
+
+        # Ignoring only generated output must not hide adjacent, tracked or
+        # staged source edits. Exercise the real sealed source validator.
+        sn=self.build/"sn"
+        with mock.patch.dict(os.environ,self.env,clear=True):
+            for pkg,kind in (("miner","untracked"),("validator","tracked"),("snclaim","staged")):
+                file=sn/f"v2026/cli/{pkg}/"/("new.go" if kind=="untracked" else "main.go")
+                self.write(file,"package main // changed product source\n")
+                if kind=="staged":
+                    subprocess.run([self.real_git,"-C",str(sn),"add",str(file)],check=True,capture_output=True)
+                with self.assertRaisesRegex(self.state.Refusal,"changed: build/sn"):
+                    self.state.validate_inputs(self.root,value)
+                if kind=="untracked": file.unlink()
+                else: self.write(file,"package main\n")
+                if kind=="staged":
+                    subprocess.run([self.real_git,"-C",str(sn),"add",str(file)],check=True,capture_output=True)
+            self.state.validate_inputs(self.root,value)
+
+        # Retained CLI artifacts restore after cleanup and never recompile.
+        shutil.rmtree(sn/"v2026/cli/miner/build")
+        fourth=self.invoke("--resume",VERSION)
+        self.assertEqual(fourth.returncode,93,fourth.stdout+fourth.stderr)
+        for pkg in ("miner","validator","snclaim"):
+            self.assertIn("reuse cli-"+pkg+": verified",fourth.stdout+fourth.stderr)
+        self.assertTrue((sn/"v2026/cli/miner/build/provider.tar.gz").is_file())
+        events=(self.root/"events").read_text().splitlines()
+        self.assertEqual([event for event in events if event.startswith("cli-build:")],cli_events)
+        self.assertEqual(events.count("make:build/sdk/build"),1)
+        self.assertEqual(events.count("sdk-mobile"),2)
+
+        # A corrupt retained CLI output cannot silently become a rebuild.
+        retained=Path(value["stages"]["cli-miner"]["outputs"][0]["path"])
+        self.write(retained/"linux/arm64/provider","corrupt retained binary")
+        corrupt=self.invoke("--resume",VERSION)
+        self.assertEqual(corrupt.returncode,65,corrupt.stdout+corrupt.stderr)
+        self.assertEqual([event for event in (self.root/"events").read_text().splitlines() if event.startswith("cli-build:")],cli_events)
         self.assertFalse(list((self.build/"changelogs").glob("*")))
         for logfile in (self.root/"build-logs").glob("*.log"):
             self.assertEqual(logfile.stat().st_mode & 0o777,0o600)
