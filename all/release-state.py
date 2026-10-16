@@ -455,7 +455,9 @@ def deployment_snapshot(workspace):
                                     ("vaultHome", "WARP_VAULT_HOME", "vault"),
                                     ("siteHome", "WARP_SITE_HOME", "site")):
         selected[key] = str(Path(settings.get(key) or os.environ.get(variable) or workspace / default).resolve())
-        if default in ("config", "vault") and Path(selected[key]) != workspace / default:
+        # Canonical workspace roots may be symlinks. The repository snapshot
+        # follows them; hashing the resolved selection also pins their target.
+        if default in ("config", "vault") and Path(selected[key]) != (workspace / default).resolve():
             raise Refusal("alternate " + default + " root is not covered by release provenance; select the canonical workspace root before a new release")
     version_home = Path(os.environ.get("WARP_VERSION_HOME") or workspace).resolve()
     selected["versionHome"] = str(version_home)

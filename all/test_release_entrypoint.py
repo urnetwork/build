@@ -115,9 +115,9 @@ class CanonicalEntrypoint(unittest.TestCase):
         cls.real_git = shutil.which("git")
         cls.base_env = {"PATH": str(cls.bin)+":"+os.environ["PATH"], "HOME": str(cls.home),
                         "RECOVERY_FIXTURE": str(cls.root), "NVM_DIR": str(cls.root/"nvm"),
-                        "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C"}
+                        "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C", "WARP_SKIP_DEPLOY": "1"}
         cls.env = dict(cls.base_env, WARP_HOME=str(cls.root), BRINGYOUR_HOME=str(cls.build),
-                       BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="", WARP_SKIP_DEPLOY="1",
+                       BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="",
                        BUILD_URIO_CHANGELOG="0", CONNECT_IP_UPDATE="1", BUILD_APPLE_IDENTITY="1",
                        BUILD_OUT=str(cls.home/"Google Drive/My Drive/URnetwork/Build"), NPM_TOKEN="synthetic-only",
                        SDK_PACKAGE_CHANNEL="nightly", FDROID_VERSION_CODE_OFFSETS="0 2 3", STAGE_SECONDS="60",
@@ -213,7 +213,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         first_events=(self.root/"events").read_text().splitlines()
         self.assertEqual(first_events.count("make:build/sdk/build"),1)
         self.assertEqual(first_events.count("sdk-mobile"),1)
-        self.assertNotIn("preflight:main-lan",first_events)  # wrapper explicitly skips deployment
+        self.assertNotIn("preflight:main-lan",first_events)  # fixture explicitly skips deployment
         self.assertFalse([e for e in first_events if e.startswith("FORBIDDEN")],first_events)
         self.write(self.root/"allow-mobile","dependency restored")
         second=self.invoke("--resume",VERSION)

@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -57,6 +58,131 @@ class RealSourceProvenance(unittest.TestCase):
     def snapshot(self):
         with mock.patch.object(state,"repositories",return_value=self.repos):
             return state.source_snapshot(self.root)
+
+    def canonical_symlink(self, name):
+        temporary = tempfile.TemporaryDirectory(prefix="release-external-" + name + "-")
+        self.addCleanup(temporary.cleanup)
+        target = Path(temporary.name).resolve() / name
+        canonical = self.root / name
+        if canonical.exists():
+            canonical.rename(target)
+        else:
+            target.mkdir()
+            self.git(target, "init", "-q")
+            self.git(target, "config", "user.name", "Release Fixture")
+            self.git(target, "config", "user.email", "fixture@example.invalid")
+        self.write(target / "private-fixture.txt", "private-fixture-input\n")
+        (target / "private-fixture.txt").chmod(0o600)
+        self.commit(target)
+        canonical.symlink_to(target, target_is_directory=True)
+        self.repos[name] = canonical
+        return canonical, target
+
+    def validate_sources(self, sealed):
+        with mock.patch.object(state, "repositories", return_value=self.repos):
+            return state.validate_inputs(self.root, sealed)
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_canonical_config_and_vault_symlinks_accept_equivalent_selections(self):
+        for name in ("config", "vault"):
+            with self.subTest(root=name):
+                canonical, target = self.canonical_symlink(name)
+                self.assertFalse(target.is_relative_to(self.root))
+                self.write(self.root / "warp.json", "{}")
+                original = state.deployment_snapshot(self.root)
+                snapshot = self.snapshot()
+                self.assertEqual(snapshot[name]["head"], self.git(target, "rev-parse", "HEAD"))
+                self.assertNotIn("private-fixture-input", json.dumps(snapshot))
+                for selected in (canonical, target):
+                    with self.subTest(selected=selected):
+                        self.write(self.root / "warp.json", json.dumps({name + "Home": str(selected)}))
+                        self.assertEqual(state.deployment_snapshot(self.root), original)
+                        self.write(self.root / "warp.json", "{}")
+                        with mock.patch.dict(os.environ, {"WARP_" + name.upper() + "_HOME": str(selected)}):
+                            self.assertEqual(state.deployment_snapshot(self.root), original)
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_canonical_symlink_retarget_rejects_resume_even_with_identical_git_contents(self):
+        for name in ("config", "vault"):
+            with self.subTest(root=name):
+                canonical, target = self.canonical_symlink(name)
+                self.write(self.root / "warp.json", json.dumps({name + "Home": str(canonical)}))
+                original = self.snapshot()
+                sealed = {"sources": original, "environment": state.environment_snapshot()}
+                self.assertEqual(self.validate_sources(sealed), original)
+                other = target.with_name(name + "-other")
+                shutil.copytree(target, other)
+                canonical.unlink()
+                canonical.symlink_to(other, target_is_directory=True)
+                changed = self.snapshot()
+                self.assertEqual(changed[name], original[name], "the copied Git input is identical")
+                self.assertNotEqual(changed["deployment-inputs"], original["deployment-inputs"])
+                with self.assertRaisesRegex(state.Refusal, "changed: deployment-inputs"):
+                    self.validate_sources(sealed)
+                self.assertEqual(sealed["sources"], original, "validation must not adopt a new root")
+                canonical.unlink()
+                canonical.symlink_to(target, target_is_directory=True)
+                self.write(self.root / "warp.json", "{}")
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_canonical_vault_symlink_tracks_private_content_without_storing_it(self):
+        _, target = self.canonical_symlink("vault")
+        original = self.snapshot()
+        sealed = {"sources": original, "environment": state.environment_snapshot()}
+        for mutation in ("tracked", "staged", "untracked"):
+            with self.subTest(mutation=mutation):
+                file = target / ("new-private-fixture.txt" if mutation == "untracked" else "private-fixture.txt")
+                self.write(file, "changed-private-fixture-input\n")
+                file.chmod(0o600)
+                if mutation == "staged":
+                    self.git(target, "add", file.name)
+                changed = self.snapshot()
+                self.assertEqual(changed["deployment-inputs"], original["deployment-inputs"])
+                self.assertNotEqual(changed["vault"], original["vault"])
+                self.assertNotIn("changed-private-fixture-input", json.dumps(changed))
+                with self.assertRaisesRegex(state.Refusal, "changed: vault"):
+                    self.validate_sources(sealed)
+                if mutation == "untracked":
+                    file.unlink()
+                else:
+                    self.write(file, "private-fixture-input\n")
+                    if mutation == "staged":
+                        self.git(target, "add", file.name)
+                self.assertEqual(self.validate_sources(sealed), original)
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_alternate_config_and_vault_targets_remain_rejected(self):
+        for name in ("config", "vault"):
+            with self.subTest(root=name):
+                canonical, target = self.canonical_symlink(name)
+                other = target.with_name(name + "-alternate")
+                shutil.copytree(target, other)
+                variable = "WARP_" + name.upper() + "_HOME"
+                self.write(self.root / "warp.json", "{}")
+                with mock.patch.dict(os.environ, {variable: str(other)}):
+                    with self.assertRaisesRegex(state.Refusal, "alternate " + name + " root"):
+                        state.deployment_snapshot(self.root)
+                self.write(self.root / "warp.json", json.dumps({name + "Home": str(other)}))
+                # A canonical environment selection must not hide a different
+                # JSON selection, since Warp JSON takes precedence.
+                with mock.patch.dict(os.environ, {variable: str(canonical)}):
+                    with self.assertRaisesRegex(state.Refusal, "alternate " + name + " root"):
+                        state.deployment_snapshot(self.root)
+                self.write(self.root / "warp.json", "{}")
+
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_external_gowork_symlink_is_still_rejected(self):
+        temporary = tempfile.TemporaryDirectory(prefix="release-external-gowork-")
+        self.addCleanup(temporary.cleanup)
+        target = Path(temporary.name).resolve() / "go.work"
+        target.write_text("go 1.27.2\n")
+        work = self.root / "go.work"
+        work.symlink_to(target)
+        values = {key: "" for key in state.GO_ENV_KEYS}
+        values.update(GOENV="off", GOWORK=str(work))
+        with mock.patch.object(state, "run", return_value=json.dumps(values).encode()):
+            with self.assertRaisesRegex(state.Refusal, "external GOWORK"):
+                state.go_environment_snapshot(self.root)
 
     def test_tracked_staged_untracked_standalone_and_ignored_module_graph_changes_detected(self):
         original=self.snapshot()
