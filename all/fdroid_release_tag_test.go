@@ -12,7 +12,7 @@ import (
 
 // F-Droid tracks v<version>-fdroid tags. Exercise the production helper
 // against a local origin: the tag must peel to the -ungoogle commit (not the
-// branch head), and a second publication must fail without moving it.
+// branch head). Exact re-observation is safe; a conflicting target must fail.
 func TestGitTagFdroidAliasesUngoogleCommit(t *testing.T) {
 	tempDir := t.TempDir()
 	remote := filepath.Join(tempDir, "remote.git")
@@ -58,11 +58,19 @@ git_tag_fdroid
 
 	before := runGit(t, repository, "ls-remote", "--tags", "origin", tagRef, tagRef+"^{}")
 	output, err := run()
-	if err == nil || !strings.Contains(output, "refusing to overwrite") {
-		t.Fatalf("second fdroid tag publication exit = %v, output=%q", err, output)
+	if err != nil {
+		t.Fatalf("verified identical fdroid tag could not resume: %v, output=%q", err, output)
 	}
 	if after := runGit(t, repository, "ls-remote", "--tags", "origin", tagRef, tagRef+"^{}"); after != before {
 		t.Fatalf("published fdroid tag moved:\nbefore: %s\nafter:  %s", before, after)
+	}
+	// A different local ungoogle target must never move the published marker.
+	runGit(t, repository, "tag", "-f", "v"+version+"-ungoogle", "HEAD")
+	if output, err := run(); err == nil || !strings.Contains(output, "refusing to overwrite") {
+		t.Fatalf("conflicting fdroid tag was accepted: %v, output=%q", err, output)
+	}
+	if after := runGit(t, repository, "ls-remote", "--tags", "origin", tagRef, tagRef+"^{}"); after != before {
+		t.Fatal("conflicting retry moved the published fdroid tag")
 	}
 }
 

@@ -40,11 +40,20 @@ warp_rollout_deploy() {
             ;;
     esac
 
+    # Preflight uses precisely the same classification and guard arguments as
+    # promotion. Warpctl exits before all external writes/announcements.
+    if [[ "${3:-}" = preflight ]]; then
+        deploy_args+=(--preflight)
+        if [[ "${4:-}" = future ]]; then deploy_args+=(--allow-missing-image); fi
+    fi
+
     warpctl "${deploy_args[@]}"
     code=$?
     if (( code != 0 )); then
         return "$code"
     fi
+
+    if [[ "${3:-}" = preflight ]]; then return 0; fi
 
     builder_message "${BUILD_ENV}[${percent}%] ${service} \`${EXTERNAL_WARP_VERSION}\` deployed${success_suffix}"
 }

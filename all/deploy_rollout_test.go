@@ -307,8 +307,7 @@ func TestRunBuildsAltAndGossipContainersBeforeRollout(t *testing.T) {
 
 	for _, service := range []string{"gossip", "alt"} {
 		buildBlock := fmt.Sprintf(
-			"(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/%s/Makefile)\nerror_trap 'warpctl build %s'\nbuilder_message \"service %s \\`${EXTERNAL_WARP_VERSION}\\` available\"",
-			service,
+			"(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/%s/Makefile)\nerror_trap 'warpctl build %s'",
 			service,
 			service,
 		)

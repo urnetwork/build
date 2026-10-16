@@ -5,6 +5,72 @@ checked by the script at startup; the two below are host setup it can't do for
 you. See `build/DESKTOP_BUILD.md` for architecture and `windows/README.md` +
 `linux/README.md` for the desktop builds.
 
+## Exact-version recovery
+
+Use `xops/builder/build.sh --resume <exact-external-version>` only after the
+failed invocation reports `release checkpoint sealed`, exits, and finishes
+owned cleanup. Normal invocation still starts a full new release. Preparation
+(source refresh, candidate checks, versioning/module transforms and initial npm
+publication) is deliberately not replayable mid-flight. After its seal, actual
+SDK/CLI/app/IP-database/service-image stages retain independent, hash-checked
+artifacts, timings and success evidence under the private
+`$WARP_HOME/.release-checkpoints/<version>/` tree. This can consume tens of GiB;
+there is no automatic deletion of recoverable releases.
+
+Resume preserves the version and verifies the source/index/untracked-input
+graph (including standalone MMM and generated SDK module sums), relevant
+options/publisher plan, host tool identities/effective Go configuration,
+candidate-gate outputs and exact
+remote release tags. It does not pull/reset/allocate a new version. Completed
+builds restore their declared output paths from verified copies; interrupted
+local stages retry. Publication reads reconcile exact GitHub draft IDs, asset
+digests, npm tarballs and immutable image manifests. All remaining gates,
+migrations and rollout waves still execute. Code changes, missing/corrupt
+cache, remote conflicts, unjournaled source mutations and ambiguous image,
+Apple or multi-registry uploads fail closed; never edit JSON to mark success.
+An interrupted image build/import retains publication intent: even if its tag
+is currently absent, a daemon-owned BuildKit job may still push it later.
+Resume never starts a second push for that intent. Only observed command
+success, a matching registry receipt and a completed checkpoint permit reuse;
+lock recovery does not establish BuildKit job termination or clear intent.
+The host-tool seal does not make existing container/VM package installations
+fully hermetic (for example F-Droid's buildserver tag/apt inputs). Eligible
+retried non-publishing container stages still execute their original gates.
+
+Before candidate sites, on resume and immediately before production mutations,
+read-only preflight checks Main LAN database identity/head/capacity and
+Grafana/Brevo authorization, then invokes Warp's exact deployment guard planner
+with `--preflight`. The early check permits missing future images only; real
+deployments still require them. SQL uses enforced read-only SELECT paths,
+never the potentially mutating `db version` helper. Production probes have a
+300-second overall deadline (the native helper compile is separately bounded
+to 300 seconds) and do not announce, promote, initialize selectors,
+or send messages. Health is checked again later, not assumed to persist.
+
+Kernel locking covers the process group, including FD-closing descendants via
+a separate reaper. Detached VMs/daemon containers require cleanup inventory:
+an uncertain exit blocks a new writer until
+`python3 build/all/release-state.py recover-lock "$WARP_HOME"` verifies no
+recorded group/workspace-CWD/QEMU/writable-Docker-bind writer. Never remove the
+lock file or kill unrelated work. The fuller commands, limitations and
+Sol/medium triage versus Astra/max repair policy are in
+`xops/builder/BUILD.md`. Private state/log modes do not propagate umask 077 into
+Apple artifact builds; children use 022 and retained signing modes are checked.
+
+Focused hermetic verification (no provider writes):
+
+```sh
+cd build
+GO111MODULE=auto GOMAXPROCS=2 go test -p 1 ./all
+cd all
+python3 -B -m unittest -v test_release_recovery.py test_release_sources.py test_release_entrypoint.py
+```
+
+The canonical-entrypoint fixture runs unchanged copies of both production
+scripts against real disposable Git/state/cache boundaries and fake host/
+provider commands: a failed mobile SDK stage retries while the passed SDK
+stage is reused. It does not claim an end-to-end real release or deployment.
+
 ## Required release components
 
 Every enabled component and attempted release-input generator in `run.sh` is a
@@ -120,6 +186,9 @@ flaked. Uploading to the GitHub release stays in `run.sh`.
 - `build-fdroid.sh` — the android github/ungoogle flavor APKs, built in the
   F-Droid buildserver container. Needs `WARP_HOME` and the android repo on its
   `v<version>-ungoogle` branch; APKs land in the android gradle outputs dir.
+  Its fixed 12 GiB memory cap fits the host's Docker minimum of 16 GiB. The
+  previous 8 GiB cap could stall SDK compilation in reclaim with OOM kills
+  disabled even when the Docker VM had spare memory.
   The script is both the host launcher and the container entrypoint (its
   `container-build` phase), and the fdroiddata recipe seds the pinned go
   version out of it — keep the recipe's prebuild path in sync if it moves.

@@ -23,6 +23,13 @@ func runFunction(t *testing.T, name string) string {
 	if len(matches) != 1 {
 		t.Fatalf("run.sh %s function count = %d, want 1", name, len(matches))
 	}
+	if name == "git_tag" || name == "git_tag_fdroid" {
+		helpers, err := os.ReadFile(filepath.Join(rolloutRoot(t), "release-checkpoints.zsh"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(helpers) + "\n" + matches[0]
+	}
 	return matches[0]
 }
 

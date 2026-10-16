@@ -1,5 +1,13 @@
 #!/usr/bin/env zsh
 
+# Direct and host-wrapper invocations share one lock before any mutations.
+RELEASE_SCRIPT="${0:A}"
+: "${WARP_HOME:?WARP_HOME must identify the release workspace}"
+if ! python3 "${RELEASE_SCRIPT:h}/release-state.py" check-lock "$WARP_HOME"; then
+    exec python3 "${RELEASE_SCRIPT:h}/release-state.py" locked "$WARP_HOME" -- "$RELEASE_SCRIPT" "$@"
+fi
+umask 022
+
 # Expect the following env vars to be set:
 # WARP_HOME
 # APPLE_API_KEY
@@ -98,6 +106,7 @@ required_build_tools=(
     hdiutil
     java
     jq
+    lsof
     make
     mktemp
     nc
@@ -224,6 +233,7 @@ error_trap () {
     code=$?
     if [ $code != 0 ]; then
         builder_message "error($code): $1"
+        if (( $+functions[release_failure_hint] )); then release_failure_hint; fi
         exit $code
     fi
 }
@@ -466,6 +476,38 @@ export BRINGYOUR_HOME=`realpath ..`
 if [ ! "$STAGE_SECONDS" ]; then
     export STAGE_SECONDS=60
 fi
+source "$BUILD_HOME/all/release-checkpoints.zsh"
+error_trap 'load release checkpoints'
+source "$BUILD_HOME/all/release-preflight.zsh"
+error_trap 'load read-only deployment preflight'
+export SDK_PACKAGE_CHANNEL="${SDK_PACKAGE_CHANNEL:-nightly}"
+sdk_package_stage () {
+    go -C "$BUILD_HOME/sdk/packaging" run . release "$1"
+}
+export FDROID_VERSION_CODE_OFFSETS="${FDROID_VERSION_CODE_OFFSETS:-0 2 3}"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+
+if [[ -n "${BUILD_RESUME:-}" ]]; then
+    [[ "$BUILD_RESUME" =~ '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$' ]] || exit 64
+    export EXTERNAL_WARP_VERSION="$BUILD_RESUME"
+    export WARP_VERSION_BASE="${BUILD_RESUME%-*}"
+    export WARP_VERSION_CODE="${BUILD_RESUME##*-}"
+    export WARP_VERSION="$WARP_VERSION_BASE+$WARP_VERSION_CODE"
+    export EXTENSION_VERSION="$WARP_VERSION_BASE"
+    GO_MOD_VERSION="${WARP_VERSION_BASE%%.*}"
+    if [[ "$GO_MOD_VERSION" = 0 || "$GO_MOD_VERSION" = 1 ]]; then
+        GO_MOD_SUFFIX=''
+    else
+        GO_MOD_SUFFIX="/v$GO_MOD_VERSION"
+    fi
+    export BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
+    export BUILD_NOTES_PREFIX="$WARP_VERSION_CODE"
+    export BUILD_CHANGELOG_FULL="$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Full.md"
+    export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
+    release_state validate
+    error_trap 'validate immutable release before resume'
+    export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
+fi
 
 
 # Release branches refer to versioned URnetwork modules by the tag this run has
@@ -554,10 +596,12 @@ if [ "$BUILD_APPLE_IDENTITY" ]; then
     echo "$APPLE_IDENTITY_ORIG_KEYCHAINS" | xargs security list-keychains -d user -s "$APPLE_IDENTITY_KC"
     error_trap 'apple identity keychain search list'
     # prove signing works in THIS session before spending an hour building
-    echo x > /tmp/apple-identity-smoke &&
-        codesign -f -s "Apple Development: Product Builder (F7RQ5ZZ798)" /tmp/apple-identity-smoke
+    APPLE_IDENTITY_SMOKE=$(mktemp "$WARP_HOME/.release-checkpoints/.apple-signing.XXXXXXXX")
+    error_trap 'apple identity private smoke-test file'
+    echo x > "$APPLE_IDENTITY_SMOKE" &&
+        codesign -f -s "Apple Development: Product Builder (F7RQ5ZZ798)" "$APPLE_IDENTITY_SMOKE"
     error_trap 'apple identity codesign smoke test'
-    rm -f /tmp/apple-identity-smoke
+    rm -f "$APPLE_IDENTITY_SMOKE"
 fi
 
 # The macOS direct-download build signs manually with Developer ID profiles
@@ -591,6 +635,10 @@ git_main () {
 # conflicts or stash unrelated working-tree edits.
 git_push_with_rebase_retry () {
     git push && return 0
+    local push_result=$?
+    # Once sealed, integrating any remote advance would change release inputs.
+    # Exact local commits can be retried after external connectivity returns.
+    if [[ -n "${RELEASE_STATE_VERSION:-}" ]]; then return "$push_result"; fi
     git pull --rebase || return $?
     git push
 }
@@ -631,6 +679,7 @@ remove_retired_submodule_checkouts () {
     done
 }
 
+if [[ -z "${BUILD_RESUME:-}" ]]; then
 (cd $WARP_HOME/config && git_main)
 error_trap 'pull warp config'
 (cd $WARP_HOME/vault && git_main)
@@ -804,6 +853,25 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# Gradle and deployment guard planning both need the freshly selected Warpctl.
+# Compile this before candidate sites so existing infrastructure blockers fail
+# before the expensive work. No release version is allocated by this check.
+python3 "$BUILD_HOME/all/release-state.py" check-inputs "$WARP_HOME"
+error_trap 'check supported sealed compiler inputs'
+(cd $BUILD_HOME/warp/warpctl && make)
+error_trap 'build bootstrap warpctl'
+export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
+if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
+    builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
+    exit 1
+fi
+RELEASE_DOCKER_NAMESPACE=$(warpctl ls docker-namespace)
+error_trap 'resolve early release registry namespace'
+[[ "$RELEASE_DOCKER_NAMESPACE" = bringyour ]]
+error_trap 'production release requires bringyour registry namespace'
+release_early_preflight "$BUILD_HOME/server/bringyourctl" future
+error_trap 'early read-only deployment preflight'
+
 # Build both sites with their complete check batteries before any app or
 # service release work: ur.xyz through web, and ur.io through the mmm service
 # (mmm/mmm, the nginx front for the sites whose source lives in mmm). The final
@@ -813,20 +881,13 @@ error_trap 'localizations codegen'
 builder_message "checking web builds after localization updates"
 (cd "$BUILD_HOME/web/web" && URNETWORK_ROOT="$BUILD_HOME" make check)
 error_trap 'web build checks'
+WEB_CANDIDATE_RECEIPT=$(python3 "$BUILD_HOME/all/release-state.py" candidate "$WARP_HOME" web "$BUILD_HOME/web/web/build/preview.ur.xyz")
+error_trap 'retain web candidate gate evidence'
 builder_message "checking mmm builds after localization updates"
 (cd "$WARP_HOME/mmm/mmm" && URNETWORK_ROOT="$BUILD_HOME" make check)
 error_trap 'mmm build checks'
-
-# Gradle evaluates Android's version fields even for dependency reports and
-# reads them through the sibling warpctl binary. Bootstrap that fresh checkout
-# before the license gate; allocate the new release only after all gates pass.
-(cd $BUILD_HOME/warp/warpctl && make)
-error_trap 'build bootstrap warpctl'
-export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
-if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
-    builder_message "Build warpctl is not first on the PATH ($(which warpctl))."
-    exit 1
-fi
+MMM_CANDIDATE_RECEIPT=$(python3 "$BUILD_HOME/all/release-state.py" candidate "$WARP_HOME" mmm "$WARP_HOME/mmm/mmm/build/preview.ur.io" "$WARP_HOME/mmm/mmm/build/lag.dev")
+error_trap 'retain mmm candidate gate evidence'
 
 # license list gate: sdk/license.yml is embedded in the SDK and shown under
 # Account -> Settings -> Licenses in every app, so it must list every dependency
@@ -1387,6 +1448,8 @@ $(cat "$store_note_path")
 fi
 
 
+fi # full-run source preparation; resume never replays transformations
+
 go_mod_edit_module () {
     go mod edit -module=$1${GO_MOD_SUFFIX} &&
     go_edit_require $1
@@ -1630,13 +1693,9 @@ git_commit () {
 #
 git_tag () {
     local tag="v${EXTERNAL_WARP_VERSION}"
-    if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once)."
-        return 1
-    else
-        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}" &&
-        git push origin "refs/tags/$tag"
-    fi
+    local commit
+    commit=$(git rev-parse HEAD) || return $?
+    release_git_tag "$tag" "$commit"
 }
 
 # Create and push the F-Droid tag, v<version>-fdroid, on the degoogled commit
@@ -1651,16 +1710,13 @@ git_tag () {
 git_tag_fdroid () {
     local tag="v${EXTERNAL_WARP_VERSION}-fdroid"
     local source_tag="v${EXTERNAL_WARP_VERSION}-ungoogle"
-    if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-        builder_message "error: tag $tag already exists on origin; refusing to overwrite (a version is published only once)."
-        return 1
-    else
-        git tag -a "$tag" -m "${EXTERNAL_WARP_VERSION}-fdroid" "${source_tag}^{commit}" &&
-        git push origin "refs/tags/$tag"
-    fi
+    local commit
+    commit=$(git rev-parse "${source_tag}^{commit}") || return $?
+    release_git_tag "$tag" "$commit"
 }
 
 
+if [[ -z "${BUILD_RESUME:-}" ]]; then
 (cd $BUILD_HOME/glog &&
     go_mod_edit_module github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog)
@@ -1795,9 +1851,6 @@ error_trap 'sdk push branch'
 # artifact manifest. Swift/Carthage and Rust wait for public GitHub asset URLs.
 export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
 export SDK_PACKAGE_CHANNEL="${SDK_PACKAGE_CHANNEL:-nightly}"
-sdk_package_stage () {
-    go -C "$BUILD_HOME/sdk/packaging" run . release "$1"
-}
 sdk_package_stage plan
 error_trap 'sdk package publishing plan'
 SDK_NPM_PUBLISH="$(go -C "$BUILD_HOME/sdk/packaging" run . credential npm)"
@@ -1971,8 +2024,59 @@ error_trap 'push +2 branch'
     git_tag)
 error_trap 'push +3 branch'
 
+(umask 077; mkdir -p "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION")
+error_trap 'private release state directory'
+cp "$WEB_CANDIDATE_RECEIPT" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/web-candidate.json" &&
+    cp "$MMM_CANDIDATE_RECEIPT" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/mmm-candidate.json"
+error_trap 'retain completed candidate receipts'
+if [[ "$SDK_NPM_PUBLISH" = yes ]]; then
+    (umask 077; mkdir -p "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/npm")
+    error_trap 'private npm receipts directory'
+    cp -p "$BUILD_HOME/sdk/js/release/artifacts/"*.tgz "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/npm/"
+    error_trap 'retain published SDK npm tarballs'
+    (cd "$BUILD_HOME/localizations" && npm pack --ignore-scripts --json --pack-destination "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/npm")
+    error_trap 'retain published localizations npm tarball'
+    python3 "$BUILD_HOME/all/release-publication.py" npm "$EXTERNAL_WARP_VERSION" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/npm/"*.tgz
+    error_trap 'verify exact published npm package integrity'
+fi
+release_prepared_paths
+release_state seal "${RELEASE_PREPARED_OUTPUTS[@]}"
+error_trap 'seal immutable release inputs and candidate gates'
+fi # immutable release preparation is complete
+
+# Definitions and derived values needed by both full and resumed invocations.
+export RELEASE_STATE_VERSION="$EXTERNAL_WARP_VERSION"
+export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
+SDK_NPM_PUBLISH="$(go -C "$BUILD_HOME/sdk/packaging" run . credential npm)"
+error_trap 'npm SDK publishing credential check'
+
 
 # Build release
+
+release_prepared_paths
+if [[ -n "${BUILD_RESUME:-}" ]]; then
+    release_state restore-prepared "${RELEASE_PREPARED_OUTPUTS[@]}"
+    error_trap 'restore verified preparation outputs'
+fi
+for sdk_registry in npm pypi nuget rubygems crates maven swift cocoapods conan vcpkg; do
+    sdk_expected=$(jq -r --arg registry "$sdk_registry" '.registries[$registry]' "$BUILD_HOME/sdk/packaging/release/plan.json")
+    error_trap 'read sealed SDK publisher selection'
+    sdk_actual=$(go -C "$BUILD_HOME/sdk/packaging" run . credential "$sdk_registry")
+    error_trap 'read current SDK publisher availability'
+    [[ ( "$sdk_expected" = true && "$sdk_actual" = yes ) || ( "$sdk_expected" = false && "$sdk_actual" = no ) ]]
+    error_trap "SDK publisher $sdk_registry differs from sealed selection"
+done
+if [[ "$SDK_NPM_PUBLISH" = yes ]]; then
+    python3 "$BUILD_HOME/all/release-publication.py" npm "$EXTERNAL_WARP_VERSION" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/npm/"*.tgz
+    error_trap 'verify retained exact npm publications'
+fi
+RELEASE_DOCKER_NAMESPACE=$(warpctl ls docker-namespace)
+error_trap 'resolve release registry namespace'
+[[ "$RELEASE_DOCKER_NAMESPACE" = bringyour ]]
+error_trap 'production release requires bringyour registry namespace'
+
+release_early_preflight "$BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl" future
+error_trap 'read-only deployment preflight for pinned release'
 
 github_create_draft_release () {
     if [ "$1" ]; then
@@ -1980,13 +2084,10 @@ github_create_draft_release () {
     else
         PRE_RELEASE=false
     fi
-    GITHUB_RELEASE=`$BUILD_CURL \
-        -X POST \
-        -H 'Accept: application/vnd.github+json' \
-        -H "Authorization: Bearer $GITHUB_API_KEY" \
-        -H 'X-GitHub-Api-Version: 2022-11-28' \
-        https://api.github.com/repos/urnetwork/build/releases \
-        -d "{\"tag_name\":\"v${EXTERNAL_WARP_VERSION}\",\"name\":\"v${EXTERNAL_WARP_VERSION}\",\"body\":\"v${EXTERNAL_WARP_VERSION}\",\"draft\":true,\"prerelease\":$PRE_RELEASE,\"generate_release_notes\":false}"`
+    local release_commit
+    release_commit=$(git -C "$BUILD_HOME" rev-parse "refs/tags/v${EXTERNAL_WARP_VERSION}^{commit}")
+    error_trap 'resolve exact GitHub release commit'
+    GITHUB_RELEASE=$(python3 "$BUILD_HOME/all/release-publication.py" release "$EXTERNAL_WARP_VERSION" "$release_commit" "$PRE_RELEASE")
     error_trap 'github create release'
     GITHUB_RELEASE_ID=`echo "$GITHUB_RELEASE" | jq -r .id`
     GITHUB_UPLOAD_URL="https://uploads.github.com/repos/urnetwork/build/releases/$GITHUB_RELEASE_ID/assets"
@@ -1997,6 +2098,16 @@ github_create_draft_release () {
 github_release_upload () {
     require_build_artifacts "$2"
     error_trap "required github release artifact $1"
+    local reconcile_status
+    GITHUB_UPLOAD=$(python3 "$BUILD_HOME/all/release-publication.py" asset "$GITHUB_RELEASE_ID" "$1" "$2")
+    reconcile_status=$?
+    if (( reconcile_status == 0 )); then
+        local retained_sha=$(shasum -a 256 "$2" | awk '{print $1}')
+        VIRUSTOTAL_ARTIFACTS+=("|[$1](https://github.com/urnetwork/build/releases/download/v${EXTERNAL_WARP_VERSION}/$1)|\`$retained_sha\`|retained verified publication|")
+        return 0
+    elif (( reconcile_status != 10 )); then
+        exit "$reconcile_status"
+    fi
     virustotal "$1" "$2"
 
     # This transport preserves GitHub's response headers/message and retries
@@ -2005,6 +2116,8 @@ github_release_upload () {
     GITHUB_UPLOAD=$("$BUILD_HOME/all/github-release-upload.zsh" \
         "$GITHUB_UPLOAD_URL" "$1" "$2")
     error_trap "github release upload $1"
+    python3 "$BUILD_HOME/all/release-publication.py" asset "$GITHUB_RELEASE_ID" "$1" "$2" >/dev/null
+    error_trap "verify published github release artifact $1"
 }
 
 # virustotal analysis is best-effort context for the release notes: a
@@ -2094,6 +2207,10 @@ virustotal_verify () {
 }
 
 github_create_release () {
+    python3 "$BUILD_HOME/all/release-publication.py" finalized "$GITHUB_RELEASE_ID" "$EXTERNAL_WARP_VERSION"
+    local finalized_status=$?
+    if (( finalized_status == 10 )); then return 0; fi
+    if (( finalized_status != 0 )); then exit "$finalized_status"; fi
     if [ "$1" ]; then
         PRE_RELEASE=true
         HEADER="This is an architecture-specific release of v${EXTERNAL_WARP_VERSION%?}0"
@@ -2212,6 +2329,7 @@ sn_cli_release () {
     shift 2
     local src="$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/$pkg"
     local out="$src/build"
+    if ! release_build "cli-$pkg" "$out"; then return 0; fi
     rm -rf "$out" || return 1
     local osarch os arch gomips ext
     for osarch in "$@"; do
@@ -2231,18 +2349,27 @@ sn_cli_release () {
                 -ldflags "-w -s -X main.Version=${WARP_VERSION}" \
                 -o "$out/$os/$arch/$binary$ext" .) || return 1
     done
-    (cd "$out" && COPYFILE_DISABLE=1 tar -czf "$binary.tar.gz" */)
+    (cd "$out" && COPYFILE_DISABLE=1 tar -czf "$binary.tar.gz" */) || return $?
+    release_complete "cli-$pkg" "$out"
 }
 
 
 github_create_draft_release
 
 
+if release_build sdk "$BUILD_HOME/sdk/build/android" "$BUILD_HOME/sdk/build/apple" "$BUILD_HOME/sdk/js/build" "$BUILD_HOME/sdk/js/wasm" "$BUILD_HOME/sdk/cgo/build/linux" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"; then
 (cd $BUILD_HOME/sdk/build && make)
 error_trap 'build sdk'
+release_complete sdk "$BUILD_HOME/sdk/build/android" "$BUILD_HOME/sdk/build/apple" "$BUILD_HOME/sdk/js/build" "$BUILD_HOME/sdk/js/wasm" "$BUILD_HOME/sdk/cgo/build/linux" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+fi
 
+sdk_mobile_outputs=("${(@f)$(release_sdk_outputs mobile)}")
+error_trap 'resolve sealed mobile SDK output contract'
+if release_build sdk-mobile "${sdk_mobile_outputs[@]}"; then
 sdk_package_stage mobile
 error_trap 'sdk Swift package build and check'
+release_complete sdk-mobile "${sdk_mobile_outputs[@]}"
+fi
 
 github_release_upload "URnetworkSdk-${EXTERNAL_WARP_VERSION}.aar" "$BUILD_HOME/sdk/build/android/URnetworkSdk.aar"
 github_release_upload "URnetworkSdk-sources-${EXTERNAL_WARP_VERSION}.jar" "$BUILD_HOME/sdk/build/android/URnetworkSdk-sources.jar"
@@ -2288,10 +2415,14 @@ github_release_upload "urnetwork-snclaim-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUIL
 builder_message "snclaim \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
+if release_build bringyourctl "$BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl/build"; then
 (cd $BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl && make)
 error_trap 'build bringyourctl'
+release_complete bringyourctl "$BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl/build"
+fi
 
 
+if release_build proxy-socks "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build"; then
 (cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks && make)
 error_trap 'build proxy socks'
 # The socks Makefile picks the MIPS float variables itself. A hardfloat MIPS
@@ -2299,6 +2430,12 @@ error_trap 'build proxy socks'
 for proxy_socks_arch in mips mipsle mips64 mips64le; do
     go_mips_require_softfloat "$proxy_socks_arch" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/linux/$proxy_socks_arch/socks"
     error_trap "proxy socks $proxy_socks_arch softfloat"
+done
+release_complete proxy-socks "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build"
+fi
+for proxy_socks_arch in mips mipsle mips64 mips64le; do
+    go_mips_require_softfloat "$proxy_socks_arch" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/linux/$proxy_socks_arch/socks"
+    error_trap "retained proxy socks $proxy_socks_arch softfloat"
 done
 
 github_release_upload "urnetwork-proxy-socks-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks/build/proxy-socks.tar.gz"
@@ -2323,8 +2460,11 @@ builder_message "proxy socks \`${EXTERNAL_WARP_VERSION}\` available - https://gi
 # UR_SKIP_SDK_BUILD: the extension's sync-sdk step uses the sdk wasm `make
 # package` built in $BUILD_HOME/sdk/js above instead of rebuilding it, and
 # fails if there is none
+if release_build extension "$BUILD_HOME/extension/release"; then
 (cd $BUILD_HOME/extension && UR_SKIP_SDK_BUILD=1 make)
 error_trap 'build extension'
+release_complete extension "$BUILD_HOME/extension/release"
+fi
 
 github_release_upload "crx-@urnetwork-extension-${EXTENSION_VERSION}.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTENSION_VERSION}.zip"
 github_release_upload "crx-@urnetwork-extension-${EXTENSION_VERSION}-firefox.zip" "$BUILD_HOME/extension/release/crx-@urnetwork-extension-${EXTENSION_VERSION}-firefox.zip"
@@ -2420,6 +2560,7 @@ for d in "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/priv
 done
 
 
+if release_build ios "$BUILD_HOME/apple/app/build/URnetwork.ipa"; then
 (cd $BUILD_HOME/apple/app &&
     rm -f build/URnetwork.ipa &&
     xcodebuild -scheme URnetwork clean &&
@@ -2431,23 +2572,30 @@ done
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=iOS &&
     require_build_artifacts build/URnetwork.ipa &&
     bug_fix_clean_ipa build/URnetwork.ipa &&
-    xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-    xcrun altool --show-progress --upload-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+    xcrun altool --show-progress --validate-app --file build/URnetwork.ipa -t ios --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 error_trap 'ios build and deploy'
+release_complete ios "$BUILD_HOME/apple/app/build/URnetwork.ipa"
+fi
+release_apple_upload ios "$BUILD_HOME/apple/app/build/URnetwork.ipa"
+error_trap 'ios App Store Connect upload'
 
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}.ipa" "$BUILD_HOME/apple/app/build/URnetwork.ipa"
 builder_message "ios \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
+if release_build macos-store "$BUILD_HOME/apple/app/build/URnetwork.pkg"; then
 (cd $BUILD_HOME/apple/app &&
     rm -f build/URnetwork.pkg &&
     xcodebuild -scheme URnetwork clean &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -workspace app.xcodeproj/project.xcworkspace -config Release -scheme URnetwork -archivePath build.xcarchive -destination generic/platform=macOS &&
     xcodebuild archive -allowProvisioningUpdates $XCODEBUILD_AUTH -exportArchive -exportOptionsPlist ExportOptions.plist -archivePath build.xcarchive -exportPath build -destination generic/platform=macOS &&
     require_build_artifacts build/URnetwork.pkg &&
-    xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER &&
-    xcrun altool --show-progress --upload-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
+    xcrun altool --show-progress --validate-app --file build/URnetwork.pkg -t macos --apiKey $APPLE_API_KEY --apiIssuer $APPLE_API_ISSUER)
 error_trap 'macos build and deploy'
+release_complete macos-store "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+fi
+release_apple_upload macos "$BUILD_HOME/apple/app/build/URnetwork.pkg"
+error_trap 'macos App Store Connect upload'
 
 # The macOS pkg is the Mac App Store export (app-store-connect ExportOptions.plist).
 # It is signed for the store only and does not launch when installed directly,
@@ -2481,6 +2629,7 @@ error_trap 'macos direct: Developer ID Application identity'
 macos_require_direct_profiles "$MACOS_DIRECT_IDENTITY"
 error_trap 'macos direct: Developer ID provisioning profiles'
 
+if release_build macos-direct-app "$BUILD_HOME/apple/app/build/direct" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_ZIP"; then
 (cd $BUILD_HOME/apple/app &&
     rm -rf build-direct.xcarchive build/direct build/direct-dmg "build/$MACOS_DIRECT_DMG" "build/$MACOS_DIRECT_ZIP" &&
     xcodebuild -scheme URnetworkDirect clean &&
@@ -2499,12 +2648,18 @@ error_trap 'macos direct build and notarize'
     ditto -c -k --keepParent build/direct/URnetwork.app "build/$MACOS_DIRECT_ZIP" &&
     require_build_artifacts "build/$MACOS_DIRECT_ZIP")
 error_trap 'macos direct zip'
-
+release_complete macos-direct-app "$BUILD_HOME/apple/app/build/direct" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_ZIP"
+else
+    (cd "$BUILD_HOME/apple/app" && spctl --assess --type execute -vv build/direct/URnetwork.app)
+    error_trap 'macos direct retained app verification'
+fi
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_ZIP"
 
 # DMG: the stapled app plus an Applications symlink (drag to install; the app
 # must run from /Applications to activate its system extension)
+if release_build macos-direct-dmg "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_DMG"; then
 (cd $BUILD_HOME/apple/app &&
+    rm -rf build/direct-dmg "build/$MACOS_DIRECT_DMG" &&
     mkdir -p build/direct-dmg &&
     ditto build/direct/URnetwork.app build/direct-dmg/URnetwork.app &&
     ln -s /Applications build/direct-dmg/Applications &&
@@ -2515,7 +2670,11 @@ github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.zip" "$BUILD_HOM
     macos_notarize_and_staple "build/$MACOS_DIRECT_DMG" &&
     spctl --assess --type open --context context:primary-signature -vv "build/$MACOS_DIRECT_DMG")
 error_trap 'macos direct dmg'
-
+release_complete macos-direct-dmg "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_DMG"
+else
+    (cd "$BUILD_HOME/apple/app" && spctl --assess --type open --context context:primary-signature -vv "build/$MACOS_DIRECT_DMG")
+    error_trap 'macos direct retained dmg verification'
+fi
 github_release_upload "URnetwork-${EXTERNAL_WARP_VERSION}-macos.dmg" "$BUILD_HOME/apple/app/build/$MACOS_DIRECT_DMG"
 builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
@@ -2565,10 +2724,15 @@ builder_message "macos direct download \`${EXTERNAL_WARP_VERSION}\` available - 
 DESKTOP_OUT="${BUILD_OUT:-$BUILD_HOME/out}/desktop"
 
 builder_message "building windows app (cgo sdk + MSI in the local QEMU ARM Windows VM)"
+if release_build windows "$DESKTOP_OUT/windows" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"; then
 OUT_DIR="$DESKTOP_OUT/windows" "$BUILD_HOME/all/build-windows.sh"
 error_trap 'windows build'
 require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"
 error_trap 'required windows artifacts'
+release_complete windows "$DESKTOP_OUT/windows" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
+fi
+require_windows_artifacts "$DESKTOP_OUT/windows" "$EXTERNAL_WARP_VERSION"
+error_trap 'retained required windows artifacts'
 github_release_upload "URnetworkSdkWindows-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
 for msi in "$DESKTOP_OUT/windows/"*.msi(N); do
     github_release_upload "$(basename "$msi")" "$msi"
@@ -2576,12 +2740,24 @@ done
 builder_message "windows \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 builder_message "building linux app (cgo sdk + deb/install-tarball/rpm/arch on ubuntu 22.04 + AppImage on ubuntu 24.04, each verified in-container; then Flatpak in its dependency-complete Linux container)"
+if release_build linux "$DESKTOP_OUT/linux" "$BUILD_HOME/sdk/cgo/build/linux" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"; then
 UR_REQUIRE_RPM=true UR_REQUIRE_ARCH_PKG=true OUT_DIR="$DESKTOP_OUT/linux" "$BUILD_HOME/all/build-linux.sh"
 error_trap 'linux build'
+release_complete linux "$DESKTOP_OUT/linux" "$BUILD_HOME/sdk/cgo/build/linux" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
+fi
 github_release_upload "URnetworkSdkLinux-${EXTERNAL_WARP_VERSION}.zip" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"
 
+sdk_desktop_outputs=("${(@f)$(release_sdk_outputs desktop)}")
+error_trap 'resolve sealed desktop SDK output contract'
+if release_build sdk-desktop "${sdk_desktop_outputs[@]}"; then
+release_sdk_publication_begin sdk-desktop
+error_trap 'reconcile native SDK publication intent'
 sdk_package_stage desktop
 error_trap 'sdk native package build, check and publish'
+release_state effect-complete sdk-desktop
+error_trap 'record native SDK publication completion'
+release_complete sdk-desktop "${sdk_desktop_outputs[@]}"
+fi
 for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
     github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
 done
@@ -2604,6 +2780,7 @@ done
 #
 # This is a release gate now that its toolchain is managed by the build. A real
 # Flatpak failure must stop before the uploader silently ships no bundle.
+if release_build flatpak "$DESKTOP_OUT/linux"; then
 VERSION="${EXTERNAL_WARP_VERSION}" \
 LINUX_DIR="$BUILD_HOME/linux" \
 OUT_DIR="$DESKTOP_OUT/linux" \
@@ -2611,6 +2788,10 @@ OUT_DIR="$DESKTOP_OUT/linux" \
 error_trap 'flatpak build'
 require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"
 error_trap 'required linux artifacts'
+release_complete flatpak "$DESKTOP_OUT/linux"
+fi
+require_linux_artifacts "$DESKTOP_OUT/linux" "$EXTERNAL_WARP_VERSION"
+error_trap 'retained required linux artifacts'
 
 # Six artifact types per arch (names normative — linux/MIGRATION.md):
 # urnetwork-daemon_<v>_<arch>.deb, urnetwork-daemon-<v>-<arch>.install.tar.gz,
@@ -2633,9 +2814,12 @@ done
 builder_message "linux \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
+if release_build android "$BUILD_HOME/android/app/app/build/outputs/apk/play" "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp" "$BUILD_HOME/android/app/app/build/outputs/bundle/playRelease"; then
 (cd $BUILD_HOME/android/app &&
     ./gradlew clean assemblePlayRelease bundlePlayRelease assembleSolana_dappRelease)
 error_trap 'android build'
+release_complete android "$BUILD_HOME/android/app/app/build/outputs/apk/play" "$BUILD_HOME/android/app/app/build/outputs/apk/solana_dapp" "$BUILD_HOME/android/app/app/build/outputs/bundle/playRelease"
+fi
 
 github_release_upload \
     "com.bringyour.network-${EXTERNAL_WARP_VERSION}-play-release.apk" \
@@ -2669,8 +2853,9 @@ builder_message "android \`${EXTERNAL_WARP_VERSION}\` available - https://github
 # android submodule off it and onto a degoogled branch, and the build repo has
 # to be put back afterwards. See the restore at the end of this section for why
 # that matters.
-ANDROID_RELEASE_COMMIT=`cd $BUILD_HOME/android && git rev-parse HEAD`
+ANDROID_RELEASE_COMMIT=`cd $BUILD_HOME/android && git rev-parse "refs/tags/v${EXTERNAL_WARP_VERSION}^{commit}"`
 error_trap 'android release commit'
+if release_build fdroid-source "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/fdroid-source.txt"; then
 (cd $BUILD_HOME/android &&
     git checkout -b v${EXTERNAL_WARP_VERSION}-ungoogle)
 error_trap 'android prepare ungoogle version branch'
@@ -2698,12 +2883,20 @@ error_trap 'push ungoogle branch'
     git tag -a v${EXTERNAL_WARP_VERSION}-ungoogle -m "${EXTERNAL_WARP_VERSION}-ungoogle" && 
     git push origin v${EXTERNAL_WARP_VERSION}-ungoogle)
 error_trap 'push ungoogle tag'
+release_transition fdroid-prepare
+(umask 077; git -C "$BUILD_HOME" rev-parse "refs/tags/v${EXTERNAL_WARP_VERSION}-ungoogle^{commit}" > "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/fdroid-source.txt")
+error_trap 'record F-Droid source'
+release_complete fdroid-source "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/fdroid-source.txt"
+fi
 
 # build in the fdroid server context (all/build-fdroid.sh — uses the ungoogle
 # branch state configured above; also runs standalone)
 # ideally this should not be required, but there are some small differences in the android artifacts apparently due to build environment (macos/arm versus linux/amd perhaps)
+if release_build fdroid "$BUILD_HOME/android/app/app/build/outputs/apk/github/release"; then
 "$BUILD_HOME/all/build-fdroid.sh"
 error_trap 'android github build'
+release_complete fdroid "$BUILD_HOME/android/app/app/build/outputs/apk/github/release"
+fi
 
 # upload github as the "official" apk which lexicograhpically sorts to the front, for release systems like Obtanium
 github_release_upload \
@@ -2762,6 +2955,7 @@ if [ "$ANDROID_RELEASE_COMMIT" ]; then
             (git commit -m "${EXTERNAL_WARP_VERSION} restore android pin" &&
                 git_push_with_rebase_retry)))
     error_trap 'restore android pin'
+    release_transition fdroid-restore
     builder_message "android pin restored to \`${ANDROID_RELEASE_COMMIT}\` (the \`${EXTERNAL_WARP_VERSION}\` release commit); the degoogled tree stays on the \`v${EXTERNAL_WARP_VERSION}-ungoogle\` tag"
 else
     builder_message "warning: ANDROID_RELEASE_COMMIT is empty, so main is still pinned to the degoogled android tree, which cannot build the play and solana_dapp flavors until that is corrected."
@@ -2775,8 +2969,15 @@ builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https:/
 github_create_release
 
 
+if release_build sdk-public "$BUILD_HOME/sdk/packaging/release/plan.json"; then
+release_sdk_publication_begin sdk-public
+error_trap 'reconcile public SDK publication intent'
 sdk_package_stage public
 error_trap 'sdk packages referencing public release assets'
+release_state effect-complete sdk-public
+error_trap 'record public SDK publication completion'
+release_complete sdk-public "$BUILD_HOME/sdk/packaging/release/plan.json"
+fi
 
 # create pre-releases for version code variants
 # this is needed for reproducible builds
@@ -2901,8 +3102,12 @@ refresh_ip_databases () {
     builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${update_summary:-no update summary}"
 }
 
+if release_build ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"; then
 refresh_ip_databases
 error_trap 'GeoLite2, ARIN and subscriber evidence release update'
+release_transition ip-databases
+release_complete ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"
+fi
 
 # The config-updater image carries this release's config, so on the deploy
 # path it is built after the Brevo template export below has written its
@@ -2920,52 +3125,151 @@ error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 # its host) restarts once for it, as before. A run that skips deployment builds
 # the image now, for a rollout run later by hand.
 build_config_updater () {
+    if release_build image-config-updater "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-config-updater.json"; then
+    release_image_publication_begin config-updater
+    error_trap 'verify unpublished config-updater image'
     (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile --config_restart=no)
     error_trap 'warpctl build config-updater'
+    release_image_publication_complete config-updater
+    error_trap 'record config-updater image digest'
+    release_complete image-config-updater "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-config-updater.json"
+    fi
+    release_image_receipt config-updater
+    error_trap 'verify retained config-updater image digest'
     builder_message "service config-updater \`${EXTERNAL_WARP_VERSION}\` available"
 }
 if [ "$WARP_SKIP_DEPLOY" != "" ]; then
     build_config_updater
 fi
 
+if release_build image-grafana "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-grafana.json"; then
+release_image_publication_begin grafana
+error_trap 'verify unpublished grafana image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/grafana/Makefile)
 error_trap 'warpctl build grafana'
+release_image_publication_complete grafana
+error_trap 'record grafana image digest'
+release_complete image-grafana "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-grafana.json"
+fi
+release_image_receipt grafana
+error_trap 'verify retained grafana image digest'
 builder_message "service grafana \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-lb "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-lb.json"; then
+release_image_publication_begin lb
+error_trap 'verify unpublished lb image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
+release_image_publication_complete lb
+error_trap 'record lb image digest'
+release_complete image-lb "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-lb.json"
+fi
+release_image_receipt lb
+error_trap 'verify retained lb image digest'
 builder_message "service lb \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-taskworker "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-taskworker.json"; then
+release_image_publication_begin taskworker
+error_trap 'verify unpublished taskworker image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
+release_image_publication_complete taskworker
+error_trap 'record taskworker image digest'
+release_complete image-taskworker "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-taskworker.json"
+fi
+release_image_receipt taskworker
+error_trap 'verify retained taskworker image digest'
 builder_message "service taskworker \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-api "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-api.json"; then
+release_image_publication_begin api
+error_trap 'verify unpublished api image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/api/Makefile)
 error_trap 'warpctl build api'
+release_image_publication_complete api
+error_trap 'record api image digest'
+release_complete image-api "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-api.json"
+fi
+release_image_receipt api
+error_trap 'verify retained api image digest'
 builder_message "service api \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-connect "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-connect.json"; then
+release_image_publication_begin connect
+error_trap 'verify unpublished connect image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/connect/Makefile)
 error_trap 'warpctl build connect'
+release_image_publication_complete connect
+error_trap 'record connect image digest'
+release_complete image-connect "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-connect.json"
+fi
+release_image_receipt connect
+error_trap 'verify retained connect image digest'
 builder_message "service connect \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-mcp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mcp.json"; then
+release_image_publication_begin mcp
+error_trap 'verify unpublished mcp image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/mcp/Makefile)
 error_trap 'warpctl build mcp'
+release_image_publication_complete mcp
+error_trap 'record mcp image digest'
+release_complete image-mcp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mcp.json"
+fi
+release_image_receipt mcp
+error_trap 'verify retained mcp image digest'
 builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"; then
+release_image_publication_begin gossip
+error_trap 'verify unpublished gossip image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/gossip/Makefile)
 error_trap 'warpctl build gossip'
+release_image_publication_complete gossip
+error_trap 'record gossip image digest'
+release_complete image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"
+fi
+release_image_receipt gossip
+error_trap 'verify retained gossip image digest'
 builder_message "service gossip \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"; then
+release_image_publication_begin alt
+error_trap 'verify unpublished alt image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/alt/Makefile)
 error_trap 'warpctl build alt'
+release_image_publication_complete alt
+error_trap 'record alt image digest'
+release_complete image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"
+fi
+release_image_receipt alt
+error_trap 'verify retained alt image digest'
 builder_message "service alt \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-proxy "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-proxy.json"; then
+release_image_publication_begin proxy
+error_trap 'verify unpublished proxy image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/proxy/Makefile)
 error_trap 'warpctl build proxy'
+release_image_publication_complete proxy
+error_trap 'record proxy image digest'
+release_complete image-proxy "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-proxy.json"
+fi
+release_image_receipt proxy
+error_trap 'verify retained proxy image digest'
 builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-web "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-web.json"; then
+release_image_publication_begin web
+error_trap 'verify unpublished web image'
 (cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
+release_image_publication_complete web
+error_trap 'record web image digest'
+release_complete image-web "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-web.json"
+fi
+release_image_receipt web
+error_trap 'verify retained web image digest'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 
 # The mmm service is the nginx front for the sites whose source lives in mmm
@@ -2976,6 +3280,9 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 # release's, so a workspace outside both checkouts pins it to the release's
 # warp. mmm's Makefile and ur.io's astro build read WEB_BUILD_CHECKS by that
 # name.
+if release_build image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"; then
+release_image_publication_begin mmm
+error_trap 'verify unpublished mmm image'
 mmm_go_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-mmm-gowork.XXXXXX")
 error_trap 'mmm go workspace'
 printf 'go %s\n\nuse %s\n\nreplace github.com/urnetwork/warp => %s\n' \
@@ -2986,18 +3293,46 @@ error_trap 'mmm go workspace'
 (cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
 error_trap 'warpctl build mmm'
 rm -rf "$mmm_go_work_dir"
+release_verify_mmm
+error_trap 'verify four MMM binaries use release Warp and version'
+release_image_publication_complete mmm
+error_trap 'record mmm image digest'
+release_complete image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"
+fi
+release_verify_mmm
+error_trap 'verify retained four MMM release binaries'
+release_image_receipt mmm
+error_trap 'verify retained mmm image digest'
 builder_message "service mmm \`${EXTERNAL_WARP_VERSION}\` available"
 
+if release_build image-manager "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-manager.json"; then
+release_image_publication_begin manager
+error_trap 'verify unpublished manager image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)
 error_trap 'warpctl build web/manager'
+release_image_publication_complete manager
+error_trap 'record manager image digest'
+release_complete image-manager "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-manager.json"
+fi
+release_image_receipt manager
+error_trap 'verify retained manager image digest'
 builder_message "service web/manager \`${EXTERNAL_WARP_VERSION}\` available"
 
 # The manager source directory supplies the deployed `app` service.  warpctl
 # derives an image name from the Makefile directory, so explicitly publish the
 # same verified multi-architecture image under the service name used by the
 # rollout configuration.
+if release_build image-app "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-app.json"; then
+release_image_publication_begin app
+error_trap 'verify unpublished app image'
 (cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-manager:${EXTERNAL_WARP_VERSION}" --service_name=app)
 error_trap 'warpctl import manager image as app'
+release_image_publication_complete app
+error_trap 'record app image digest'
+release_complete image-app "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-app.json"
+fi
+release_image_receipt app
+error_trap 'verify retained app image digest'
 builder_message "service app \`${EXTERNAL_WARP_VERSION}\` available"
 
 builder_message "release \`${EXTERNAL_WARP_VERSION}\` complete - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
@@ -3016,6 +3351,9 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     error_trap 'resolve build host Go architecture for Main pre-deploy'
     MAIN_BRINGYOURCTL_DIR="$BUILD_HOME/server${GO_MOD_SUFFIX}/bringyourctl"
     MAIN_BRINGYOURCTL_BINARY="$MAIN_BRINGYOURCTL_DIR/build/$BUILD_HOST_GOOS/$BUILD_HOST_GOARCH/bringyourctl"
+
+    release_preflight "$MAIN_BRINGYOURCTL_DIR" "$MAIN_BRINGYOURCTL_BINARY" future
+    error_trap 'dynamic preflight immediately before Main mutations'
 
     BRINGYOURCTL_BINARY="$MAIN_BRINGYOURCTL_BINARY" \
         "$MAIN_BRINGYOURCTL_DIR/run-main-lan.sh" db migrate
@@ -3045,9 +3383,13 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
             git_push_with_rebase_retry
         fi)
     error_trap 'onboarding templates config push'
+    release_transition onboarding
 
     # the release's config, template ids included (see build_config_updater)
     build_config_updater
+
+    release_preflight "$MAIN_BRINGYOURCTL_DIR" "$MAIN_BRINGYOURCTL_BINARY" images
+    error_trap 'dynamic preflight immediately before service promotion'
 
     # BUILD_HOME is the build repository root (set from this script's parent
     # above), so the rollout implementation is directly under all/.

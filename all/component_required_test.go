@@ -106,7 +106,30 @@ xcrun() {
     record_component_step "$step"
 }
 node() { record_component_step generate; }
-python3() { record_component_step generate; }
+release_build() { return 0; }
+release_complete() { return 0; }
+release_state() { return 0; }
+release_sdk_outputs() { print -r -- "$BUILD_HOME/sdk/packaging/release/plan.json"; }
+release_sdk_publication_begin() { return 0; }
+release_image_absent() { return 0; }
+release_image_receipt() { return 0; }
+# Actual image intent/crash/reuse behavior is exercised by the canonical-stage
+# Python fixtures. Keep these component tests' provider boundaries unchanged.
+release_image_publication_begin() { release_image_absent "$@"; }
+release_image_publication_complete() { release_image_receipt "$@"; }
+release_verify_mmm() { return 0; }
+release_apple_upload() {
+    xcrun altool --show-progress --upload-app --file "$2" -t "$1" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+}
+python3() {
+    if [[ "$1" == */release-publication.py && "$2" == asset ]]; then
+        local observed="$BUILD_HOME/observed-$4"
+        if [[ -f "$observed" ]]; then print -r -- '{"id":1}'; return 0; fi
+        : > "$observed"
+        return 10
+    fi
+    record_component_step generate
+}
 go() {
     if [[ "$#" != 6 || "$1" != -C || "$2" != "$BUILD_HOME/sdk/packaging" || "$3" != run || "$4" != . || "$5" != release || "$6" != desktop ]]; then
         printf 'unexpected-go\n' >> "$event_log"
@@ -184,8 +207,8 @@ func runComponent(t *testing.T, source, setup string, overrides ...string) compo
 
 // The iOS/macOS chain must stop at each failed build, validation, or publication step.
 func TestRunAppleComponentFailuresAreFatal(t *testing.T) {
-	appleStart := "(cd $BUILD_HOME/apple/app &&"
-	ios := componentRegion(t, appleStart, appleStart)
+	appleStart := "if release_build ios "
+	ios := componentRegion(t, appleStart, "if release_build macos-store ")
 	macos := strings.TrimPrefix(componentRegion(t, appleStart, "# ============================================================================="), ios)
 	for _, testCase := range []struct {
 		name      string
@@ -208,8 +231,8 @@ func TestRunAppleComponentFailuresAreFatal(t *testing.T) {
 
 // Export success without a new nonempty output must not reuse or publish an old artifact.
 func TestRunAppleRejectsMissingEmptyAndStaleArtifacts(t *testing.T) {
-	appleStart := "(cd $BUILD_HOME/apple/app &&"
-	ios := componentRegion(t, appleStart, appleStart)
+	appleStart := "if release_build ios "
+	ios := componentRegion(t, appleStart, "if release_build macos-store ")
 	allApple := componentRegion(t, appleStart, "# =============================================================================")
 	macos := strings.TrimPrefix(allApple, ios)
 	for _, testCase := range []struct {
@@ -236,8 +259,8 @@ func TestRunAppleRejectsMissingEmptyAndStaleArtifacts(t *testing.T) {
 // exactly once; the macOS pkg is the Mac App Store export, which does not launch
 // when installed directly, so it is never attached to the GitHub release.
 func TestRunAppleRequiredComponentsSucceed(t *testing.T) {
-	appleStart := "(cd $BUILD_HOME/apple/app &&"
-	ios := componentRegion(t, appleStart, appleStart)
+	appleStart := "if release_build ios "
+	ios := componentRegion(t, appleStart, "if release_build macos-store ")
 	macos := strings.TrimPrefix(componentRegion(t, appleStart, "# ============================================================================="), ios)
 	for _, testCase := range []struct {
 		extension string
@@ -320,7 +343,7 @@ curl() { record_component_step unexpected-api-query; return 52; }
 
 // A zero-exit generator must still produce all requested nonempty release metadata.
 func TestRunChangelogRejectsMissingOutputs(t *testing.T) {
-	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "fi # full-run source preparation")
 	setup := `BUILD_CHANGELOG_STORE="$BUILD_HOME/store.txt"
 BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
 BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
@@ -357,7 +380,7 @@ python3() {
 
 // Each generated note is independently required; old files cannot satisfy a failed refresh.
 func TestRunChangelogRejectsPartialAndStaleNotes(t *testing.T) {
-	source := componentRegion(t, `rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"`, "go_mod_edit_module () {")
+	source := componentRegion(t, `rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"`, "fi # full-run source preparation")
 	for _, note := range []string{"store.txt", "full.md", "123_Full.md", "123_Simple.txt", "123_Android.txt", "123_Apple.txt", "123_Windows.txt", "123_Linux.xml"} {
 		setup := completeChangelogSetup + `mkdir -p "$BUILD_NOTES_DIR"
 printf 'old note\n' > "$BUILD_NOTES_DIR/$MISSING_NOTE"
@@ -371,7 +394,7 @@ printf 'old note\n' > "$BUILD_NOTES_DIR/$MISSING_NOTE"
 
 // Generated notes stage successfully, but each attempted copy must preserve failure status.
 func TestRunChangelogCopyFailuresAreFatal(t *testing.T) {
-	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "fi # full-run source preparation")
 	for _, target := range []string{"125.txt", "default.txt", "release-description.xml"} {
 		setup := completeChangelogSetup + `mkdir -p "$BUILD_HOME/linux/app/packaging"
 printf 'opted-in description\n' > "$BUILD_HOME/linux/app/packaging/release-description.xml"
@@ -389,7 +412,7 @@ cp() {
 
 // Healthy metadata and the existing Linux opt-in handshake remain supported.
 func TestRunChangelogRequiredInputsSucceed(t *testing.T) {
-	source := componentRegion(t, releaseNotesStart, "go_mod_edit_module () {")
+	source := componentRegion(t, releaseNotesStart, "fi # full-run source preparation")
 	setup := completeChangelogSetup + `
 `
 	result := runComponent(t, source, setup, "MISSING_NOTE=")
@@ -400,7 +423,7 @@ func TestRunChangelogRequiredInputsSucceed(t *testing.T) {
 
 // Nullglob loops must not make absent Windows/Linux output sets look successful.
 func TestRunDesktopRejectsMissingOutputs(t *testing.T) {
-	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	source := componentRegion(t, `builder_message "building windows app`, "if release_build android ")
 	setup := `mkdir -p "$BUILD_HOME/out/desktop/windows" "$BUILD_HOME/out/desktop/linux"
 DESKTOP_OUT="$BUILD_HOME/out/desktop"
 printf 'sdk zip\n' > "$BUILD_HOME/sdk/cgo/build/URnetworkSdkWindows.zip"
@@ -496,7 +519,7 @@ func TestRunDesktopSelectedPlansRemainSupported(t *testing.T) {
 
 // Required desktop components preserve failure status rather than publishing a partial release.
 func TestRunDesktopBuildAndPublicationFailuresAreFatal(t *testing.T) {
-	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	source := componentRegion(t, `builder_message "building windows app`, "if release_build android ")
 	steps := []string{"windows-build", "linux-build", "flatpak-build", "publish"}
 	if strings.Contains(source, "sdk_package_stage desktop") {
 		steps = append(steps, "sdk-package-stage")
@@ -514,7 +537,7 @@ func TestRunDesktopBuildAndPublicationFailuresAreFatal(t *testing.T) {
 
 // A complete release still publishes both desktop matrices, even if ambient strict knobs are false.
 func TestRunDesktopRequiredComponentsSucceedWithStrictPackaging(t *testing.T) {
-	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	source := componentRegion(t, `builder_message "building windows app`, "if release_build android ")
 	stageCount := 0
 	if strings.Contains(source, "sdk_package_stage desktop") {
 		stageCount = 1
@@ -532,7 +555,7 @@ func TestRunDesktopRequiredComponentsSucceedWithStrictPackaging(t *testing.T) {
 // urnetwork/linux releases, and a .zsync on the release page would advertise
 // a channel that cannot work (GitHub Releases returns 501 on multi-range).
 func TestRunDesktopNeitherRequiresNorPublishesAppImageZsync(t *testing.T) {
-	source := componentRegion(t, `builder_message "building windows app`, "(cd $BUILD_HOME/android/app &&")
+	source := componentRegion(t, `builder_message "building windows app`, "if release_build android ")
 	setup := completeDesktopSetup + `for architecture in amd64 arm64; do
     printf 'stale\n' > "$DESKTOP_OUT/linux/URnetwork-$EXTERNAL_WARP_VERSION-$architecture.AppImage.zsync"
 done

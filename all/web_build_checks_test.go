@@ -12,9 +12,10 @@ import (
 // ur.xyz's checks run in web and ur.io's in the mmm service; either failing
 // stops the release before any app or service work.
 func TestRunWebAndMmmChecksFailBeforeReleaseWork(t *testing.T) {
-	source := componentRegion(t, "error_trap 'localizations codegen'", "# Gradle evaluates")
+	source := componentRegion(t, `builder_message "checking web builds`, "# license list gate:")
 	setup := `
 mkdir -p "$BUILD_HOME/web/web" "$WARP_HOME/mmm/mmm"
+python3() { return 0; } # Gate evidence storage is covered by real entrypoint fixtures.
 make() {
     [[ "$*" == check && "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
     case "$PWD" in
@@ -46,7 +47,7 @@ make() {
 // builds against this release's warp through a workspace, not the developer's
 // checkout its go.mod names. None of those settings outlive their command.
 func TestRunDisablesSiteChecksOnlyForFinalWebAndMmmBuilds(t *testing.T) {
-	source := componentRegion(t, `(cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0`, `(cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)`)
+	source := componentRegion(t, `if release_build image-web `, `if release_build image-manager `)
 	setup := `
 WEB_BUILD_CHECKS=caller-value
 URNETWORK_ROOT=caller-root
@@ -95,9 +96,10 @@ func TestRunSiteChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T
 	for _, step := range []string{
 		"error_trap 'ur.io content dates update'",
 		"error_trap 'localizations codegen'",
+		"error_trap 'build bootstrap warpctl'",
+		"error_trap 'early read-only deployment preflight'",
 		"error_trap 'web build checks'",
 		"error_trap 'mmm build checks'",
-		"error_trap 'build bootstrap warpctl'",
 		`warpctl stage version next release --message="$HOST build all"`,
 		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile`,
 		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile"`,

@@ -136,7 +136,10 @@ stage_local_repos sdk connect gvisor glog goidenticons android
 
 echo ">>> building the android github flavor in the fdroid buildserver container (android on branch $(git -C "$BUILD_HOME/android" branch --show-current))"
 docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver
-docker run --oom-kill-disable --memory="8192m" --rm -u vagrant \
+# The SDK compile exceeded the old 8 GiB cap and stalled in reclaim with OOM
+# kills disabled despite ample VM memory. Keep a fixed 12 GiB cap; the release
+# host contract already requires at least 16 GiB assigned to Docker Desktop.
+docker run --oom-kill-disable --memory="12g" --rm -u vagrant \
     --entrypoint /urnetwork/build/all/build-fdroid.sh \
     -v "$WARP_HOME/release:/urnetwork/release:z" \
     -v "$BUILD_HOME:/urnetwork/build:Z" \
