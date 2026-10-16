@@ -27,10 +27,34 @@ func ipDatabaseRefreshFixture(t *testing.T, fail bool, env ...string) (string, s
 	}
 	fake := filepath.Join(dir, "fake-arindbctl")
 	if err := os.WriteFile(fake, []byte(`#!/bin/sh
+if [ "$1" = canary-baseline ]; then
+  printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS.baseline"
+  printf '%s\n' "${IP_DATABASE_TEST_BASELINE-copy}"
+  exit "${IP_DATABASE_TEST_BASELINE_STATUS:-0}"
+fi
+if [ "$1" = geolite2 ]; then
+  printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS.geolite2"
+  [ "$2" = refresh ] || exit 9
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --output) shift; target="$1" ;;
+    esac
+    shift
+  done
+  mkdir -p "$target"
+  printf 'synthetic geolite\n' > "$target/geolite2.mmdb"
+  printf 'synthetic places\n' > "$target/places.yml"
+  printf '{}\n' > "$target/manifest.json"
+  exit 0
+fi
 printf '%s\n' "$@" > "$IP_DATABASE_TEST_ARGS"
 [ "$1" = update ] || exit 8
+previous=no
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output ]; then shift; target="$1"; fi
+  case "$1" in
+    --output) shift; target="$1" ;;
+    --previous-config|--previous-database) previous=yes ;;
+  esac
   shift
 done
 mkdir -p "$target/mmdb"
@@ -38,12 +62,17 @@ printf 'synthetic geolite\n' > "$target/mmdb/geolite2.mmdb"
 [ "$IP_DATABASE_TEST_FAIL" = no ] || exit 7
 mkdir -p "$target/arindb"
 printf 'synthetic arin\n' > "$target/arindb/arin.mmdb"
+# the canary copy, which a refused copy leaves out
+if [ "$previous" = yes ] && [ "${IP_DATABASE_TEST_COPY:-yes}" = yes ]; then
+  printf 'synthetic previous arin\n' > "$target/arindb/arin-old.mmdb"
+  printf '{}\n' > "$target/arindb/manifest-old.json"
+fi
 printf 'synthetic places\n' > "$target/mmdb/places.yml"
 printf '{}\n' > "$target/mmdb/manifest.json"
 printf '{}\n' > "$target/arindb/manifest.json"
 mkdir -p "$target/subscriber-evidence"
 printf 'synthetic evidence\n' > "$target/subscriber-evidence/catalog.yml"
-printf 'registration and subscriber augmentation applied; unavailable evidence: asdb\n' > "$target/update-summary.txt"
+printf '%s\n' "${IP_DATABASE_TEST_SUMMARY:-registration and subscriber augmentation applied; unavailable evidence: asdb}" > "$target/update-summary.txt"
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -315,5 +344,170 @@ func TestReleaseIpDatabaseUpdateUsesExplicitCatalogWithoutDefault(t *testing.T) 
 	}
 	if !strings.Contains(string(args), "--subscriber-catalog\n"+catalog+"\n") || strings.Contains(string(args), defaultCatalog) {
 		t.Fatalf("explicit catalog was not preserved: %s", args)
+	}
+}
+
+// The canary's previous database is exactly what the release's environment
+// selects now: the runner names the config root and environment, before this
+// release's version exists, and publishes arindbctl's copy with the release.
+func TestReleaseIpDatabaseRefreshCopiesThePreviousSelectionForward(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--previous-config\n"+filepath.Join(warpHome, "config")+"\n--previous-env\nmain\n") || strings.Contains(string(args), "--previous-database") {
+		t.Fatalf("refresh did not name the selected previous database: %s", args)
+	}
+	for _, name := range []string{"arin-old.mmdb", "manifest-old.json"} {
+		if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", name)); err != nil {
+			t.Fatalf("the release lost the canary copy %s: %v", name, err)
+		}
+	}
+}
+
+// After a bad release the operator pins the last good database; the pin
+// replaces the selection rather than adding to it.
+func TestReleaseIpDatabaseRefreshPinsThePreviousDatabase(t *testing.T) {
+	pinned := filepath.Join(t.TempDir(), "last good", "arin.mmdb")
+	dir, _, command := ipDatabaseRefreshFixture(t, false, "ARIN_PREVIOUS_DATABASE_FILE="+pinned)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--previous-database\n"+pinned+"\n") || strings.Contains(string(args), "--previous-config") || strings.Contains(string(args), "--previous-env") {
+		t.Fatalf("the pin was not passed alone: %s", args)
+	}
+}
+
+// A copy arindbctl refuses ships the release without a canary: the release
+// still publishes and pushes, and its message says so.
+func TestReleaseIpDatabaseRefreshShipsWithoutACanaryWhenTheCopyIsRefused(t *testing.T) {
+	summary := "registration and subscriber augmentation applied; no canary: previous database refused (the copied bytes do not have the previous manifest's SHA-256)"
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false, "IP_DATABASE_TEST_COPY=no", "IP_DATABASE_TEST_SUMMARY="+summary)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("a refused copy failed the release: %v\n%s", err, output)
+	}
+	release := filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4")
+	if _, err := os.Stat(filepath.Join(release, "arin.mmdb")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(release, "arin-old.mmdb")); !os.IsNotExist(err) {
+		t.Fatal("a refused copy was published")
+	}
+	events, err := os.ReadFile(filepath.Join(dir, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(events), "push\n") || !strings.Contains(string(events), "no canary: previous database refused") {
+		t.Fatalf("the release did not publish or did not say it ships without a canary: %s", events)
+	}
+}
+
+// With the published canary decision the copy follows the database it
+// protects, from the selected Server's arindbctl: the selection copies as
+// before, a fallback's database is pinned, and a decision it cannot follow, or
+// a failing answer, pauses the ARIN refresh without failing the release while
+// GeoLite2 still refreshes. The operator's pin wins over the decision, and
+// without a decision the release says the copy was not gated.
+func TestReleaseIpDatabaseRefreshFollowsTheCanaryDecision(t *testing.T) {
+	decisionEnv := func(dir string) string {
+		path := filepath.Join(dir, "decision.json")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "ARIN_CANARY_DECISION_FILE=" + path
+	}
+	for _, c := range []struct {
+		name      string
+		env       []string
+		pinned    bool
+		published bool
+		paused    bool
+		update    string
+		message   string
+	}{
+		{name: "the selection is served", env: []string{"IP_DATABASE_TEST_BASELINE=copy"}, published: true,
+			update: "--previous-config\n", message: "registration and subscriber augmentation applied; unavailable evidence: asdb"},
+		{name: "a fallback is served", env: []string{"IP_DATABASE_TEST_BASELINE=pin /served/arin.mmdb"}, published: true,
+			update: "--previous-database\n/served/arin.mmdb\n", message: "(canary baseline pinned to the protected /served/arin.mmdb)"},
+		{name: "a decision it cannot follow", env: []string{"IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1"}, paused: true,
+			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: the canary decision is version 2, not 1"},
+		{name: "an empty answer", env: []string{"IP_DATABASE_TEST_BASELINE="}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
+		{name: "an empty pause reason", env: []string{"IP_DATABASE_TEST_BASELINE=pause "}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
+		{name: "an unknown answer", env: []string{"IP_DATABASE_TEST_BASELINE=unexpected"}, paused: true,
+			message: "ARIN refresh paused, so the previous ARIN release stays selected: unrecognized canary-baseline response"},
+		{name: "a failing answer", env: []string{"IP_DATABASE_TEST_BASELINE=copy", "IP_DATABASE_TEST_BASELINE_STATUS=3"}, paused: true,
+			message: "message:GeoLite2 database refreshed for `1.2.3-4`. ARIN refresh paused, so the previous ARIN release stays selected: arindbctl canary-baseline failed"},
+		{name: "the operator's pin", env: []string{"IP_DATABASE_TEST_BASELINE=pause never asked", "ARIN_PREVIOUS_DATABASE_FILE=/pinned/arin.mmdb"},
+			pinned: true, published: true, update: "--previous-database\n/pinned/arin.mmdb\n"},
+	} {
+		dir, warpHome, command := ipDatabaseRefreshFixture(t, false, c.env...)
+		command.Env = append(command.Env, decisionEnv(dir))
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s: refresh failed: %v\n%s", c.name, err, output)
+		}
+		baselineArgs, baselineErr := os.ReadFile(filepath.Join(dir, "args.baseline"))
+		if c.pinned != os.IsNotExist(baselineErr) {
+			t.Errorf("%s: canary-baseline asked=%t, want %t", c.name, baselineErr == nil, !c.pinned)
+		}
+		if !c.pinned && !strings.Contains(string(baselineArgs), "canary-baseline\n--decision\n"+filepath.Join(dir, "decision.json")+"\n--previous-config\n"+filepath.Join(warpHome, "config")+"\n--previous-env\nmain\n") {
+			t.Errorf("%s: canary-baseline args %q", c.name, baselineArgs)
+		}
+		args, argsErr := os.ReadFile(filepath.Join(dir, "args"))
+		_, published := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4", "arin.mmdb"))
+		if c.published != (published == nil) || c.published != (argsErr == nil) {
+			t.Errorf("%s: published=%v update=%v, want published %t", c.name, published, argsErr, c.published)
+		}
+		if c.published && !strings.Contains(string(args), c.update) {
+			t.Errorf("%s: update args %q lack %q", c.name, args, c.update)
+		}
+		events, _ := os.ReadFile(filepath.Join(dir, "events"))
+		if c.message != "" && !strings.Contains(string(events), c.message) {
+			t.Errorf("%s: events %q lack %q", c.name, events, c.message)
+		}
+		// Both outcomes retain a complete publication for the release checkpoint.
+		checkpoint := filepath.Join(dir, "build tree", "out", "ip-databases", "release-1.2.3+4")
+		for _, name := range []string{"summary.txt", "mmdb/geolite2.mmdb"} {
+			if _, err := os.Stat(filepath.Join(checkpoint, name)); err != nil {
+				t.Errorf("%s: missing checkpoint output %s: %v", c.name, name, err)
+			}
+		}
+		_, arinCheckpoint := os.Stat(filepath.Join(checkpoint, "arindb", "arin.mmdb"))
+		if c.published != (arinCheckpoint == nil) {
+			t.Errorf("%s: checkpoint ARIN=%v, want published %t", c.name, arinCheckpoint, c.published)
+		}
+		// a pause still publishes GeoLite2, and only GeoLite2
+		_, geolite2 := os.Stat(filepath.Join(warpHome, "config", "all", "mmdb", "1.2.3+4", "geolite2.mmdb"))
+		if geolite2 != nil {
+			t.Errorf("%s: GeoLite2 was not published: %v", c.name, geolite2)
+		}
+		geolite2Args, geolite2Err := os.ReadFile(filepath.Join(dir, "args.geolite2"))
+		if c.paused != (geolite2Err == nil) {
+			t.Errorf("%s: GeoLite2-only refresh ran=%t, want %t", c.name, geolite2Err == nil, c.paused)
+		}
+		if c.paused && (!strings.Contains(string(geolite2Args), "geolite2\nrefresh\n--geoip-config\n"+filepath.Join(warpHome, "vault", "mm-geoip.yml")+"\n") ||
+			!strings.Contains(string(events), "git:commit -m 1.2.3-4 GeoLite2 database -- all/mmdb/1.2.3+4\n") || strings.Contains(string(events), "all/arindb/1.2.3+4")) {
+			t.Errorf("%s: a pause did not publish GeoLite2 alone: args %q events %q", c.name, geolite2Args, events)
+		}
+	}
+	// without a decision the copy is not gated, and the release says so
+	dir, _, command := ipDatabaseRefreshFixture(t, false)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "args.baseline")); !os.IsNotExist(err) {
+		t.Fatal("canary-baseline was asked without a decision")
+	}
+	if events, _ := os.ReadFile(filepath.Join(dir, "events")); !strings.Contains(string(events), "(canary copy-forward not gated: ARIN_CANARY_DECISION_FILE is unset)") {
+		t.Fatalf("an ungated copy was not reported: %s", events)
 	}
 }

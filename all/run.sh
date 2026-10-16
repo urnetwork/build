@@ -25,6 +25,20 @@ umask 022
 #            and publishes the augmented database.
 # (optional) ARIN_RELAY_GEOFEEDS=1 also pins the Apple Private Relay and
 #            Cloudflare egress geofeeds as reviewed VPN address lists
+# (optional) ARIN_PREVIOUS_DATABASE_FILE names the arin.mmdb the ARIN canary
+#            compares the new build against, instead of the database the
+#            $BUILD_ENV config selects now. Set it to the last good database
+#            after a bad release (the baseline pin) and clear it once a good
+#            release ships (server arindbctl/ARINDB.md, "Dual-database canary").
+# (optional) ARIN_CANARY_DECISION_FILE names a copy of the canary decision the
+#            $BUILD_ENV score export published ({arindb_canary_decision}).
+#            Without the pin, the copy then follows the database the decision
+#            protects: a fallback's database is pinned automatically, and a
+#            decision that cannot be followed (unreadable, older than six
+#            hours, or protecting a database no release directory holds)
+#            pauses the ARIN refresh for this release while GeoLite2 still
+#            refreshes; the release message says so. Unset, the copy is not
+#            gated and the release message says so.
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
 # (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
@@ -3067,6 +3081,74 @@ refresh_ip_databases () {
     ipdb_work=$(mktemp -d "$ipdb_out/refresh.XXXXXXXX") || return $?
     (cd "$BUILD_HOME/server${GO_MOD_SUFFIX}" &&
         go build -ldflags "-X main.Version=$WARP_VERSION" -o "$ipdb_work/arindbctl" ./arindbctl) || return $?
+    # The canary copies the previously selected database beside the new build
+    # as arin-old.mmdb: exactly the file a $BUILD_ENV process opens before
+    # this release is added, or the operator's pin. With the published canary
+    # decision, the copy follows the database the decision protects, so a
+    # rejected latest never becomes the next release's baseline, and a
+    # decision it cannot follow pauses the ARIN refresh while GeoLite2 still
+    # refreshes. A copy arindbctl refuses never fails the release; the update
+    # summary says the release ships without a canary.
+    local copy_note='' arin_pause=''
+    # A paused ARIN refresh deliberately publishes no new ARIN directory.
+    # Retain the actual publication in one fixed checkpoint directory so
+    # resume verifies either outcome without requiring a nonexistent file.
+    local ipdb_checkpoint="$ipdb_out/release-$WARP_VERSION"
+    if [ -n "${ARIN_PREVIOUS_DATABASE_FILE:-}" ]; then
+        update_args+=(--previous-database "$ARIN_PREVIOUS_DATABASE_FILE")
+    elif [ -n "${ARIN_CANARY_DECISION_FILE:-}" ]; then
+        local baseline=''
+        if ! baseline=$("$ipdb_work/arindbctl" canary-baseline \
+                --decision "$ARIN_CANARY_DECISION_FILE" \
+                --previous-config "$config_root" \
+                --previous-env "$BUILD_ENV"); then
+            baseline="pause arindbctl canary-baseline failed"
+        fi
+        case "$baseline" in
+            copy)
+                update_args+=(--previous-config "$config_root" --previous-env "$BUILD_ENV")
+                ;;
+            "pin "?*)
+                update_args+=(--previous-database "${baseline#pin }")
+                copy_note=" (canary baseline pinned to the protected ${baseline#pin })"
+                ;;
+            "pause "?*)
+                arin_pause="${baseline#pause }"
+                ;;
+            *)
+                arin_pause='unrecognized canary-baseline response'
+                ;;
+        esac
+    else
+        update_args+=(--previous-config "$config_root" --previous-env "$BUILD_ENV")
+        copy_note=' (canary copy-forward not gated: ARIN_CANARY_DECISION_FILE is unset)'
+    fi
+    if [ -n "$arin_pause" ]; then
+        # The canary decision cannot be followed, so no ARIN database is
+        # published and the previous ARIN release stays selected. GeoLite2
+        # refreshes on its own.
+        "$ipdb_work/arindbctl" geolite2 refresh \
+            --geoip-config "$geoip_config" \
+            --output "$ipdb_work/geolite2" \
+            --timeout 2h || return $?
+        if [ -e "$geoip_target" ] || [ -L "$geoip_target" ]; then
+            print -u2 -- "GeoLite2 refresh version appeared during generation; nothing published"
+            return 1
+        fi
+        mkdir -p -- "$config_root/all/mmdb" || return $?
+        mv -- "$ipdb_work/geolite2" "$geoip_target" || return $?
+        (cd "$config_root" &&
+            git add -- "all/mmdb/$WARP_VERSION" &&
+            if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION"; then
+                git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 database" -- "all/mmdb/$WARP_VERSION" &&
+                git_push_with_rebase_retry
+            fi) || return $?
+        mkdir -- "$ipdb_checkpoint" || return $?
+        cp -R -- "$geoip_target" "$ipdb_checkpoint/mmdb" || return $?
+        print -r -- "ARIN paused: $arin_pause" > "$ipdb_checkpoint/summary.txt" || return $?
+        builder_message "GeoLite2 database refreshed for \`${EXTERNAL_WARP_VERSION}\`. ARIN refresh paused, so the previous ARIN release stays selected: ${arin_pause}"
+        return 0
+    fi
     # Nothing is published unless every required database validates. The
     # subscriber evidence, registration base, audit and validation stay in
     # $ipdb_work/bundle/subscriber-evidence for review; they are not config.
@@ -3099,14 +3181,18 @@ refresh_ip_databases () {
     if [ -r "$ipdb_work/bundle/update-summary.txt" ]; then
         update_summary=$(<"$ipdb_work/bundle/update-summary.txt")
     fi
-    builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${update_summary:-no update summary}"
+    mkdir -- "$ipdb_checkpoint" || return $?
+    cp -R -- "$geoip_target" "$ipdb_checkpoint/mmdb" || return $?
+    cp -R -- "$arin_target" "$ipdb_checkpoint/arindb" || return $?
+    print -r -- "${update_summary:-no update summary}${copy_note}" > "$ipdb_checkpoint/summary.txt" || return $?
+    builder_message "GeoLite2 and ARIN databases refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${update_summary:-no update summary}${copy_note}"
 }
 
-if release_build ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"; then
+if release_build ip-databases "${BUILD_OUT:-$BUILD_HOME/out}/ip-databases/release-$WARP_VERSION"; then
 refresh_ip_databases
 error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 release_transition ip-databases
-release_complete ip-databases "$WARP_HOME/config/all/mmdb/$WARP_VERSION" "$WARP_HOME/config/all/arindb/$WARP_VERSION"
+release_complete ip-databases "${BUILD_OUT:-$BUILD_HOME/out}/ip-databases/release-$WARP_VERSION"
 fi
 
 # The config-updater image carries this release's config, so on the deploy
