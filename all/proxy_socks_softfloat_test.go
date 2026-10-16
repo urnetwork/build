@@ -22,6 +22,8 @@ const proxySocksSoftfloatHarness = `
 BUILD_HOME="$1"
 GO_MOD_SUFFIX=/v2026
 builder_message() { print -r -- "message:$*" >> "$BUILD_HOME/events"; }
+release_build() { return 0; }
+release_complete() { return 0; }
 source "$2"
 eval "$3"
 eval "$4"
@@ -81,7 +83,7 @@ func TestProxySocksReleaseRequiresMipsSoftFloat(t *testing.T) {
 	buildMipsBinary(t, moduleDir, filepath.Join(hard, "mips64"), "GOARCH=mips64", "GOMIPS=softfloat")
 	buildMipsBinary(t, moduleDir, filepath.Join(hard, "mips64le"), "GOARCH=mips64le", "GOMIPS=softfloat")
 
-	region := componentRegion(t, "(cd $BUILD_HOME/proxy${GO_MOD_SUFFIX}/socks && make)", "\ngithub_release_upload \"urnetwork-proxy-socks-")
+	region := componentRegion(t, "if release_build proxy-socks ", "\ngithub_release_upload \"urnetwork-proxy-socks-")
 	errorTrap := componentFunctions(t, "error_trap")
 	mipsEnv := filepath.Join(rolloutRoot(t), "go-mips-env.sh")
 

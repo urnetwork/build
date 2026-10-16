@@ -12,16 +12,22 @@ import (
 // A clean release checkout has no warpctl binary. Gradle needs that exact
 // sibling binary even when the license collector only requests dependencies.
 func TestRunBootstrapsWarpctlBeforeLicenseGate(t *testing.T) {
-	source := componentRegion(t, "error_trap 'mmm build checks'", "# Dependency vulnerability gate.")
+	// Keep the actual bootstrap and license blocks; intervening site checks
+	// have their own fatal-gate tests and now follow the early deploy preflight.
+	source := componentRegion(t, "# Gradle and deployment guard planning", "# Build both sites") + componentRegion(t, "# license list gate:", "# Dependency vulnerability gate.")
 	setup := `
 WARP_HOME="$BUILD_HOME/workspace"
 mkdir -p "$BUILD_HOME/warp/warpctl"
+release_early_preflight() { return 0; }
+python3() {
+    [[ "$1" == "$BUILD_HOME/all/release-state.py" && "$2" == check-inputs && "$3" == "$WARP_HOME" ]] || return 54
+}
 make() {
     [[ "$PWD" == "$BUILD_HOME/warp/warpctl" ]] || return 51
     record_component_step bootstrap || return $?
     if [[ "$ARTIFACT_MODE" == complete ]]; then
         mkdir -p build/darwin/arm64
-        printf '#!/bin/sh\nprintf "warp-version-code\\n" >> "$BUILD_HOME/events"\n' > build/darwin/arm64/warpctl
+        printf '#!/bin/sh\nif [ "$*" = "ls docker-namespace" ]; then printf "bringyour\\n"; else printf "warp-version-code\\n" >> "$BUILD_HOME/events"; fi\n' > build/darwin/arm64/warpctl
         chmod +x build/darwin/arm64/warpctl
     fi
 }
