@@ -551,6 +551,7 @@
                 "GO-2026-6603"
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659",
                 "GO-2026-6603"
               ],
@@ -561,6 +562,7 @@
                 "GO-2026-6610"
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660",
                 "GO-2026-6610"
               ],
@@ -571,6 +573,7 @@
                 "GO-2026-6611"
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669",
                 "GO-2026-6611"
               ],
@@ -581,6 +584,7 @@
                 "GO-2026-6612"
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663",
                 "GO-2026-6612"
               ],
@@ -591,6 +595,7 @@
                 "GO-2026-6617"
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032",
                 "GO-2026-6617"
               ],
@@ -1051,6 +1056,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659"
               ],
               "credits": [
@@ -1064,7 +1070,7 @@
               },
               "details": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently.",
               "id": "GO-2026-6603",
-              "modified": "2026-10-08T22:45:07.896248218Z",
+              "modified": "2026-10-16T09:55:47.068117441Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -1233,6 +1239,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660"
               ],
               "credits": [
@@ -1246,7 +1253,7 @@
               },
               "details": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling.",
               "id": "GO-2026-6610",
-              "modified": "2026-10-08T23:00:13.120370808Z",
+              "modified": "2026-10-16T09:56:04.364467528Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -1780,6 +1787,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669"
               ],
               "credits": [
@@ -1793,7 +1801,7 @@
               },
               "details": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values.",
               "id": "GO-2026-6611",
-              "modified": "2026-10-08T22:45:08.418707742Z",
+              "modified": "2026-10-16T09:55:38.952277866Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -2244,6 +2252,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663"
               ],
               "credits": [
@@ -2257,7 +2266,7 @@
               },
               "details": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control.",
               "id": "GO-2026-6612",
-              "modified": "2026-10-08T23:00:13.121765309Z",
+              "modified": "2026-10-16T09:55:54.129082194Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -2740,6 +2749,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032"
               ],
               "credits": [
@@ -2753,7 +2763,7 @@
               },
               "details": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server.",
               "id": "GO-2026-6617",
-              "modified": "2026-10-08T22:45:07.914682376Z",
+              "modified": "2026-10-16T09:55:57.350751224Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -3505,6 +3515,7 @@
                 "GO-2026-6603"
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659",
                 "GO-2026-6603"
               ],
@@ -3515,6 +3526,7 @@
                 "GO-2026-6610"
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660",
                 "GO-2026-6610"
               ],
@@ -3525,6 +3537,7 @@
                 "GO-2026-6611"
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669",
                 "GO-2026-6611"
               ],
@@ -3535,6 +3548,7 @@
                 "GO-2026-6612"
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663",
                 "GO-2026-6612"
               ],
@@ -3545,6 +3559,7 @@
                 "GO-2026-6617"
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032",
                 "GO-2026-6617"
               ],
@@ -4005,6 +4020,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659"
               ],
               "credits": [
@@ -4018,7 +4034,7 @@
               },
               "details": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently.",
               "id": "GO-2026-6603",
-              "modified": "2026-10-08T22:45:07.896248218Z",
+              "modified": "2026-10-16T09:55:47.068117441Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -4187,6 +4203,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660"
               ],
               "credits": [
@@ -4200,7 +4217,7 @@
               },
               "details": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling.",
               "id": "GO-2026-6610",
-              "modified": "2026-10-08T23:00:13.120370808Z",
+              "modified": "2026-10-16T09:56:04.364467528Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -4734,6 +4751,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669"
               ],
               "credits": [
@@ -4747,7 +4765,7 @@
               },
               "details": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values.",
               "id": "GO-2026-6611",
-              "modified": "2026-10-08T22:45:08.418707742Z",
+              "modified": "2026-10-16T09:55:38.952277866Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -5198,6 +5216,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663"
               ],
               "credits": [
@@ -5211,7 +5230,7 @@
               },
               "details": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control.",
               "id": "GO-2026-6612",
-              "modified": "2026-10-08T23:00:13.121765309Z",
+              "modified": "2026-10-16T09:55:54.129082194Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -5694,6 +5713,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032"
               ],
               "credits": [
@@ -5707,7 +5727,7 @@
               },
               "details": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server.",
               "id": "GO-2026-6617",
-              "modified": "2026-10-08T22:45:07.914682376Z",
+              "modified": "2026-10-16T09:55:57.350751224Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -6555,6 +6575,7 @@
                 "GO-2026-6603"
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659",
                 "GO-2026-6603"
               ],
@@ -6565,6 +6586,7 @@
                 "GO-2026-6610"
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660",
                 "GO-2026-6610"
               ],
@@ -6575,6 +6597,7 @@
                 "GO-2026-6611"
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669",
                 "GO-2026-6611"
               ],
@@ -6585,6 +6608,7 @@
                 "GO-2026-6612"
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663",
                 "GO-2026-6612"
               ],
@@ -6595,6 +6619,7 @@
                 "GO-2026-6617"
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032",
                 "GO-2026-6617"
               ],
@@ -7055,6 +7080,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659"
               ],
               "credits": [
@@ -7068,7 +7094,7 @@
               },
               "details": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently.",
               "id": "GO-2026-6603",
-              "modified": "2026-10-08T22:45:07.896248218Z",
+              "modified": "2026-10-16T09:55:47.068117441Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -7237,6 +7263,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660"
               ],
               "credits": [
@@ -7250,7 +7277,7 @@
               },
               "details": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling.",
               "id": "GO-2026-6610",
-              "modified": "2026-10-08T23:00:13.120370808Z",
+              "modified": "2026-10-16T09:56:04.364467528Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -7784,6 +7811,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669"
               ],
               "credits": [
@@ -7797,7 +7825,7 @@
               },
               "details": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values.",
               "id": "GO-2026-6611",
-              "modified": "2026-10-08T22:45:08.418707742Z",
+              "modified": "2026-10-16T09:55:38.952277866Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -8248,6 +8276,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663"
               ],
               "credits": [
@@ -8261,7 +8290,7 @@
               },
               "details": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control.",
               "id": "GO-2026-6612",
-              "modified": "2026-10-08T23:00:13.121765309Z",
+              "modified": "2026-10-16T09:55:54.129082194Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -8744,6 +8773,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032"
               ],
               "credits": [
@@ -8757,7 +8787,7 @@
               },
               "details": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server.",
               "id": "GO-2026-6617",
-              "modified": "2026-10-08T22:45:07.914682376Z",
+              "modified": "2026-10-16T09:55:57.350751224Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -9334,6 +9364,7 @@
                 "GO-2026-6603"
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659",
                 "GO-2026-6603"
               ],
@@ -9344,6 +9375,7 @@
                 "GO-2026-6610"
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660",
                 "GO-2026-6610"
               ],
@@ -9354,6 +9386,7 @@
                 "GO-2026-6611"
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669",
                 "GO-2026-6611"
               ],
@@ -9364,6 +9397,7 @@
                 "GO-2026-6612"
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663",
                 "GO-2026-6612"
               ],
@@ -9374,6 +9408,7 @@
                 "GO-2026-6617"
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032",
                 "GO-2026-6617"
               ],
@@ -9834,6 +9869,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78659",
                 "CVE-2026-78659"
               ],
               "credits": [
@@ -9847,7 +9883,7 @@
               },
               "details": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently.",
               "id": "GO-2026-6603",
-              "modified": "2026-10-08T22:45:07.896248218Z",
+              "modified": "2026-10-16T09:55:47.068117441Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -10016,6 +10052,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78660",
                 "CVE-2026-78660"
               ],
               "credits": [
@@ -10029,7 +10066,7 @@
               },
               "details": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling.",
               "id": "GO-2026-6610",
-              "modified": "2026-10-08T23:00:13.120370808Z",
+              "modified": "2026-10-16T09:56:04.364467528Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -10563,6 +10600,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78669",
                 "CVE-2026-78669"
               ],
               "credits": [
@@ -10576,7 +10614,7 @@
               },
               "details": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values.",
               "id": "GO-2026-6611",
-              "modified": "2026-10-08T22:45:08.418707742Z",
+              "modified": "2026-10-16T09:55:38.952277866Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -11027,6 +11065,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-78663",
                 "CVE-2026-78663"
               ],
               "credits": [
@@ -11040,7 +11079,7 @@
               },
               "details": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control.",
               "id": "GO-2026-6612",
-              "modified": "2026-10-08T23:00:13.121765309Z",
+              "modified": "2026-10-16T09:55:54.129082194Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -11523,6 +11562,7 @@
                 }
               ],
               "aliases": [
+                "BIT-golang-2026-97032",
                 "CVE-2026-97032"
               ],
               "credits": [
@@ -11536,7 +11576,7 @@
               },
               "details": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server.",
               "id": "GO-2026-6617",
-              "modified": "2026-10-08T22:45:07.914682376Z",
+              "modified": "2026-10-16T09:55:57.350751224Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
