@@ -3126,11 +3126,11 @@ fi
 # the image now, for a rollout run later by hand.
 build_config_updater () {
     if release_build image-config-updater "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-config-updater.json"; then
-    release_image_absent config-updater
+    release_image_publication_begin config-updater
     error_trap 'verify unpublished config-updater image'
     (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/config-updater/Makefile --config_restart=no)
     error_trap 'warpctl build config-updater'
-    release_image_receipt config-updater
+    release_image_publication_complete config-updater
     error_trap 'record config-updater image digest'
     release_complete image-config-updater "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-config-updater.json"
     fi
@@ -3143,11 +3143,11 @@ if [ "$WARP_SKIP_DEPLOY" != "" ]; then
 fi
 
 if release_build image-grafana "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-grafana.json"; then
-release_image_absent grafana
+release_image_publication_begin grafana
 error_trap 'verify unpublished grafana image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/grafana/Makefile)
 error_trap 'warpctl build grafana'
-release_image_receipt grafana
+release_image_publication_complete grafana
 error_trap 'record grafana image digest'
 release_complete image-grafana "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-grafana.json"
 fi
@@ -3156,11 +3156,11 @@ error_trap 'verify retained grafana image digest'
 builder_message "service grafana \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-lb "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-lb.json"; then
-release_image_absent lb
+release_image_publication_begin lb
 error_trap 'verify unpublished lb image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV warp/lb/Makefile)
 error_trap 'warpctl build lb'
-release_image_receipt lb
+release_image_publication_complete lb
 error_trap 'record lb image digest'
 release_complete image-lb "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-lb.json"
 fi
@@ -3169,11 +3169,11 @@ error_trap 'verify retained lb image digest'
 builder_message "service lb \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-taskworker "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-taskworker.json"; then
-release_image_absent taskworker
+release_image_publication_begin taskworker
 error_trap 'verify unpublished taskworker image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/taskworker/Makefile)
 error_trap 'warpctl build taskworker'
-release_image_receipt taskworker
+release_image_publication_complete taskworker
 error_trap 'record taskworker image digest'
 release_complete image-taskworker "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-taskworker.json"
 fi
@@ -3182,11 +3182,11 @@ error_trap 'verify retained taskworker image digest'
 builder_message "service taskworker \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-api "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-api.json"; then
-release_image_absent api
+release_image_publication_begin api
 error_trap 'verify unpublished api image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/api/Makefile)
 error_trap 'warpctl build api'
-release_image_receipt api
+release_image_publication_complete api
 error_trap 'record api image digest'
 release_complete image-api "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-api.json"
 fi
@@ -3195,11 +3195,11 @@ error_trap 'verify retained api image digest'
 builder_message "service api \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-connect "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-connect.json"; then
-release_image_absent connect
+release_image_publication_begin connect
 error_trap 'verify unpublished connect image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/connect/Makefile)
 error_trap 'warpctl build connect'
-release_image_receipt connect
+release_image_publication_complete connect
 error_trap 'record connect image digest'
 release_complete image-connect "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-connect.json"
 fi
@@ -3208,11 +3208,11 @@ error_trap 'verify retained connect image digest'
 builder_message "service connect \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-mcp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mcp.json"; then
-release_image_absent mcp
+release_image_publication_begin mcp
 error_trap 'verify unpublished mcp image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/mcp/Makefile)
 error_trap 'warpctl build mcp'
-release_image_receipt mcp
+release_image_publication_complete mcp
 error_trap 'record mcp image digest'
 release_complete image-mcp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mcp.json"
 fi
@@ -3221,11 +3221,11 @@ error_trap 'verify retained mcp image digest'
 builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"; then
-release_image_absent gossip
+release_image_publication_begin gossip
 error_trap 'verify unpublished gossip image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/gossip/Makefile)
 error_trap 'warpctl build gossip'
-release_image_receipt gossip
+release_image_publication_complete gossip
 error_trap 'record gossip image digest'
 release_complete image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"
 fi
@@ -3234,11 +3234,11 @@ error_trap 'verify retained gossip image digest'
 builder_message "service gossip \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"; then
-release_image_absent alt
+release_image_publication_begin alt
 error_trap 'verify unpublished alt image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/alt/Makefile)
 error_trap 'warpctl build alt'
-release_image_receipt alt
+release_image_publication_complete alt
 error_trap 'record alt image digest'
 release_complete image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"
 fi
@@ -3247,11 +3247,11 @@ error_trap 'verify retained alt image digest'
 builder_message "service alt \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-proxy "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-proxy.json"; then
-release_image_absent proxy
+release_image_publication_begin proxy
 error_trap 'verify unpublished proxy image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/proxy/Makefile)
 error_trap 'warpctl build proxy'
-release_image_receipt proxy
+release_image_publication_complete proxy
 error_trap 'record proxy image digest'
 release_complete image-proxy "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-proxy.json"
 fi
@@ -3260,11 +3260,11 @@ error_trap 'verify retained proxy image digest'
 builder_message "service proxy \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-web "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-web.json"; then
-release_image_absent web
+release_image_publication_begin web
 error_trap 'verify unpublished web image'
 (cd $BUILD_HOME && URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile)
 error_trap 'warpctl build web'
-release_image_receipt web
+release_image_publication_complete web
 error_trap 'record web image digest'
 release_complete image-web "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-web.json"
 fi
@@ -3281,7 +3281,7 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 # warp. mmm's Makefile and ur.io's astro build read WEB_BUILD_CHECKS by that
 # name.
 if release_build image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"; then
-release_image_absent mmm
+release_image_publication_begin mmm
 error_trap 'verify unpublished mmm image'
 mmm_go_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-mmm-gowork.XXXXXX")
 error_trap 'mmm go workspace'
@@ -3295,7 +3295,7 @@ error_trap 'warpctl build mmm'
 rm -rf "$mmm_go_work_dir"
 release_verify_mmm
 error_trap 'verify four MMM binaries use release Warp and version'
-release_image_receipt mmm
+release_image_publication_complete mmm
 error_trap 'record mmm image digest'
 release_complete image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"
 fi
@@ -3306,11 +3306,11 @@ error_trap 'verify retained mmm image digest'
 builder_message "service mmm \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-manager "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-manager.json"; then
-release_image_absent manager
+release_image_publication_begin manager
 error_trap 'verify unpublished manager image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV web/manager/Makefile)
 error_trap 'warpctl build web/manager'
-release_image_receipt manager
+release_image_publication_complete manager
 error_trap 'record manager image digest'
 release_complete image-manager "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-manager.json"
 fi
@@ -3323,11 +3323,11 @@ builder_message "service web/manager \`${EXTERNAL_WARP_VERSION}\` available"
 # same verified multi-architecture image under the service name used by the
 # rollout configuration.
 if release_build image-app "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-app.json"; then
-release_image_absent app
+release_image_publication_begin app
 error_trap 'verify unpublished app image'
 (cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-manager:${EXTERNAL_WARP_VERSION}" --service_name=app)
 error_trap 'warpctl import manager image as app'
-release_image_receipt app
+release_image_publication_complete app
 error_trap 'record app image digest'
 release_complete image-app "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-app.json"
 fi

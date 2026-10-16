@@ -33,7 +33,7 @@ release_transition() {
 release_failure_hint() {
     if [[ -n "${EXTERNAL_WARP_VERSION:-}" && -f "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/manifest.json" ]]; then
         print -u2 -r -- "Release $EXTERNAL_WARP_VERSION stopped. After restoring the failed dependency, run: $WARP_HOME/xops/builder/build.sh --resume $EXTERNAL_WARP_VERSION"
-        print -u2 -- 'Resume verifies sealed source/config/vault, options, toolchain and every retained artifact. Product source changes require a new full release. An uncertain Apple upload requires observed reconciliation; it is never resent automatically.'
+        print -u2 -- 'Resume verifies sealed source/config/vault, options, toolchain and every retained artifact. Product source changes require a new full release. An uncertain image, Apple or SDK publication requires provider/job reconciliation; it is never retried automatically.'
     else
         print -u2 -- 'This invocation has not sealed immutable release preparation and cannot resume. Preserve the failure evidence, then start a new full build.'
     fi
@@ -101,6 +101,29 @@ release_image_absent() {
         return 65
     fi
     rm -f "$diagnostic"
+}
+
+# BuildKit may continue a registry push after every host-side process exits.
+# Tag absence is not proof that an earlier submitted job cannot publish later.
+# The absence probe is read-only; persist intent before the black-box build or
+# import can start, and never automatically replay a previously recorded one.
+release_image_publication_begin() {
+    local service="$1" observed
+    release_image_absent "$service" || return $?
+    observed=$(release_state effect-begin "image-$service-publication") || return $?
+    if [[ -n "$observed" ]]; then
+        print -u2 -- "Image $service publication was already attempted without a completed checkpoint. A daemon-owned BuildKit job may still publish even though the tag is currently absent. Verify the old job and exact version with the owning operator; do not retry or clear its intent. Start a new release after owned cleanup if authoritative reconciliation is unavailable."
+        return 65
+    fi
+}
+
+# Called only after the actual build/import returned successfully and all its
+# component gates passed. A registry receipt alone cannot establish that an
+# interrupted job has terminated. The later stage completion retains the
+# receipt atomically; a gap before that checkpoint still refuses publication.
+release_image_publication_complete() {
+    release_image_receipt "$1" || return $?
+    release_state effect-complete "image-$1-publication"
 }
 
 release_verify_mmm() {

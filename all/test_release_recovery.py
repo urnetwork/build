@@ -11,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import shutil
 import stat
@@ -86,6 +87,93 @@ class Checkpoints(unittest.TestCase):
         (target / "current").symlink_to("binary")
         self.assertEqual(self.invoke("complete", "apple", target), 0)
         return target
+
+    def run_image_stage(self, service, outcome):
+        # Execute the actual canonical image-stage block and shell helpers.
+        # Git/toolchain inspection is the only state-manager fake here; the
+        # inherited kernel lock, effect journal, atomic writes and caches are
+        # real. Existing real-source/entrypoint fixtures cover input inspection.
+        boundary = self.workspace / "checkpoint-boundary.py"
+        boundary.write_text('''import importlib.util,json,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("image_state",sys.argv[1])
+state=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(state)
+expected=json.loads((Path(sys.argv[3])/".release-checkpoints"/sys.argv[4]/"manifest.json").read_text())
+state.source_snapshot=lambda _:expected["sources"]
+state.environment_snapshot=lambda:expected["environment"]
+state.tool_snapshot=lambda *args:expected["toolchain"]
+sys.argv=sys.argv[1:]
+sys.exit(state.main())
+''')
+        source = (HERE / "run.sh").read_text()
+        match = re.search(r'(?ms)^if release_build image-' + re.escape(service) + r' .*?^builder_message "service ' + re.escape(service) + r' .*?\n', source)
+        self.assertIsNotNone(match, service)
+        body = r'''
+source "$BUILD_HOME/all/release-checkpoints.zsh"
+python3() { "$FIXTURE_PYTHON" -B "$WARP_HOME/checkpoint-boundary.py" "$@"; }
+builder_message() { return 0; }
+error_trap() { local result=$?; if (( result != 0 )); then exit "$result"; fi; }
+docker() {
+    print -r -- "inspect-$FIXTURE_SERVICE" >> "$WARP_HOME/image-events"
+    if [[ -f "$WARP_HOME/provider-$FIXTURE_SERVICE.json" ]]; then
+        /bin/cat "$WARP_HOME/provider-$FIXTURE_SERVICE.json"
+    else
+        print -u2 -- 'manifest unknown'
+        return 1
+    fi
+}
+warpctl() {
+    [[ "$1" = build || "$1" = import ]] || return 99
+    print -r -- "publish-$FIXTURE_SERVICE" >> "$WARP_HOME/image-events"
+    if [[ "$FIXTURE_OUTCOME" = killed ]]; then
+        # The host runner dies after submitting work; the fake remote job has
+        # not made its tag visible yet and can still finish later.
+        kill -KILL $$
+        return 137
+    fi
+    print -r -- '{"manifest":"verified-original"}' > "$WARP_HOME/provider-$FIXTURE_SERVICE.json"
+}
+'''
+        environment = dict(os.environ, WARP_HOME=str(self.workspace), BUILD_HOME=str(HERE.parent),
+                           EXTERNAL_WARP_VERSION=VERSION, BUILD_ENV="main", GO_MOD_SUFFIX="",
+                           FIXTURE_PYTHON=sys.executable, FIXTURE_SERVICE=service, FIXTURE_OUTCOME=outcome)
+        return subprocess.run(["/bin/zsh", "-c", body + match[0]], env=environment,
+                              pass_fds=(self.fd,), capture_output=True, text=True, timeout=15)
+
+    def test_interrupted_canonical_image_stage_never_retries_an_absent_pending_push(self):
+        first = self.run_image_stage("api", "killed")
+        self.assertEqual(first.returncode, -signal.SIGKILL, first.stdout + first.stderr)
+        self.assertEqual(self.manifest()["effects"]["image-api-publication"]["state"], "uncertain")
+        self.assertEqual(self.manifest()["stages"]["image-api"]["state"], "running")
+        self.assertFalse((self.workspace / "provider-api.json").exists())
+        retry = self.run_image_stage("api", "success")
+        self.assertEqual(retry.returncode, 65, retry.stdout + retry.stderr)
+        self.assertIn("BuildKit job may still publish", retry.stderr)
+        events = (self.workspace / "image-events").read_text().splitlines()
+        self.assertEqual(events.count("inspect-api"), 2)  # Both reads observed absence.
+        self.assertEqual(events.count("publish-api"), 1)  # Never a second submission.
+        # A later remote completion must not become permission to overwrite it.
+        (self.workspace / "provider-api.json").write_text('{"manifest":"delayed-old-job"}\n')
+        late = self.run_image_stage("api", "success")
+        self.assertEqual(late.returncode, 65, late.stdout + late.stderr)
+        self.assertEqual((self.workspace / "image-events").read_text().splitlines().count("publish-api"), 1)
+        self.assertEqual(self.manifest()["effects"]["image-api-publication"]["state"], "uncertain")
+
+    def test_successful_canonical_image_import_reuses_checkpoint_and_verifies_digest(self):
+        first = self.run_image_stage("app", "success")
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertEqual(self.manifest()["effects"]["image-app-publication"]["state"], "complete")
+        self.assertEqual(self.manifest()["stages"]["image-app"]["state"], "complete")
+        again = self.run_image_stage("app", "success")
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertIn("reuse image-app: verified", again.stderr)
+        self.assertEqual((self.workspace / "image-events").read_text().splitlines().count("publish-app"), 1)
+        (self.workspace / "provider-app.json").write_text('{"manifest":"conflicting"}\n')
+        changed = self.run_image_stage("app", "success")
+        self.assertEqual(changed.returncode, 65, changed.stdout + changed.stderr)
+        self.assertIn("Versioned image changed", changed.stderr)
+        self.assertEqual((self.workspace / "image-events").read_text().splitlines().count("publish-app"), 1)
 
     def test_interrupted_stage_retries_completed_stage_reuses_exact_bytes_modes(self):
         target = self.completed()
@@ -480,6 +568,20 @@ class ShellSideEffectGuards(unittest.TestCase):
         environment = {"PATH":os.environ["PATH"],"WARP_HOME":str(root),"BUILD_HOME":str(HERE.parent),
                        "BUILD_ENV":"main","EXTERNAL_WARP_VERSION":VERSION,"APPLE_API_KEY":"fixture","APPLE_API_ISSUER":"fixture",**extra}
         return subprocess.run(["/bin/zsh","-c",'source "$BUILD_HOME/all/release-checkpoints.zsh"\n'+body],env=environment,capture_output=True,text=True,timeout=5)
+
+    def test_all_canonical_image_builds_and_imports_bracket_publication_intent(self):
+        source = (HERE / "run.sh").read_text()
+        stages = list(re.finditer(r'(?m)^\s*if release_build image-([a-z-]+) ', source))
+        self.assertEqual({stage[1] for stage in stages}, {"config-updater","grafana","lb","taskworker","api","connect","mcp","gossip","alt","proxy","web","mmm","manager","app"})
+        for stage in stages:
+            name = stage[1]
+            end = source.index("release_complete image-" + name + " ", stage.end())
+            block = source[stage.start():end]
+            begin = block.index("release_image_publication_begin " + name)
+            operation = block.index("warpctl import " if name == "app" else "warpctl build ")
+            observed = block.index("release_image_publication_complete " + name)
+            self.assertLess(begin, operation, name)
+            self.assertLess(operation, observed, name)
 
     def test_actual_apple_upload_helper_stops_uncertain_and_skips_observed_complete(self):
         with tempfile.TemporaryDirectory(prefix="release-apple-guard-") as directory:

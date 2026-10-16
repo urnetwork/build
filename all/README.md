@@ -26,11 +26,16 @@ builds restore their declared output paths from verified copies; interrupted
 local stages retry. Publication reads reconcile exact GitHub draft IDs, asset
 digests, npm tarballs and immutable image manifests. All remaining gates,
 migrations and rollout waves still execute. Code changes, missing/corrupt
-cache, remote conflicts, unjournaled source mutations and ambiguous Apple or
-multi-registry uploads fail closed; never edit JSON to mark success.
+cache, remote conflicts, unjournaled source mutations and ambiguous image,
+Apple or multi-registry uploads fail closed; never edit JSON to mark success.
+An interrupted image build/import retains publication intent: even if its tag
+is currently absent, a daemon-owned BuildKit job may still push it later.
+Resume never starts a second push for that intent. Only observed command
+success, a matching registry receipt and a completed checkpoint permit reuse;
+lock recovery does not establish BuildKit job termination or clear intent.
 The host-tool seal does not make existing container/VM package installations
-fully hermetic (for example F-Droid's buildserver tag/apt inputs). Retried
-unfinished container stages still execute their original component gates.
+fully hermetic (for example F-Droid's buildserver tag/apt inputs). Eligible
+retried non-publishing container stages still execute their original gates.
 
 Before candidate sites, on resume and immediately before production mutations,
 read-only preflight checks Main LAN database identity/head/capacity and

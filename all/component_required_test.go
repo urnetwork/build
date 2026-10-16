@@ -113,6 +113,10 @@ release_sdk_outputs() { print -r -- "$BUILD_HOME/sdk/packaging/release/plan.json
 release_sdk_publication_begin() { return 0; }
 release_image_absent() { return 0; }
 release_image_receipt() { return 0; }
+# Actual image intent/crash/reuse behavior is exercised by the canonical-stage
+# Python fixtures. Keep these component tests' provider boundaries unchanged.
+release_image_publication_begin() { release_image_absent "$@"; }
+release_image_publication_complete() { release_image_receipt "$@"; }
 release_verify_mmm() { return 0; }
 release_apple_upload() {
     xcrun altool --show-progress --upload-app --file "$2" -t "$1" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
