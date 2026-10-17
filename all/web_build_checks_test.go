@@ -51,6 +51,7 @@ func TestRunDisablesSiteChecksOnlyForFinalWebAndMmmBuilds(t *testing.T) {
 	setup := `
 WEB_BUILD_CHECKS=caller-value
 URNETWORK_ROOT=caller-root
+UR_PRESERVE_NETWORK_STATS=caller-value
 BUILD_ENV=main
 mkdir -p "$WARP_HOME/mmm/mmm"
 printf 'module github.com/urnetwork/mmm/mmm\n\ngo 1.25.0\n\nrequire github.com/urnetwork/warp v0.0.0\n' > "$WARP_HOME/mmm/mmm/go.mod"
@@ -59,9 +60,11 @@ warpctl() {
     case "$*" in
         'build main web/web/Makefile')
             [[ -z "${GOWORK:-}" ]] || return 54
+            [[ "$UR_PRESERVE_NETWORK_STATS" == caller-value ]] || return 57
             record_component_step web-image
             ;;
         "build main $WARP_HOME/mmm/mmm/Makefile")
+            [[ "$UR_PRESERVE_NETWORK_STATS" == 1 ]] || return 58
             [[ "$(<"$GOWORK")" == "go 1.25.0
 
 use $WARP_HOME/mmm/mmm
@@ -77,7 +80,7 @@ replace github.com/urnetwork/warp => $BUILD_HOME/warp" ]] || return 55
 }
 `
 	source += `
-[[ "$WEB_BUILD_CHECKS" == caller-value && "$URNETWORK_ROOT" == caller-root && -z "${GOWORK:-}" ]] || exit 53
+[[ "$WEB_BUILD_CHECKS" == caller-value && "$URNETWORK_ROOT" == caller-root && "$UR_PRESERVE_NETWORK_STATS" == caller-value && -z "${GOWORK:-}" ]] || exit 53
 [[ ! -e "$(<"$BUILD_HOME/gowork-path")" ]] || exit 56
 `
 	result := runComponent(t, source, setup)
@@ -102,7 +105,7 @@ func TestRunSiteChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T
 		"error_trap 'mmm build checks'",
 		`warpctl stage version next release --message="$HOST build all"`,
 		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV web/web/Makefile`,
-		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile"`,
+		`URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 UR_PRESERVE_NETWORK_STATS=1 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile"`,
 		`source "$BUILD_HOME/all/deploy-rollout.zsh"`,
 	} {
 		at := strings.Index(source, step)

@@ -92,6 +92,21 @@ reused. Changed effective Go inputs, adjacent source changes and corrupt
 retained outputs still refuse reuse. It does not claim an end-to-end real
 release or deployment.
 
+The final MMM image build sets `UR_PRESERVE_NETWORK_STATS=1` only for that
+command. Candidate checks still refresh and verify the network snapshot before
+it is committed and sealed; the final rebuild consumes those same bytes. The
+cross-repository regression executes the canonical command through a real
+Warpctl, the real nested Makefiles and the real statistics generator, with
+synthetic feed/compiler/package/image boundaries and no provider writes. Run
+from the build repository root:
+
+```sh
+python3 -B all/mmm_release_inputs_test.py --warpctl /path/to/warpctl --mmm /path/to/mmm -v
+```
+
+This fixture requires those inputs explicitly (no skipped coverage) and checks
+candidate refresh, frozen final inputs, and failure gates before publication.
+
 ## Required release components
 
 Every enabled component and attempted release-input generator in `run.sh` is a

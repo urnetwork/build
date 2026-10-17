@@ -3386,7 +3386,9 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 # which from $WARP_HOME/mmm is the developer's warp checkout rather than this
 # release's, so a workspace outside both checkouts pins it to the release's
 # warp. mmm's Makefile and ur.io's astro build read WEB_BUILD_CHECKS by that
-# name.
+# name. Preserve the network snapshot generated and checked by the candidate
+# build, then committed and sealed above: live refresh here would change a
+# pinned input after hours of artifact work, just before image publication.
 if release_build image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"; then
 release_image_publication_begin mmm
 error_trap 'verify unpublished mmm image'
@@ -3397,7 +3399,7 @@ printf 'go %s\n\nuse %s\n\nreplace github.com/urnetwork/warp => %s\n' \
     "$WARP_HOME/mmm/mmm" \
     "$BUILD_HOME/warp" > "$mmm_go_work_dir/go.work"
 error_trap 'mmm go workspace'
-(cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
+(cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 UR_PRESERVE_NETWORK_STATS=1 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
 error_trap 'warpctl build mmm'
 rm -rf "$mmm_go_work_dir"
 release_verify_mmm
