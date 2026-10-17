@@ -46,6 +46,7 @@ func TestConfigurePrivateGoModulesUsesBuildSSHCredentials(t *testing.T) {
 set -eu
 eval "$1"
 configure_private_go_modules
+configure_private_go_modules
 print -r -- "$GOPRIVATE"
 print -r -- "$GONOPROXY"
 print -r -- "$GONOSUMDB"

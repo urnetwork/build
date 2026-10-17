@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -48,7 +49,9 @@ elif name=="git":
     os.execv("REALGIT",["REALGIT",*args])
 elif name=="go":
     if args==["version"]: print("go version go1.27.2 darwin/arm64")
-    elif args[:2]==["env","-json"]: print(json.dumps({key:("off" if key in ("GOWORK","GOENV") else "synthetic") for key in args[2:]}))
+    # Probe genuine effective Go settings, including the three private-module
+    # prefixes. Constant fake values previously hid a real resume-order bug.
+    elif args[:2]==["env","-json"]: os.execv("REALGO",["REALGO",*args])
     elif len(args)>=2 and args[-2]=="credential": print("no")
     elif args[-2:]==["release","mobile"]:
         event("sdk-mobile")
@@ -118,9 +121,15 @@ class CanonicalEntrypoint(unittest.TestCase):
         cls.home = cls.root / "synthetic-home"
         cls.home.mkdir()
         cls.real_git = shutil.which("git")
+        cls.real_go = shutil.which("go")
+        if cls.real_go is None:
+            raise AssertionError("canonical recovery fixture requires Go for read-only go env probes")
         cls.base_env = {"PATH": str(cls.bin)+":"+os.environ["PATH"], "HOME": str(cls.home),
                         "RECOVERY_FIXTURE": str(cls.root), "NVM_DIR": str(cls.root/"nvm"),
-                        "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C", "WARP_SKIP_DEPLOY": "1"}
+                        "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C", "WARP_SKIP_DEPLOY": "1",
+                        "GOENV": "off", "GOWORK": "off", "GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off",
+                        "GOCACHE": str(cls.root/"go-cache"), "GOMODCACHE": str(cls.root/"go-modcache"),
+                        "GOPRIVATE": "private.example", "GONOPROXY": "proxy.example", "GONOSUMDB": "sum.example"}
         cls.env = dict(cls.base_env, WARP_HOME=str(cls.root), BRINGYOUR_HOME=str(cls.build),
                        BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="",
                        BUILD_URIO_CHANGELOG="0", CONNECT_IP_UPDATE="1", BUILD_APPLE_IDENTITY="1",
@@ -146,7 +155,7 @@ class CanonicalEntrypoint(unittest.TestCase):
             if name == "timeout":
                 # The genuine bounded subprocess wrapper is safe with fake children.
                 continue
-            cls.write(cls.bin/name, FAKE_TOOL.replace("PYTHON",sys.executable).replace("REALGIT",cls.real_git), mode=0o755)
+            cls.write(cls.bin/name, FAKE_TOOL.replace("PYTHON",sys.executable).replace("REALGIT",cls.real_git).replace("REALGO",cls.real_go), mode=0o755)
         # Git is the busiest read boundary; use a tiny shell shim so real source
         # fingerprints do not pay a Python startup for every read-only query.
         cls.write(cls.bin/"git", '#!/bin/sh\nfor arg in "$@"; do\ncase "$arg" in checkout|reset|pull|stash|fetch|push|submodule) printf "FORBIDDEN-GIT:%s\\n" "$*" >> "$RECOVERY_FIXTURE/events"; exit 91;; esac\ndone\nexec "'+cls.real_git+'" "$@"\n',mode=0o755)
@@ -154,6 +163,10 @@ class CanonicalEntrypoint(unittest.TestCase):
         cls.build.mkdir()
         shutil.copytree(HERE, cls.build/"all", ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(XOPS/"builder", cls.root/"xops/builder", ignore=shutil.ignore_patterns("__pycache__"))
+        # A real fresh run seals AFTER canonical private-module setup. Execute
+        # that exact function here; the unchanged resume entrypoint must derive
+        # identical settings BEFORE its first validation, with no adoption.
+        cls.env = cls.private_go_environment(cls.env)
         modules=("glog","connect","userwireguard","goidenticons","proxy","sdk","sn","server","android","apple","windows","linux","web","warp","localizations","extension")
         cls.write(cls.build/".gitmodules", "".join(f'[submodule "{name}"]\n\tpath = {name}\n' for name in modules))
         standalone=("config","vault","release","localizations","gvisor","sdk","mmm","goidenticons","connect","glog","userwireguard","examples","xops")
@@ -185,7 +198,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         cls.write(cls.build/"sdk/js/wasm/main.wasm","prepared wasm")
         cls.write(cls.build/"sdk/js/release/plan.json","prepared npm release")
         cls.write(cls.build/"sdk/packaging/release/plan.json",json.dumps({"version":VERSION,"registries":{name:False for name in ("npm","pypi","nuget","rubygems","crates","maven","swift","cocoapods","conan","vcpkg")}}))
-        cls.write(cls.build/"warp/warpctl/build/darwin/arm64/warpctl", FAKE_TOOL.replace("PYTHON",sys.executable).replace("REALGIT",cls.real_git),mode=0o755)
+        cls.write(cls.build/"warp/warpctl/build/darwin/arm64/warpctl", FAKE_TOOL.replace("PYTHON",sys.executable).replace("REALGIT",cls.real_git).replace("REALGO",cls.real_go),mode=0o755)
         cls.write(cls.build/"server/v2026/bringyourctl/run-main-lan.sh", '#!/bin/sh\nprintf "preflight:main-lan\\n" >> "$RECOVERY_FIXTURE/events"\nexit 0\n',mode=0o755)
         directory=cls.root/".release-checkpoints"/VERSION
         directory.mkdir(parents=True,mode=0o700)
@@ -218,8 +231,17 @@ class CanonicalEntrypoint(unittest.TestCase):
         for args in (("init","-q"),("config","user.name","Release Fixture"),("config","user.email","fixture@example.invalid"),("add","."),("commit","-qm","sealed fixture input")):
             subprocess.run([cls.real_git,"-C",str(repo),*args],check=True,capture_output=True)
 
-    def invoke(self,*args):
-        return subprocess.run(["/bin/zsh",str(self.root/"xops/builder/build.sh"),*args],cwd=self.root,env=self.base_env,capture_output=True,text=True,timeout=60,umask=0o077)
+    @classmethod
+    def private_go_environment(cls,environment):
+        functions=re.findall(r"(?ms)^configure_private_go_modules \(\) \{\n.*?^\}\n", (cls.build/"all/run.sh").read_text())
+        if len(functions)!=1: raise AssertionError("expected one canonical private Go setup function")
+        result=subprocess.run(["/bin/zsh","-eu","-c",'eval "$1"; configure_private_go_modules; exec "$2" -B -c "import json, os; print(json.dumps(dict(os.environ)))"',"fixture-private-go",functions[0],sys.executable],env=environment,capture_output=True,text=True,timeout=10)
+        if result.returncode: raise AssertionError("fixture private Go configuration failed: "+result.stderr)
+        configured=json.loads(result.stdout)
+        return dict(environment,**{key:value for key,value in configured.items() if key in ("GOPRIVATE","GONOPROXY","GONOSUMDB") or key.startswith("GIT_CONFIG_")})
+
+    def invoke(self,*args,environment=None):
+        return subprocess.run(["/bin/zsh",str(self.root/"xops/builder/build.sh"),*args],cwd=self.root,env=self.base_env if environment is None else environment,capture_output=True,text=True,timeout=60,umask=0o077)
 
     def test_canonical_resume_retries_failed_stage_without_preparing_or_rebuilding_sdk(self):
         first=self.invoke("--resume",VERSION)
@@ -231,7 +253,11 @@ class CanonicalEntrypoint(unittest.TestCase):
         self.assertNotIn("preflight:main-lan",first_events)  # fixture explicitly skips deployment
         self.assertFalse([e for e in first_events if e.startswith("FORBIDDEN")],first_events)
         self.write(self.root/"allow-mobile","dependency restored")
-        second=self.invoke("--resume",VERSION)
+        # Callers may already have applied canonical process-local setup. It
+        # must be idempotent, preserving exactly the sealed effective Go input.
+        configured=self.private_go_environment(self.base_env)
+        self.assertEqual(self.private_go_environment(configured),configured)
+        second=self.invoke("--resume",VERSION,environment=configured)
         self.assertEqual(second.returncode,89,second.stdout+second.stderr)
         self.assertIn("reuse sdk: verified",second.stdout+second.stderr)
         events=(self.root/"events").read_text().splitlines()
@@ -244,6 +270,12 @@ class CanonicalEntrypoint(unittest.TestCase):
         value=json.loads(manifests[0].read_text())
         self.assertEqual(value["stages"]["sdk"]["state"],"complete")
         self.assertEqual(value["stages"]["sdk-mobile"]["state"],"complete")
+        sealed_bytes=manifests[0].read_bytes()
+        drift=self.invoke("--resume",VERSION,environment=dict(self.base_env,GOFLAGS="-tags=changed_input"))
+        self.assertEqual(drift.returncode,65,drift.stdout+drift.stderr)
+        self.assertIn("pinned toolchain changed",drift.stdout+drift.stderr)
+        self.assertEqual(manifests[0].read_bytes(),sealed_bytes)
+        self.assertEqual((self.root/"events").read_text().splitlines().count("make:build/sdk/build"),1)
         self.write(self.root/"allow-cli-publication", "synthetic publication boundary ready")
         third=self.invoke("--resume",VERSION)
         # All three canonical SN CLI stages finish; stop at the next make.

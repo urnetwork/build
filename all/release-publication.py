@@ -4,12 +4,14 @@ import base64
 import hashlib
 import json
 import importlib.util
+import math
 import os
 from pathlib import Path
 import re
 import sys
 import subprocess
 import tarfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +21,8 @@ import urllib.request
 sys.dont_write_bytecode = True
 
 API = "https://api.github.com/repos/urnetwork/build"
+GET_MAX_ATTEMPTS = 4
+GET_RETRY_SECONDS = 3700
 _spec = importlib.util.spec_from_file_location("release_state", Path(__file__).with_name("release-state.py"))
 state = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(state)
@@ -33,6 +37,40 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def rate_limit_delay(error, attempt):
+    """Classify an explicit GitHub limit without disclosing response content."""
+    if error.code not in (403, 429):
+        return None
+    headers = error.headers or {}
+    primary = headers.get("X-RateLimit-Remaining") == "0"
+    retry_after = headers.get("Retry-After")
+    limited = primary or error.code == 429 or retry_after is not None
+    if not limited:
+        # Secondary limits can omit headers. Read only a bounded JSON message
+        # to classify GitHub's documented response; never log its body/reason.
+        try:
+            body = json.loads(error.read(65537))
+            message = body.get("message", "") if isinstance(body, dict) else ""
+            limited = isinstance(message, str) and any(
+                phrase in message.lower() for phrase in ("secondary rate limit", "api rate limit exceeded"))
+        except (OSError, ValueError):
+            return None
+    if not limited:
+        return None
+    delays = []
+    if retry_after is not None:
+        if not re.fullmatch(r"[0-9]{1,12}", retry_after):
+            raise Conflict("publication GET rate limit has invalid Retry-After; no retry was sent")
+        delays.append(max(1, int(retry_after)))
+    if primary:
+        reset = headers.get("X-RateLimit-Reset", "")
+        if not re.fullmatch(r"[0-9]{1,12}", reset):
+            raise Conflict("publication GET primary rate limit lacks a valid reset; no retry was sent")
+        delays.append(max(1, math.ceil(int(reset) - time.time() + 1)))
+    # Honor both headers when present, never retry before either deadline.
+    return max(delays) if delays else 60 * (2 ** (attempt - 1))
+
+
 def request(url, method="GET", data=None, github=True, missing=False):
     headers = {"Accept": "application/vnd.github+json" if github else "application/json"}
     if github:
@@ -44,15 +82,39 @@ def request(url, method="GET", data=None, github=True, missing=False):
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=45) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        if missing and error.code == 404:
-            return None
-        raise Conflict("publication " + method + " returned HTTP " + str(error.code) + "; response body withheld") from None
-    except (OSError, ValueError):
-        raise Conflict("publication " + method + " failed or returned invalid JSON; reconcile before retrying") from None
+    deadline = time.monotonic() + GET_RETRY_SECONDS
+    for attempt in range(1, GET_MAX_ATTEMPTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise Conflict("publication GET rate-limit retry budget exhausted")
+        try:
+            with urllib.request.build_opener(NoRedirect).open(req, timeout=min(45, remaining)) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            try:
+                if missing and error.code == 404:
+                    return None
+                # Only exact read-only GitHub reconciliation requests retry.
+                # POST/PATCH, other registries, auth failures and ambiguous
+                # transport results retain their existing fail-closed behavior.
+                delay = rate_limit_delay(error, attempt) if github and method == "GET" and data is None else None
+                if delay is None:
+                    raise Conflict("publication " + method + " returned HTTP " + str(error.code) + "; response body withheld") from None
+                if attempt == GET_MAX_ATTEMPTS:
+                    raise Conflict("publication GET rate-limit retry limit reached") from None
+                if delay >= deadline - time.monotonic():
+                    raise Conflict("publication GET rate-limit wait exceeds remaining retry budget") from None
+                print(f"publication GET rate-limited (HTTP {error.code}); retrying in {delay}s ({attempt}/{GET_MAX_ATTEMPTS})", file=sys.stderr, flush=True)
+            finally:
+                error.close()
+            # Keep waits interruptible and bounded; the next attempt retains
+            # exactly the URL, authorization and JSON validation contract.
+            while delay > 0:
+                interval = min(60, delay)
+                time.sleep(interval)
+                delay -= interval
+        except (OSError, ValueError):
+            raise Conflict("publication " + method + " failed or returned invalid JSON; reconcile before retrying") from None
 
 
 def verify_tag(version, commit):

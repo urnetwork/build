@@ -37,6 +37,19 @@ The host-tool seal does not make existing container/VM package installations
 fully hermetic (for example F-Droid's buildserver tag/apt inputs). Eligible
 retried non-publishing container stages still execute their original gates.
 
+Private Go module prefixes and Git SSH rewrites are configured process-locally
+before both fresh preparation and the first resume validation. Reapplying this
+setup preserves caller settings and does not append duplicate canonical rules.
+Effective Go input drift still fails validation; setup never changes a seal.
+
+Exact GitHub reconciliation GETs wait on positively identified primary or
+secondary rate limits, honoring reset/Retry-After with at most four attempts
+and a 3700-second total retry budget per request. No extra metadata calls or
+weaker asset checks are used. Authentication failures, ordinary 403s, invalid
+JSON and transport failures stop immediately. This read-only retry does not
+replay draft POSTs or finalization PATCHes, change the account's API allowance,
+or replace the separate upload helper's explicit-rejection policy.
+
 Before candidate sites, on resume and immediately before production mutations,
 read-only preflight checks Main LAN database identity/head/capacity and
 Grafana/Brevo authorization, then invokes Warp's exact deployment guard planner
@@ -68,8 +81,11 @@ python3 -B -m unittest -v test_release_recovery.py test_release_sources.py test_
 
 The canonical-entrypoint fixture runs unchanged copies of both production
 scripts against real disposable Git/state/cache boundaries and fake host/
-provider commands: a failed mobile SDK stage retries while the passed SDK
-stage is reused. It does not claim an end-to-end real release or deployment.
+provider commands, with genuine read-only `go env` probes: a failed mobile SDK
+stage retries while the passed SDK and all three completed CLI stages are
+reused. Changed effective Go inputs, adjacent source changes and corrupt
+retained outputs still refuse reuse. It does not claim an end-to-end real
+release or deployment.
 
 ## Required release components
 

@@ -4,6 +4,7 @@ Run: python3 -m unittest -v test_release_recovery.py
 No test reads the builder's credentials or contacts a publication provider.
 """
 import contextlib
+from email.message import Message
 import fcntl
 import hashlib
 import importlib.util
@@ -526,6 +527,122 @@ class HostBoundaries(unittest.TestCase):
             responses = [rows, b"unix:///fixture/docker.sock\n", b"abcdef123456\n", json.dumps([{"Type":"bind","RW":True,"Source":directory}]).encode()]
             with mock.patch.object(state,"run",side_effect=responses),self.assertRaisesRegex(state.Refusal,"writable workspace"):
                 state.inspect_workspace_writers(directory,{"state":"finished"},uncertain=False)
+
+
+class PublicationReadRetries(unittest.TestCase):
+    def error(self, code, headers=None, message="private response marker"):
+        fields = Message()
+        for key, value in (headers or {}).items():
+            fields[key] = value
+        return publication.urllib.error.HTTPError(publication.API + "/releases/42/assets", code,
+                                                  "private reason marker", fields,
+                                                  io.BytesIO(json.dumps({"message": message}).encode()))
+
+    @contextlib.contextmanager
+    def transport(self, replies):
+        opener = mock.Mock()
+        opener.open.side_effect = replies
+        clock = [1000.0]
+        sleeps = []
+        def sleep(seconds):
+            self.assertGreater(seconds, 0)
+            self.assertLessEqual(seconds, 60)
+            sleeps.append(seconds)
+            clock[0] += seconds
+        diagnostics = io.StringIO()
+        with mock.patch.dict(os.environ, {"GITHUB_API_KEY": "private token marker"}), \
+                mock.patch.object(publication.urllib.request, "build_opener", return_value=opener), \
+                mock.patch.object(publication.time, "time", side_effect=lambda: clock[0]), \
+                mock.patch.object(publication.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(publication.time, "sleep", side_effect=sleep), \
+                contextlib.redirect_stderr(diagnostics):
+            yield opener, sleeps, diagnostics
+        for private in ("private token marker", "private response marker", "private reason marker"):
+            self.assertNotIn(private, diagnostics.getvalue())
+
+    def test_primary_get_waits_until_reset_and_retries_exact_request(self):
+        with self.transport([self.error(403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1002"}), io.BytesIO(b'[{"id":42}]')]) as (opener, sleeps, diagnostics):
+            url = publication.API + "/releases/42/assets?per_page=100&page=1"
+            self.assertEqual(publication.request(url), [{"id": 42}])
+            self.assertEqual(sum(sleeps), 3)
+            self.assertEqual(len(opener.open.call_args_list), 2)
+            for call in opener.open.call_args_list:
+                request = call.args[0]
+                self.assertEqual((request.full_url, request.method, request.data), (url, "GET", None))
+                self.assertEqual(request.get_header("Authorization"), "Bearer private token marker")
+                self.assertLessEqual(call.kwargs["timeout"], 45)
+            self.assertIn("HTTP 403", diagnostics.getvalue())
+
+    def test_retry_after_and_primary_reset_both_respected(self):
+        with self.transport([self.error(429, {"Retry-After": "5", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1002"}), io.BytesIO(b'{}')]) as (_, sleeps, _):
+            self.assertEqual(publication.request(publication.API + "/releases/42"), {})
+            self.assertEqual(sum(sleeps), 5)
+
+    def test_secondary_get_backoff_has_finite_attempt_bound(self):
+        replies = [self.error(403, message="You have exceeded a secondary rate limit") for _ in range(4)]
+        with self.transport(replies) as (opener, sleeps, _):
+            with self.assertRaisesRegex(publication.Conflict, "retry limit"):
+                publication.request(publication.API + "/releases/42")
+            self.assertEqual(opener.open.call_count, 4)
+            self.assertEqual(sum(sleeps), 60 + 120 + 240)
+
+    def test_wait_budget_refuses_oversized_or_cumulative_wait(self):
+        cases = (([self.error(429, {"Retry-After": "3701"})], 0, 1),
+                 ([self.error(429, {"Retry-After": "3000"}), self.error(429, {"Retry-After": "701"})], 3000, 2))
+        for replies, waited, attempts in cases:
+            with self.subTest(waited=waited), self.transport(replies) as (opener, sleeps, _):
+                with self.assertRaisesRegex(publication.Conflict, "retry budget"):
+                    publication.request(publication.API + "/releases/42")
+                self.assertEqual(sum(sleeps), waited)
+                self.assertEqual(opener.open.call_count, attempts)
+
+    def test_invalid_limit_headers_fail_without_guessing_a_delay(self):
+        for headers in ({"Retry-After": "bad private response marker"},
+                        {"X-RateLimit-Remaining": "0"},
+                        {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "private response marker"}):
+            with self.subTest(headers=headers), self.transport([self.error(429, headers)]) as (opener, sleeps, _):
+                with self.assertRaises(publication.Conflict) as raised:
+                    publication.request(publication.API + "/releases/42")
+                self.assertNotIn("private response marker", str(raised.exception))
+                self.assertEqual(opener.open.call_count, 1)
+                self.assertEqual(sleeps, [])
+
+    def test_auth_static_403_transport_and_invalid_json_are_not_retried(self):
+        for reply in (self.error(401), self.error(403), self.error(500), OSError("private response marker"), io.BytesIO(b'private response marker')):
+            with self.subTest(reply=type(reply).__name__), self.transport([reply]) as (opener, sleeps, _):
+                with self.assertRaises(publication.Conflict) as raised:
+                    publication.request(publication.API + "/releases/42")
+                self.assertNotIn("private response marker", str(raised.exception))
+                self.assertEqual(opener.open.call_count, 1)
+                self.assertEqual(sleeps, [])
+
+    def test_non_get_and_non_github_requests_are_never_replayed(self):
+        for method, github in (("POST", True), ("PATCH", True), ("DELETE", True), ("GET", False)):
+            with self.subTest(method=method, github=github), self.transport([self.error(429, {"Retry-After": "1"})]) as (opener, sleeps, _):
+                url = publication.API + "/releases/42" if github else "https://registry.npmjs.org/fixture"
+                with self.assertRaises(publication.Conflict):
+                    publication.request(url, method, {"draft": False} if method != "GET" else None, github=github)
+                self.assertEqual(opener.open.call_count, 1)
+                self.assertEqual(sleeps, [])
+
+    def test_expected_404_still_means_absence_without_retry(self):
+        with self.transport([self.error(404)]) as (opener, sleeps, _):
+            self.assertIsNone(publication.request(publication.API + "/releases/tags/v" + VERSION, missing=True))
+            self.assertEqual(opener.open.call_count, 1)
+            self.assertEqual(sleeps, [])
+
+    def test_asset_digest_conflict_after_rate_reset_remains_fatal(self):
+        with tempfile.TemporaryDirectory(prefix="rate-limited-asset-") as directory:
+            artifact = Path(directory) / "sdk.zip"
+            artifact.write_bytes(b"verified artifact")
+            conflicting = [{"name": "sdk.zip", "size": artifact.stat().st_size,
+                            "digest": "sha256:wrong", "state": "uploaded"}]
+            with self.transport([self.error(429, {"Retry-After": "1"}), io.BytesIO(json.dumps(conflicting).encode())]) as (opener, sleeps, _):
+                with self.assertRaisesRegex(publication.Conflict, "conflicting/unverifiable"):
+                    publication.asset("42", "sdk.zip", artifact)
+                self.assertEqual(sum(sleeps), 1)
+                self.assertEqual(opener.open.call_count, 2)
+                self.assertTrue(all(call.args[0].method == "GET" for call in opener.open.call_args_list))
 
 
 class Publications(unittest.TestCase):
