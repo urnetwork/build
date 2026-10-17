@@ -57,8 +57,13 @@ with `--preflight`. The early check permits missing future images only; real
 deployments still require them. SQL uses enforced read-only SELECT paths,
 never the potentially mutating `db version` helper. Production probes have a
 300-second overall deadline (the native helper compile is separately bounded
-to 300 seconds) and do not announce, promote, initialize selectors,
-or send messages. Health is checked again later, not assumed to persist.
+to 300 seconds). The native database/Grafana/Brevo gate runs first, then at
+most two services are checked concurrently. Each service retains Warp's exact
+guards, 20 sequential fresh-connection samples per observed block and clean-pass
+retry rules; all 13 services must pass. A failure or deadline cancels and reaps
+the owned probe groups, including registry/status child processes. Probes do
+not announce, promote, initialize selectors, or send messages. Health is
+checked again later, not assumed to persist.
 
 Kernel locking covers the process group, including FD-closing descendants via
 a separate reaper. Detached VMs/daemon containers require cleanup inventory:
@@ -76,7 +81,7 @@ Focused hermetic verification (no provider writes):
 cd build
 GO111MODULE=auto GOMAXPROCS=2 go test -p 1 ./all
 cd all
-python3 -B -m unittest -v test_release_recovery.py test_release_sources.py test_release_entrypoint.py
+python3 -B -m unittest -v test_release_recovery.py test_release_sources.py test_release_entrypoint.py test_release_preflight.py
 ```
 
 The canonical-entrypoint fixture runs unchanged copies of both production
