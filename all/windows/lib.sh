@@ -209,7 +209,10 @@ win_assert_guest_go_version() {
 # that tool, and point the operator at the only durable repair.
 win_assert_guest_cmake() {
   local version
-  version="$(win_ssh 'powershell -NoProfile -NonInteractive -Command "$cmake = Get-Command cmake -ErrorAction SilentlyContinue; if (-not $cmake) { exit 1 }; $version = (& $cmake.Source --version 2>&1 | Select-Object -First 1); if ($LASTEXITCODE -ne 0) { Write-Error $version; exit 1 }; Write-Output $version"' | tr -d '\r')" || {
+  # Drain native stdout before selecting a line: Select-Object -First can stop
+  # CMake while it is still writing its remaining --version lines, producing
+  # LASTEXITCODE=-1 even though the first line contains a valid version.
+  version="$(win_ssh 'powershell -NoProfile -NonInteractive -Command "$cmake = Get-Command cmake -ErrorAction SilentlyContinue; if (-not $cmake) { exit 1 }; $output = @(& $cmake.Source --version 2>&1); $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Error ($output -join [Environment]::NewLine); exit 1 }; $output | Select-Object -First 1"' | tr -d '\r')" || {
     echo "Windows base image CMake is missing or unusable." >&2
     echo "Run $WIN_HERE/setup.sh --reprovision before building." >&2
     return 1

@@ -443,6 +443,7 @@ win_assert_guest_go_version 1.26.5
 
 func TestGuestCMakeGuardRejectsMissingOrInvalidTool(t *testing.T) {
 	script := `
+set -o pipefail
 source "$1"
 WIN_HERE=/synthetic/windows
 win_ssh() {
@@ -459,6 +460,7 @@ win_assert_guest_cmake
 	}{
 		{name: "usable", version: "cmake version 4.1.1", rc: "0", wantOK: true},
 		{name: "missing", version: "", rc: "1", wantOK: false},
+		{name: "failed with valid version", version: "cmake version 3.31.6-msvc6", rc: "1", wantOK: false},
 		{name: "invalid output", version: "unexpected", rc: "0", wantOK: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -472,6 +474,13 @@ win_assert_guest_cmake
 				t.Errorf("version %q rc %s: success = %t, want %t", test.version, test.rc, err == nil, test.wantOK)
 			}
 		})
+	}
+}
+
+func TestGuestCMakeProbeDrainsOutputBeforeCheckingExit(t *testing.T) {
+	source := readBuildFile(t, "lib.sh")
+	if !strings.Contains(source, `$output = @(& $cmake.Source --version 2>&1); $exitCode = $LASTEXITCODE; if ($exitCode -ne 0)`) {
+		t.Fatal("CMake probe must capture all native output and its exit code before selecting a version line")
 	}
 }
 
