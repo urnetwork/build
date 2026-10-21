@@ -237,16 +237,16 @@ if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
 # exists; this is the upstream prebuilt, Windows-ARM64 host build, targets both).
 #
 # This exact pin is also read by setup/build admission. It must satisfy the
-# selected sdk/cgo/go.mod minimum; the guest must match it exactly. Go 1.26.10
-# includes the crypto/x509 fix for GO-2026-6809.
-$goVersion = "1.26.10"
+# selected sdk/cgo/go.mod minimum; the guest must match it exactly. Go 1.27.3
+# matches the release host and F-Droid compiler and fixes GO-2026-6809.
+$goVersion = "1.27.3"
 $goRoot = "C:\go"
 # Version-aware, not merely existence-aware: a plain Test-Path would leave an
 # already-provisioned image on the OLD Go forever, so bumping $goVersion above
 # would have no effect on --reprovision — the one path used to fix a stale image.
 $goInstalled = ""
 if (Test-Path "$goRoot\bin\go.exe") {
-  # "go version go1.26.10 windows/arm64" -> "1.26.10"
+  # "go version go1.27.3 windows/arm64" -> "1.27.3"
   $goInstalled = (& "$goRoot\bin\go.exe" version) -replace '^go version go([^\s]+).*$', '$1'
 }
 if ($goInstalled -ne $goVersion) {

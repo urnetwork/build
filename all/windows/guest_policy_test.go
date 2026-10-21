@@ -246,7 +246,7 @@ source "$1"
 WIN_HERE="$2"
 IMAGE="$3"
 
-fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+fingerprint="$(win_provision_contract_fingerprint 1.27.3)"
 if win_image_provision_contract_matches "$fingerprint"; then
   echo "missing marker was accepted" >&2
   exit 10
@@ -255,10 +255,10 @@ win_record_image_provision_contract "$fingerprint"
 win_image_provision_contract_matches "$fingerprint"
 
 for relative in disable-auto-servicing.ps1 packer/scripts/provision.ps1 smoke-test.ps1; do
-  fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+  fingerprint="$(win_provision_contract_fingerprint 1.27.3)"
   win_record_image_provision_contract "$fingerprint"
   printf 'changed\n' >>"$WIN_HERE/$relative"
-  changed_fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+  changed_fingerprint="$(win_provision_contract_fingerprint 1.27.3)"
   [ "$fingerprint" != "$changed_fingerprint" ]
   if win_image_provision_contract_matches "$changed_fingerprint"; then
     echo "changed $relative was accepted" >&2
@@ -266,7 +266,7 @@ for relative in disable-auto-servicing.ps1 packer/scripts/provision.ps1 smoke-te
   fi
 done
 
-fingerprint="$(win_provision_contract_fingerprint 1.26.5)"
+fingerprint="$(win_provision_contract_fingerprint 1.27.3)"
 win_record_image_provision_contract "$fingerprint"
 changed_go_fingerprint="$(win_provision_contract_fingerprint 1.26.6)"
 [ "$fingerprint" != "$changed_go_fingerprint" ]
@@ -403,7 +403,7 @@ func TestWindowsImageRejectsSdkGoVersionDrift(t *testing.T) {
 
 func TestSdkGoVersionAcceptsPatchedCompilerForSelectedModule(t *testing.T) {
 	module := filepath.Join(t.TempDir(), "go.mod")
-	if err := os.WriteFile(module, []byte("module example.invalid/sdk\n\ngo 1.26.5\n"), 0o600); err != nil {
+	if err := os.WriteFile(module, []byte("module example.invalid/sdk\n\ngo 1.27.3\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command("bash", "-c", `source "$1"; win_sdk_go_version "$2"`,
@@ -412,8 +412,8 @@ func TestSdkGoVersionAcceptsPatchedCompilerForSelectedModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version read failed: %v: %s", err, output)
 	}
-	if string(output) != "1.26.10\n" {
-		t.Fatalf("version = %q, want 1.26.10", output)
+	if string(output) != "1.27.3\n" {
+		t.Fatalf("version = %q, want 1.27.3", output)
 	}
 }
 
@@ -422,13 +422,14 @@ func TestGuestGoVersionGuardRejectsDrift(t *testing.T) {
 source "$1"
 WIN_HERE=/synthetic/windows
 win_ssh() { printf '%s\n' "$FAKE_GUEST_GO_VERSION"; }
-win_assert_guest_go_version 1.26.10
+win_assert_guest_go_version 1.27.3
 `
 	for _, test := range []struct {
 		version string
 		wantOK  bool
 	}{
-		{version: "go version go1.26.10 windows/arm64", wantOK: true},
+		{version: "go version go1.27.3 windows/arm64", wantOK: true},
+		{version: "go version go1.26.10 windows/arm64", wantOK: false},
 		{version: "go version go1.26.5 windows/arm64", wantOK: false},
 	} {
 		command := exec.Command("bash", "-c", script,
