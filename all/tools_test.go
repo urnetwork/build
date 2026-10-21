@@ -44,7 +44,7 @@ func TestSDKBuildToolsPreflight(t *testing.T) {
 case "${0##*/}" in
   go)
     if [ "$1" = version ]; then
-      printf 'go version go1.27.2 darwin/arm64\n'
+      printf 'go version go1.27.3 darwin/arm64\n'
     else
       printf '%s\n' "$@" >> "$SDK_TOOL_TEST_LOG"
       [ "$SDK_TOOL_TEST_FAILURE" != 1 ] || exit 7
@@ -84,6 +84,24 @@ esac
 				}
 			} else if len(probe) != 0 {
 				t.Fatalf("unexpected tool probe: %s", probe)
+			}
+		})
+	}
+}
+
+func TestHostGoToolchainRequiresSecurityPatch(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh required")
+	}
+	guard := componentRegion(t, `if [[ "$(go version)"`, `if [ "$NUGET_API_KEY" ] || [ "$BUILD_TEST" ]; then`)
+	for _, version := range []string{"1.27.2", "1.27.3", "1.27.30", "1.28.0"} {
+		t.Run(version, func(t *testing.T) {
+			cmd := exec.Command(zsh, "-f", "-c", `go() { printf 'go version go%s darwin/arm64\n' "$HOST_TEST_GO_VERSION"; }; `+guard)
+			cmd.Env = []string{"HOST_TEST_GO_VERSION=" + version}
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != (version == "1.27.3") {
+				t.Fatalf("Go %s: %v: %s", version, err, output)
 			}
 		})
 	}

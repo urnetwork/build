@@ -48,7 +48,7 @@ elif name=="git":
         event("FORBIDDEN-GIT:"+" ".join(args)); sys.exit(91)
     os.execv("REALGIT",["REALGIT",*args])
 elif name=="go":
-    if args==["version"]: print("go version go1.27.2 darwin/arm64")
+    if args==["version"]: print("go version go1.27.3 darwin/arm64")
     # Probe genuine effective Go settings, including the three private-module
     # prefixes. Constant fake values previously hid a real resume-order bug.
     elif args[:2]==["env","-json"]: os.execv("REALGO",["REALGO",*args])
@@ -161,7 +161,9 @@ class CanonicalEntrypoint(unittest.TestCase):
         cls.write(cls.bin/"git", '#!/bin/sh\nfor arg in "$@"; do\ncase "$arg" in checkout|reset|pull|stash|fetch|push|submodule) printf "FORBIDDEN-GIT:%s\\n" "$*" >> "$RECOVERY_FIXTURE/events"; exit 91;; esac\ndone\nexec "'+cls.real_git+'" "$@"\n',mode=0o755)
         # Canonical scripts are copied unchanged, not extracted or modified.
         cls.build.mkdir()
-        shutil.copytree(HERE, cls.build/"all", ignore=shutil.ignore_patterns("__pycache__"))
+        # Host VM images and private SSH keys are generated inputs, not harness
+        # source. Copying them makes this synthetic test consume tens of GiB.
+        shutil.copytree(HERE, cls.build/"all", ignore=shutil.ignore_patterns("__pycache__", "output", ".ssh"))
         shutil.copytree(XOPS/"builder", cls.root/"xops/builder", ignore=shutil.ignore_patterns("__pycache__"))
         # A real fresh run seals AFTER canonical private-module setup. Execute
         # that exact function here; the unchanged resume entrypoint must derive

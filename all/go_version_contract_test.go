@@ -8,8 +8,10 @@ package allbuild
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -38,7 +40,7 @@ func TestFdroidBuildUsesReleaseGoVersion(t *testing.T) {
 	releaseGoVersion := single(
 		"run.sh go check",
 		read("run.sh"),
-		regexp.MustCompile("`go version` =~ 'go version go([0-9]+\\.[0-9]+\\.[0-9]+)'"),
+		regexp.MustCompile(`"\$\(go version\)" != "go version go([0-9]+\.[0-9]+\.[0-9]+) "\*`),
 	)
 
 	fdroid := read("build-fdroid.sh")
@@ -58,5 +60,29 @@ func TestFdroidBuildUsesReleaseGoVersion(t *testing.T) {
 		if goVersion := single(check.name, fdroid, check.pattern); goVersion != releaseGoVersion {
 			t.Errorf("%s names go %s, want the release host's %s", check.name, goVersion, releaseGoVersion)
 		}
+	}
+}
+
+func TestFdroidGoGuardRejectsOtherPatchVersions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "build-fdroid.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	start := strings.Index(source, "    local go_version java_version")
+	end := strings.Index(source, "    java_version=")
+	if start < 0 || end <= start {
+		t.Fatal("cannot locate the F-Droid Go guard")
+	}
+	guard := source[start:end]
+	for _, version := range []string{"1.27.2", "1.27.3", "1.27.30", "1.28.0"} {
+		t.Run(version, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", `go() { printf 'go version go%s linux/amd64\n' "$FDROID_TEST_GO_VERSION"; }; probe() { `+guard+"\n}; probe")
+			cmd.Env = []string{"FDROID_TEST_GO_VERSION=" + version}
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != (version == "1.27.3") {
+				t.Fatalf("Go %s: %v: %s", version, err, output)
+			}
+		})
 	}
 }
