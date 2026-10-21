@@ -390,7 +390,7 @@ func TestWindowsImageRejectsSdkGoVersionDrift(t *testing.T) {
 	setup := readBuildFile(t, "setup.sh")
 	if !strings.Contains(setup, `expected_go_version="$(win_sdk_go_version "$root/sdk/cgo/go.mod")"`) ||
 		!strings.Contains(setup, `smoke-test.ps1 -ExpectedGoVersion $expected_go_version`) {
-		t.Error("setup does not compare the reusable image with the current SDK Go directive")
+		t.Error("setup does not compare the reusable image with the selected compatible compiler")
 	}
 
 	build := readBuildFile(t, "build.sh")
@@ -401,7 +401,7 @@ func TestWindowsImageRejectsSdkGoVersionDrift(t *testing.T) {
 	}
 }
 
-func TestSdkGoVersionComesFromTheSelectedModule(t *testing.T) {
+func TestSdkGoVersionAcceptsPatchedCompilerForSelectedModule(t *testing.T) {
 	module := filepath.Join(t.TempDir(), "go.mod")
 	if err := os.WriteFile(module, []byte("module example.invalid/sdk\n\ngo 1.26.5\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -412,8 +412,8 @@ func TestSdkGoVersionComesFromTheSelectedModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version read failed: %v: %s", err, output)
 	}
-	if string(output) != "1.26.5\n" {
-		t.Fatalf("version = %q, want 1.26.5", output)
+	if string(output) != "1.26.10\n" {
+		t.Fatalf("version = %q, want 1.26.10", output)
 	}
 }
 
@@ -422,14 +422,14 @@ func TestGuestGoVersionGuardRejectsDrift(t *testing.T) {
 source "$1"
 WIN_HERE=/synthetic/windows
 win_ssh() { printf '%s\n' "$FAKE_GUEST_GO_VERSION"; }
-win_assert_guest_go_version 1.26.5
+win_assert_guest_go_version 1.26.10
 `
 	for _, test := range []struct {
 		version string
 		wantOK  bool
 	}{
-		{version: "go version go1.26.5 windows/arm64", wantOK: true},
-		{version: "go version go1.26.4 windows/arm64", wantOK: false},
+		{version: "go version go1.26.10 windows/arm64", wantOK: true},
+		{version: "go version go1.26.5 windows/arm64", wantOK: false},
 	} {
 		command := exec.Command("bash", "-c", script,
 			"guest-go-version-test", filepath.Join(windowsBuildRoot(t), "lib.sh"))
