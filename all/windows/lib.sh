@@ -117,17 +117,34 @@ win_require_tools() {
   return $missing
 }
 
-# Read the exact toolchain version required by the SDK that this build will
-# sync. Reject an absent or malformed directive instead of letting Go's
-# automatic toolchain download hide a stale reusable image.
+# Select the exact compiler pinned by provisioning, and check it satisfies the
+# selected SDK's minimum Go version. A go directive is a minimum, not a reason
+# to reject a newer security patch or keep shipping a vulnerable compiler.
 win_sdk_go_version() {
-  local module="$1" version
+  local module="$1" required version provision
   [ -f "$module" ] || { echo "SDK Go module is missing: $module" >&2; return 1; }
-  version="$(awk '$1 == "go" { print $2; exit }' "$module")"
-  printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || {
+  required="$(awk '$1 == "go" { print $2; exit }' "$module")"
+  printf '%s\n' "$required" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || {
     echo "SDK Go module has no valid go directive: $module" >&2
     return 1
   }
+  provision="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/packer/scripts/provision.ps1"
+  [ -f "$provision" ] || { echo "Windows provisioning script is missing: $provision" >&2; return 1; }
+  version="$(awk -F '"' '$1 == "$goVersion = " { print $2 }' "$provision")"
+  printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+    echo "Windows provisioning script has no valid exact Go pin: $provision" >&2
+    return 1
+  }
+  if ! awk -v required="$required" -v selected="$version" 'BEGIN {
+    split(required, need, "."); split(selected, have, ".")
+    for (i = 1; i <= 3; i++) {
+      if (have[i] + 0 < need[i] + 0) exit 1
+      if (have[i] + 0 > need[i] + 0) exit 0
+    }
+  }'; then
+    echo "Windows Go $version is older than SDK minimum $required; update the provisioning pin." >&2
+    return 1
+  fi
   printf '%s\n' "$version"
 }
 

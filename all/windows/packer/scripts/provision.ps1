@@ -231,25 +231,22 @@ if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
 
 # --- Go + llvm-mingw (URnetwork cgo SDK build) ------------------------------
 # The cgo SDK (sdk/cgo -> URnetworkSdk.dll) builds natively in this VM now (was
-# cross-built on the mac). Pin Go to the sdk module's toolchain so
-# GOTOOLCHAIN=auto doesn't pull a second one at build time. llvm-mingw supplies
+# cross-built on the mac). Pin a patched Go compiler that satisfies the SDK's
+# minimum so GOTOOLCHAIN=auto need not fetch another compiler. llvm-mingw supplies
 # x86_64-/aarch64-w64-mingw32-clang for the c-shared DLLs (no Homebrew formula
 # exists; this is the upstream prebuilt, Windows-ARM64 host build, targets both).
 #
-# KEEP IN SYNC with the `go` directive in sdk/cgo/go.mod. When it drifts the
-# build still works but silently pays a toolchain download EVERY run, on the
-# slowest builder we have — "go: downloading go1.26.5 (windows/arm64)" in the
-# build log is the tell. (It drifted to 1.26.4 vs the module's 1.26.5 exactly
-# this way.) Provisioning has no repo checkout to read the version from, so it
-# is hardcoded here on purpose.
-$goVersion = "1.26.5"
+# This exact pin is also read by setup/build admission. It must satisfy the
+# selected sdk/cgo/go.mod minimum; the guest must match it exactly. Go 1.26.10
+# includes the crypto/x509 fix for GO-2026-6809.
+$goVersion = "1.26.10"
 $goRoot = "C:\go"
 # Version-aware, not merely existence-aware: a plain Test-Path would leave an
 # already-provisioned image on the OLD Go forever, so bumping $goVersion above
 # would have no effect on --reprovision — the one path used to fix a stale image.
 $goInstalled = ""
 if (Test-Path "$goRoot\bin\go.exe") {
-  # "go version go1.26.5 windows/arm64" -> "1.26.5"
+  # "go version go1.26.10 windows/arm64" -> "1.26.10"
   $goInstalled = (& "$goRoot\bin\go.exe" version) -replace '^go version go([^\s]+).*$', '$1'
 }
 if ($goInstalled -ne $goVersion) {
