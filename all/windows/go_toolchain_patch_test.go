@@ -18,8 +18,11 @@ func TestShippingGoSelectsPatchedProvisionedCompiler(t *testing.T) {
 		{minimum: "1.26.5", wantOK: true},
 		{minimum: "1.26.10", wantOK: true},
 		{minimum: "1.26", wantOK: true},
-		{minimum: "1.26.11", wantOK: false},
-		{minimum: "1.27.0", wantOK: false},
+		{minimum: "1.26.11", wantOK: true},
+		{minimum: "1.27.0", wantOK: true},
+		{minimum: "1.27.3", wantOK: true},
+		{minimum: "1.27.4", wantOK: false},
+		{minimum: "1.28.0", wantOK: false},
 		{minimum: "invalid", wantOK: false},
 	} {
 		t.Run(test.minimum, func(t *testing.T) {
@@ -33,8 +36,8 @@ func TestShippingGoSelectsPatchedProvisionedCompiler(t *testing.T) {
 			if (err == nil) != test.wantOK {
 				t.Fatalf("minimum %q: success=%t, want %t: %s", test.minimum, err == nil, test.wantOK, output)
 			}
-			if test.wantOK && string(output) != "1.26.10\n" {
-				t.Fatalf("selected compiler = %q, want patched provisioned 1.26.10", output)
+			if test.wantOK && string(output) != "1.27.3\n" {
+				t.Fatalf("selected compiler = %q, want release compiler 1.27.3", output)
 			}
 		})
 	}
@@ -58,9 +61,12 @@ win_assert_guest_go_version "$expected"
 		wantOK  bool
 	}{
 		{version: "go version go1.26.5 windows/arm64", wantOK: false},
-		{version: "go version go1.26.10 windows/arm64", wantOK: true},
+		{version: "go version go1.26.10 windows/arm64", wantOK: false},
 		{version: "go version go1.26.10 windows/amd64", wantOK: false},
-		{version: "go version go1.27.3 windows/arm64", wantOK: false},
+		{version: "go version go1.27.2 windows/arm64", wantOK: false},
+		{version: "go version go1.27.3 windows/arm64", wantOK: true},
+		{version: "go version go1.27.3 windows/amd64", wantOK: false},
+		{version: "go version go1.27.30 windows/arm64", wantOK: false},
 	} {
 		t.Run(strings.ReplaceAll(test.version, "/", "_"), func(t *testing.T) {
 			command := exec.Command("bash", "-c", script, "shipping-go-guest-test",
