@@ -553,6 +553,11 @@ win_shutdown_vm() {
     for _ in $(seq 1 300); do kill -0 "$WIN_QEMU_PID" 2>/dev/null || break; sleep 1; done
     kill -0 "$WIN_QEMU_PID" 2>/dev/null && kill -TERM "$WIN_QEMU_PID" 2>/dev/null || true
   fi
+  # TERM only requests exit; the direct child can still hold the overlay.
+  # Reap it before removing run files, including a nonzero child exit.
+  if [ -n "${WIN_QEMU_PID:-}" ]; then
+    wait "$WIN_QEMU_PID" 2>/dev/null || true
+  fi
   [ -n "${WIN_RUN_DIR:-}" ] && rm -rf "$WIN_RUN_DIR"
   WIN_QEMU_PID=""
   WIN_RUN_DIR=""
