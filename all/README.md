@@ -50,6 +50,27 @@ JSON and transport failures stop immediately. This read-only retry does not
 replay draft POSTs or finalization PATCHes, change the account's API allowance,
 or replace the separate upload helper's explicit-rejection policy.
 
+Before generators, candidate builds or version allocation, Windows readiness
+checks the existing base image, its smoke-tested provisioning receipt, matching
+Go pin, existing SSH key and QEMU firmware. This is an offline check: it never boots or
+reprovisions a VM or creates a replacement key. Missing/stale receipts require
+explicit operator provisioning. The later Windows build still verifies the
+actual guest's servicing policy, Go and CMake. Resume repeats readiness only
+when Windows has not already completed with verified retained artifacts.
+
+`govulncheck` must be installed on the host. After bootstrap Warpctl compilation,
+both existing Linux binaries undergo strict binary scans within a shared
+300-second deadline, before candidate checks and publication. This catches
+reachable compiler/standard-library and bootstrap dependency vulnerabilities
+early without another platform build. It supplements the OSV dependency check;
+every final service binary still passes its own mandatory scan before its
+image can publish. It does not attest code absent from the bootstrap binaries.
+
+Failure guidance reads the verified private journal without provider probes.
+Unresolved image, Apple or SDK publication intent prints reconciliation
+instructions instead of a resume command; a stopped process or absent tag
+still cannot clear intent. Corrupt journals never yield resume guidance.
+
 Before candidate sites, on resume and immediately before production mutations,
 read-only preflight checks Main LAN database identity/head/capacity and
 Grafana/Brevo authorization, then invokes Warp's exact deployment guard planner

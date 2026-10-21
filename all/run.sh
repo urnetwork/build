@@ -116,6 +116,7 @@ required_build_tools=(
     geoipupdate
     git
     go
+    govulncheck
     gsed
     hdiutil
     java
@@ -571,6 +572,12 @@ if [[ -n "${BUILD_RESUME:-}" ]]; then
     export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
     release_state validate
     error_trap 'validate immutable release before resume'
+    windows_stage_state=$(release_state stage-state windows)
+    error_trap 'read verified Windows checkpoint state'
+    if [[ "$windows_stage_state" != complete ]]; then
+        bash "$BUILD_HOME/all/windows/preflight.sh"
+        error_trap 'Windows image readiness before resume'
+    fi
     export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
 fi
 
@@ -831,6 +838,11 @@ error_trap 'pull localizations'
 (cd $WARP_HOME/mmm && git_main)
 error_trap 'pull mmm'
 
+# Check the provisioning receipt against the freshly selected SDK/toolchain
+# contract before generators, candidate builds, version allocation or uploads.
+bash "$BUILD_HOME/all/windows/preflight.sh"
+error_trap 'Windows image readiness before preparation'
+
 # refresh the generated connect IP tables from their live sources:
 # security/main.go -> ip_security_cfaa_block.go (threat feeds) and
 # ip_security_messaging_meta.go (Meta's AS32934 prefixes for the WhatsApp
@@ -895,6 +907,8 @@ python3 "$BUILD_HOME/all/release-state.py" check-inputs "$WARP_HOME"
 error_trap 'check supported sealed compiler inputs'
 (cd $BUILD_HOME/warp/warpctl && make)
 error_trap 'build bootstrap warpctl'
+timeout --kill-after=10 300 bash "$BUILD_HOME/all/check-bootstrap-go.sh"
+error_trap 'bootstrap Go binary security checks'
 export PATH="$BUILD_HOME/warp/warpctl/build/darwin/arm64:$PATH"
 if [[ ! `which warpctl` = "$BUILD_HOME/warp/warpctl/build/darwin/arm64/warpctl" ]]; then
     builder_message "Build warpctl is not first on the PATH ($(which warpctl))."

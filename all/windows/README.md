@@ -89,6 +89,7 @@ explicitly, so they're unaffected.
 | File | Role |
 |---|---|
 | `setup.sh` | **one-time setup + smoke test** — verifies the ISO is 24H2/Pro (see "Windows ISO"), installs Windows unattended, provisions the toolchain, verifies it. Run this first. |
+| `preflight.sh` | offline release readiness: requires a readable base image, a current smoke-tested provisioning receipt, the existing SSH key and QEMU firmware; never boots or changes the VM |
 | `lib.sh` | shared VM lifecycle (install, boot CoW overlay, boot-in-place, **rsync source in**, ssh/scp, teardown) — sourced by `setup.sh` + `build.sh` |
 | `build.sh` | per-release: boot a CoW overlay (VNC 5901 + monitor for diagnosis), enforce the hermetic guest policy, **rsync `BUILD_HOME` in**, deliver the SDK zip, run `build.ps1`, retrieve MSIs, shut down; screendumps to `output/build-fail.ppm` if ssh never comes up |
 | `disable-auto-servicing.ps1` | shared provisioning/runtime guard: blocks Windows Update sources and verifies `UsoSvc` + `wuauserv` are disabled and stopped before a build starts |

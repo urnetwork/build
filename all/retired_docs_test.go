@@ -48,7 +48,7 @@ git() {
 	for _, stage := range []struct {
 		name, start, end, event string
 	}{
-		{"pull", `(cd $BUILD_HOME/sdk && git_main)`, "# refresh the generated connect IP tables", "pull"},
+		{"pull", `(cd $BUILD_HOME/sdk && git_main)`, "# Check the provisioning receipt", "pull"},
 		{"branch", `(cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})`, "# apple branch, edit xcodeproject", "branch"},
 		{"publish", "(cd $BUILD_HOME/android && \n    git_commit", "(cd $BUILD_HOME/localizations &&\n    npm_fork", "tag"},
 	} {

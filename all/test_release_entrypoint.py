@@ -129,6 +129,8 @@ class CanonicalEntrypoint(unittest.TestCase):
                         "ANDROID_HOME": str(cls.root/"android-sdk"), "LC_ALL": "C", "WARP_SKIP_DEPLOY": "1",
                         "GOENV": "off", "GOWORK": "off", "GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off",
                         "GOCACHE": str(cls.root/"go-cache"), "GOMODCACHE": str(cls.root/"go-modcache"),
+                        "IMAGE": str(cls.root/"windows-base.qcow2"), "SSH_KEY": str(cls.root/"windows-key"),
+                        "UEFI_CODE": str(cls.root/"uefi-code"), "UEFI_VARS_TEMPLATE": str(cls.root/"uefi-vars"),
                         "GOPRIVATE": "private.example", "GONOPROXY": "proxy.example", "GONOSUMDB": "sum.example"}
         cls.env = dict(cls.base_env, WARP_HOME=str(cls.root), BRINGYOUR_HOME=str(cls.build),
                        BUILD_HOME=str(cls.build), BUILD_TEST="", BUILD_RESET="",
@@ -150,7 +152,7 @@ class CanonicalEntrypoint(unittest.TestCase):
         for index, name in enumerate(("URnetwork Download", "URnetwork Extension Download", "URnetwork Split Tunnel Download")):
             cls.write(cls.home/f".provisionprofiles/{index}.provisionprofile", plistlib.dumps({"Name":name,"UUID":str(index),"ExpirationDate":"2999-01-01T00:00:00Z","DeveloperCertificates":[b"fixture-certificate"]}))
         # Every required command exists, but unexpected execution fails closed.
-        tools = ("python3 git go make java node npm xcodebuild docker zig warpctl df lsof ps security plutil jq curl codesign ffprobe geoipupdate gsed hdiutil nc npx pandoc pip productbuild productsign python qemu-img qemu-system-aarch64 rsync scp sdkmanager ssh ssh-keygen timeout xcrun").split()
+        tools = ("python3 git go govulncheck make java node npm xcodebuild docker zig warpctl df lsof ps security plutil jq curl codesign ffprobe geoipupdate gsed hdiutil nc npx pandoc pip productbuild productsign python qemu-img qemu-system-aarch64 rsync scp sdkmanager ssh ssh-keygen timeout xcrun").split()
         for name in tools:
             if name == "timeout":
                 # The genuine bounded subprocess wrapper is safe with fake children.
@@ -196,6 +198,12 @@ class CanonicalEntrypoint(unittest.TestCase):
                 subprocess.run([cls.real_git,"-C",str(repo),"tag","v"+version],check=True,capture_output=True)
         for name in ("sdk/build/go.sum","sdk/cgo/go.sum","sdk/js/go.sum"):
             cls.write(cls.build/name,"pinned generated module graph\n")
+        cls.write(cls.build/"sdk/cgo/go.mod", "module fixture.invalid/sdk\n\ngo 1.27.3\n")
+        for name in ("windows-base.qcow2", "windows-key", "uefi-code", "uefi-vars"):
+            cls.write(cls.root/name, "synthetic Windows build prerequisite\n")
+        fingerprint=subprocess.run(["/bin/bash","-c",'source "$1"; win_init; expected="$(win_sdk_go_version "$2")"; win_provision_contract_fingerprint "$expected"',"fixture-windows",str(cls.build/"all/windows/lib.sh"),str(cls.build/"sdk/cgo/go.mod")],env=cls.env,capture_output=True,text=True,timeout=10)
+        if fingerprint.returncode: raise AssertionError("fixture Windows contract failed: "+fingerprint.stderr)
+        cls.write(cls.root/"windows-base.qcow2.provision.sha256", fingerprint.stdout,mode=0o600)
         cls.write(cls.build/"sdk/js/build/URnetworkSdkJs.zip","prepared js")
         cls.write(cls.build/"sdk/js/wasm/main.wasm","prepared wasm")
         cls.write(cls.build/"sdk/js/release/plan.json","prepared npm release")
@@ -310,8 +318,22 @@ class CanonicalEntrypoint(unittest.TestCase):
 
         # Retained CLI artifacts restore after cleanup and never recompile.
         shutil.rmtree(sn/"v2026/cli/miner/build")
-        fourth=self.invoke("--resume",VERSION)
+        # A verified completed Windows stage needs no VM. Record real retained
+        # fixture outputs, then make the synthetic base image unavailable.
+        windows_output=self.root/"windows-artifacts"
+        self.write(windows_output/"verified.msi", "synthetic checked MSI")
+        for action in ("begin", "complete"):
+            command=[sys.executable,str(self.build/"all/release-state.py"),"locked",str(self.root),"--",sys.executable,str(self.build/"all/release-state.py"),action,str(self.root),VERSION,"windows",str(windows_output)]
+            result=subprocess.run(command,env=self.env,capture_output=True,text=True,timeout=60)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        image=self.root/"windows-base.qcow2"
+        image.rename(self.root/"windows-base.offline")
+        try:
+            fourth=self.invoke("--resume",VERSION)
+        finally:
+            (self.root/"windows-base.offline").rename(image)
         self.assertEqual(fourth.returncode,93,fourth.stdout+fourth.stderr)
+        self.assertNotIn("Windows image readiness failed",fourth.stdout+fourth.stderr)
         for pkg in ("miner","validator","snclaim"):
             self.assertIn("reuse cli-"+pkg+": verified",fourth.stdout+fourth.stderr)
         self.assertTrue((sn/"v2026/cli/miner/build/provider.tar.gz").is_file())

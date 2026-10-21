@@ -77,6 +77,46 @@ class Checkpoints(unittest.TestCase):
     def manifest(self):
         return state.load_manifest(self.workspace, VERSION)[1]
 
+    def captured_diagnostic(self, command, *arguments):
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", ["release-state", command, str(self.workspace), VERSION, *map(str, arguments)]), contextlib.redirect_stdout(output):
+            self.assertEqual(state.main(), 0)
+        return output.getvalue()
+
+    def test_failure_hint_distinguishes_uncertain_publication_without_mutating_state(self):
+        self.invoke("effect-begin", "apple-ios-upload")
+        path = self.workspace / ".release-checkpoints" / VERSION / "manifest.json"
+        before = path.read_bytes()
+        message = self.captured_diagnostic("failure-hint")
+        self.assertIn("unresolved publication intent: apple-ios-upload", message)
+        self.assertIn("do not retry publication, clear intent or mark success", message)
+        self.assertNotIn("--resume", message)
+        self.assertEqual(path.read_bytes(), before)
+        self.invoke("effect-complete", "apple-ios-upload")
+        completed = path.read_bytes()
+        message = self.captured_diagnostic("failure-hint")
+        self.assertIn("If the failure was an external dependency", message)
+        self.assertIn("--resume " + VERSION, message)
+        self.assertEqual(path.read_bytes(), completed)
+
+    def test_failure_hint_refuses_corrupt_journal(self):
+        path = self.workspace / ".release-checkpoints" / VERSION / "manifest.json"
+        value = json.loads(path.read_text())
+        value["effects"]["image-grafana-publication"] = {"state": "complete"}
+        path.write_text(json.dumps(value))
+        with self.assertRaises(state.Refusal):
+            self.captured_diagnostic("failure-hint")
+
+    def test_stage_state_is_read_only_and_distinguishes_completed_outputs(self):
+        self.assertEqual(self.captured_diagnostic("stage-state", "apple"), "pending\n")
+        self.completed()
+        path = self.workspace / ".release-checkpoints" / VERSION / "manifest.json"
+        before = path.read_bytes()
+        self.assertEqual(self.captured_diagnostic("stage-state", "apple"), "complete\n")
+        self.assertEqual(path.read_bytes(), before)
+        with self.assertRaises(state.Refusal):
+            self.captured_diagnostic("stage-state", "invalid/stage")
+
     def completed(self):
         target = self.workspace / "generated" / "signed.app"
         self.assertEqual(self.invoke("begin", "apple", target), 0)

@@ -187,6 +187,31 @@ win_image_provision_contract_matches() {
   [ "$actual_fingerprint" = "$expected_fingerprint" ]
 }
 
+# Offline readiness only: setup's receipt must match today's provisioning
+# contract before a release spends time on candidates or publishes anything.
+# This does not attest the current guest contents; build.sh still boots an
+# overlay and verifies the actual policy, Go and CMake before source sync.
+win_assert_image_ready() {
+  local expected_go_version="$1" fingerprint required
+  if [ ! -f "$IMAGE" ] || [ ! -r "$IMAGE" ] || [ ! -s "$IMAGE" ]; then
+    echo "Windows base image is missing, empty or unreadable: $IMAGE" >&2
+    echo "Run $WIN_HERE/setup.sh with the Windows and virtio ISOs before building." >&2
+    return 1
+  fi
+  fingerprint="$(win_provision_contract_fingerprint "$expected_go_version")" || return
+  if ! win_image_provision_contract_matches "$fingerprint"; then
+    echo "Windows base image has a missing or stale provisioning receipt (requires Go $expected_go_version)." >&2
+    echo "Run $WIN_HERE/setup.sh --reprovision, then review its smoke-test result before building." >&2
+    return 1
+  fi
+  for required in "$SSH_KEY" "$UEFI_CODE" "$UEFI_VARS_TEMPLATE"; do
+    if [ ! -f "$required" ] || [ ! -r "$required" ] || [ ! -s "$required" ]; then
+      echo "Windows build input is missing, empty or unreadable: $required" >&2
+      return 1
+    fi
+  done
+}
+
 # Publish the contract only after provisioning, durable base-image shutdown,
 # and the subsequent smoke test all succeed; an interrupted update stays stale.
 win_record_image_provision_contract() {

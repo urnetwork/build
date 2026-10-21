@@ -19,6 +19,17 @@ func TestRunBootstrapsWarpctlBeforeLicenseGate(t *testing.T) {
 WARP_HOME="$BUILD_HOME/workspace"
 mkdir -p "$BUILD_HOME/warp/warpctl"
 release_early_preflight() { return 0; }
+timeout() {
+    [[ "$1 $2" == '--kill-after=10 300' ]] || return 55
+    shift 2
+    "$@"
+}
+# The scanner itself has separate executable, two-architecture tests. This
+# fixture owns the bootstrap/security/license ordering and fatal boundaries.
+bash() {
+    [[ "$1" == "$BUILD_HOME/all/check-bootstrap-go.sh" && "$#" == 1 ]] || return 56
+    record_component_step bootstrap-security
+}
 python3() {
     [[ "$1" == "$BUILD_HOME/all/release-state.py" && "$2" == check-inputs && "$3" == "$WARP_HOME" ]] || return 54
 }
@@ -40,19 +51,20 @@ go() {
     fi
 }
 `
-	steps := []string{"bootstrap", "license-sdk", "license-android", "warp-version-code", "license-apple", "license-web", "license-extension", "release-continued"}
+	steps := []string{"bootstrap", "bootstrap-security", "license-sdk", "license-android", "warp-version-code", "license-apple", "license-web", "license-extension", "release-continued"}
 	for _, test := range []struct {
 		name, fail, artifacts string
 		wantExit, stepCount   int
 	}{
 		{"clean checkout", "", "complete", 0, len(steps)},
 		{"bootstrap failure", "bootstrap", "complete", 37, 1},
-		{"bootstrap lacks binary", "", "missing", 1, 1},
-		{"SDK license failure", "license-sdk", "complete", 37, 2},
-		{"Android license failure", "license-android", "complete", 37, 3},
-		{"Apple license failure", "license-apple", "complete", 37, 5},
-		{"web license failure", "license-web", "complete", 37, 6},
-		{"extension license failure", "license-extension", "complete", 37, 7},
+		{"bootstrap security failure", "bootstrap-security", "complete", 37, 2},
+		{"bootstrap lacks binary", "", "missing", 1, 2},
+		{"SDK license failure", "license-sdk", "complete", 37, 3},
+		{"Android license failure", "license-android", "complete", 37, 4},
+		{"Apple license failure", "license-apple", "complete", 37, 6},
+		{"web license failure", "license-web", "complete", 37, 7},
+		{"extension license failure", "license-extension", "complete", 37, 8},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := runComponent(t, source, setup, "FAIL_STEP="+test.fail, "ARTIFACT_MODE="+test.artifacts)

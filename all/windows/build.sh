@@ -50,14 +50,9 @@ win_init
 expected_go_version="$(win_sdk_go_version "$BUILD_HOME/sdk/cgo/go.mod")" \
   || win_die "cannot determine the SDK Go version"
 
-[ -e "$UEFI_CODE" ] || win_die "missing $UEFI_CODE"
+win_assert_image_ready "$expected_go_version" \
+  || win_die "Windows image readiness failed"
 mkdir -p "$OUT_DIR"
-
-win_ensure_ssh_key
-
-# The base image is built once by setup.sh (unattended install + toolchain +
-# smoke test). If it's missing, the operator must run setup.sh first.
-[ -f "$IMAGE" ] || win_die "base image $IMAGE missing — run ./setup.sh --windows-iso ... --virtio-iso ... first"
 
 trap win_shutdown_vm EXIT
 

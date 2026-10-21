@@ -689,9 +689,32 @@ process.stdout.write(mergeTemplates(before,templates));'''
             raise Refusal("onboarding config differs from the exact pinned template-ID merge")
 
 
+def failure_hint(workspace, value):
+    """Describe recorded intent without probing providers or changing state."""
+    uncertain = []
+    for name, record in value["effects"].items():
+        if not STAGE.fullmatch(name) or record.get("state") not in ("uncertain", "complete"):
+            raise Refusal("invalid external-effect record; preserve the release journal")
+        if record["state"] == "uncertain":
+            uncertain.append(name)
+    version = value["version"]
+    if uncertain:
+        return ("Release " + version + " stopped with unresolved publication intent: " +
+                ", ".join(sorted(uncertain)) + ".\n"
+                "Preserve logs and receipts. Investigate the exact version with the owning provider/operator; "
+                "do not retry publication, clear intent or mark success. A stopped host or absent tag does not "
+                "establish that a daemon-owned job cannot publish later.\n"
+                "If authoritative reconciliation is unavailable, start a new full release after owned cleanup.")
+    return ("Release " + version + " stopped. If the failure was an external dependency and the sealed inputs "
+            "are unchanged, restore that dependency, finish owned cleanup, then run: " +
+            str(Path(workspace).resolve() / "xops/builder/build.sh") + " --resume " + version + "\n"
+            "Resume verifies sealed source/config/vault, options, toolchain and every retained artifact. "
+            "Product source changes require a new full release.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("locked", "recover-lock", "check-lock", "check-inputs", "candidate", "seal", "validate", "restore-prepared", "sdk-outputs", "begin", "complete", "transition", "status", "effect-begin", "effect-complete"))
+    parser.add_argument("command", choices=("locked", "recover-lock", "check-lock", "check-inputs", "candidate", "seal", "validate", "restore-prepared", "sdk-outputs", "begin", "complete", "transition", "status", "stage-state", "failure-hint", "effect-begin", "effect-complete"))
     parser.add_argument("workspace")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -750,6 +773,17 @@ def main():
     path, value = load_manifest(args.workspace, version)
     if args.command == "status":
         print(json.dumps({key: value[key] for key in ("version", "sealed", "stages", "effects")}, indent=2))
+        return 0
+    if args.command == "failure-hint":
+        print(failure_hint(args.workspace, value))
+        return 0
+    if args.command == "stage-state":
+        if len(rest) != 1 or not STAGE.fullmatch(rest[0]):
+            raise Refusal("one valid stage name is required")
+        observed = value["stages"].get(rest[0], {}).get("state", "pending")
+        if observed not in ("pending", "running", "complete"):
+            raise Refusal("invalid stage state")
+        print(observed)
         return 0
     if args.command == "validate":
         validate_inputs(args.workspace, value, tools=True)

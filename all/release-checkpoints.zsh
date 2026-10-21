@@ -32,8 +32,9 @@ release_transition() {
 
 release_failure_hint() {
     if [[ -n "${EXTERNAL_WARP_VERSION:-}" && -f "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/manifest.json" ]]; then
-        print -u2 -r -- "Release $EXTERNAL_WARP_VERSION stopped. After restoring the failed dependency, run: $WARP_HOME/xops/builder/build.sh --resume $EXTERNAL_WARP_VERSION"
-        print -u2 -- 'Resume verifies sealed source/config/vault, options, toolchain and every retained artifact. Product source changes require a new full release. An uncertain image, Apple or SDK publication requires provider/job reconciliation; it is never retried automatically.'
+        if ! release_state failure-hint >&2; then
+            print -u2 -- 'Cannot verify the stopped release journal. Preserve its logs and receipts; automatic resume eligibility has not been established.'
+        fi
     else
         print -u2 -- 'This invocation has not sealed immutable release preparation and cannot resume. Preserve the failure evidence, then start a new full build.'
     fi
