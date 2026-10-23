@@ -223,8 +223,16 @@ meson setup "${builddir}" "${app}" \
   -Dglibc_floor="${glibc_gate}"
 if [ "${UR_SKIP_TESTS}" = 1 ]; then
   echo ">>> [${ARCH}/${ROLE}] unit tests omitted by explicit UR_SKIP_TESTS=1"
-  targets=(urnetworkd)
-  if [ "${ROLE}" = gui ]; then targets+=(urnetwork-gui); fi
+  # Include installed translation/resource targets as well as binaries.
+  # Selecting just executables would leave files missing at install time.
+  meson introspect --targets "${builddir}" >"${builddir}/installable-targets.json"
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print("\n".join(t["name"] for t in data if t.get("installed")))' \
+    "${builddir}/installable-targets.json" >"${builddir}/installable-targets.txt"
+  targets=()
+  while IFS= read -r target; do
+    [ -n "${target}" ] && targets+=("${target}")
+  done <"${builddir}/installable-targets.txt"
+  [ "${#targets[@]}" -gt 0 ] || { echo "ERROR: no installable meson targets" >&2; exit 1; }
   meson compile -C "${builddir}" "${targets[@]}"
   DESTDIR="${staging}" meson install -C "${builddir}" --no-rebuild
 else

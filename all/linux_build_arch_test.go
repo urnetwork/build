@@ -26,6 +26,10 @@ import (
 const fakeBuildArchMeson = `#!/bin/sh
 set -eu
 if [ -n "${MESON_LOG:-}" ]; then printf '%s\n' "$*" >>"$MESON_LOG"; fi
+if [ "$1" = setup ]; then mkdir -p "$2"; fi
+if [ "$1" = introspect ]; then
+  printf '%s\n' '[{"name":"urnetworkd","installed":true},{"name":"urnetwork-catalog","installed":true},{"name":"urnetwork-tests","installed":false}]'
+fi
 if [ "$1" = install ]; then
   mkdir -p "$DESTDIR/usr/lib/urnetwork" "$DESTDIR/usr/share/locale/de/LC_MESSAGES"
   printf 'sdk\n' >"$DESTDIR/usr/lib/urnetwork/libURnetworkSdk.so"
@@ -376,7 +380,7 @@ func TestExplicitLinuxTestWaiverDoesNotBuildOrRunUnitTests(t *testing.T) {
 				}
 			}
 			if skip == "1" {
-				if ranTests || len(compile) != 4 || compile[3] != "urnetworkd" || !slices.Contains(install, "--no-rebuild") {
+				if ranTests || len(compile) != 5 || !slices.Contains(compile, "urnetworkd") || !slices.Contains(compile, "urnetwork-catalog") || slices.Contains(compile, "urnetwork-tests") || !slices.Contains(install, "--no-rebuild") {
 					t.Fatalf("waiver still compiled or ran test targets: %s", raw)
 				}
 			} else if !ranTests || len(compile) != 3 || slices.Contains(install, "--no-rebuild") {
