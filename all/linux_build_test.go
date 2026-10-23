@@ -184,3 +184,19 @@ func TestLinuxBuildGuiRoleDoesNotExpectTheArchPackage(t *testing.T) {
 		}
 	}
 }
+
+func TestLinuxTestWaiverReachesBothContainerRoles(t *testing.T) {
+	got := runLinuxBuildFixture(t, "daemon gui", "UR_SKIP_TESTS=1")
+	if got.exitCode != 0 {
+		t.Fatalf("build failed: %s", got.output)
+	}
+	count := 0
+	for _, line := range got.containerLogLines {
+		if line == "UR_SKIP_TESTS=1" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("waiver reached %d containers, want daemon and gui: %v", count, got.containerLogLines)
+	}
+}

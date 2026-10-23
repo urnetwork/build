@@ -143,7 +143,7 @@ for arch in ${ARCHES}; do
       -v "${here}/verify.sh:/verify.sh:ro" \
       -e ARCH="${arch}" -e VERSION="${VERSION}" -e ROLE="${role}" \
       -e UR_GLIBC_FLOOR -e UR_GLIBC_CEILING -e UR_SKIP_VERIFY \
-      -e UR_REQUIRE_RPM -e UR_REQUIRE_ARCH_PKG \
+      -e UR_REQUIRE_RPM -e UR_REQUIRE_ARCH_PKG -e UR_SKIP_TESTS \
       "${image_base}-${role}:${arch}" \
       bash /build-arch.sh
   done
