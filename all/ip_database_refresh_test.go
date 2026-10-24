@@ -91,7 +91,7 @@ git() {
     print -r -- "git:$*" >> "$IP_DATABASE_TEST_EVENTS"
     if [ "$1" = diff ]; then return 1; fi
 }
-git_push_with_rebase_retry() { print -r -- push >> "$IP_DATABASE_TEST_EVENTS"; }
+git_push_generated_paths() { print -r -- push >> "$IP_DATABASE_TEST_EVENTS"; }
 builder_message() { print -r -- "message:$*" >> "$IP_DATABASE_TEST_EVENTS"; }
 eval "$1"
 refresh_ip_databases

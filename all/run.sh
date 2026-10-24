@@ -685,6 +685,44 @@ git_push_with_rebase_retry () {
     git push
 }
 
+# Publish one generated config commit without incorporating remote changes into
+# the sealed checkout. A temporary index combines disjoint paths on the remote;
+# the two-parent commit retains both histories. Never merge a competing version
+# directory, rewrite main, or retry more than once.
+git_push_generated_paths () (
+    local generated_head generated_base remote_head integration_tree integration_head
+    local temporary_index_dir='' generated_path
+    local -a excluded_paths
+    [[ $# -gt 0 && "$(git symbolic-ref --short HEAD)" = main ]] || return 1
+    [[ -z "$(git status --porcelain)" ]] || return 1
+    generated_head=$(git rev-parse HEAD) || return $?
+    generated_base=$(git rev-parse HEAD^) || return $?
+    [[ "$(git rev-list --parents -n 1 HEAD | awk '{print NF}')" = 2 ]] || return 1
+    excluded_paths=()
+    for generated_path in "$@"; do excluded_paths+=(":(exclude)$generated_path"); done
+    git diff --quiet "$generated_base" "$generated_head" -- . "${excluded_paths[@]}" || return 1
+    if git push origin HEAD:refs/heads/main; then return 0; fi
+    git fetch origin main || return $?
+    remote_head=$(git rev-parse FETCH_HEAD) || return $?
+    # A lost successful response is safe to acknowledge without another push.
+    if git merge-base --is-ancestor "$generated_head" "$remote_head"; then
+        git diff --quiet "$generated_head" "$remote_head" -- "$@"
+        return $?
+    fi
+    git merge-base --is-ancestor "$generated_base" "$remote_head" || return 1
+    if ! git diff --quiet "$generated_base" "$remote_head" -- "$@"; then
+        print -u2 -- 'Generated config paths changed remotely; publication requires manual reconciliation'
+        return 1
+    fi
+    temporary_index_dir=$(mktemp -d "${TMPDIR:-/tmp}/ip-config-index.XXXXXXXX") || return $?
+    trap 'rm -rf -- "$temporary_index_dir"' EXIT
+    GIT_INDEX_FILE="$temporary_index_dir/index" git read-tree -m "$generated_base" "$remote_head" "$generated_head" || return $?
+    integration_tree=$(GIT_INDEX_FILE="$temporary_index_dir/index" git write-tree) || return $?
+    integration_head=$(git commit-tree "$integration_tree" -p "$remote_head" -p "$generated_head" \
+        -m 'Merge generated IP databases with concurrent config updates') || return $?
+    git push origin "${integration_head}:refs/heads/main"
+)
+
 # A pull that drops a submodule cannot remove its checkout (git will not rmdir
 # a populated directory), and the leftover is an untracked nested repository
 # that the release commit's `git add .` records again as a gitlink with no
@@ -3176,7 +3214,7 @@ refresh_ip_databases () {
             git add -- "all/mmdb/$WARP_VERSION" &&
             if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION"; then
                 git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 database" -- "all/mmdb/$WARP_VERSION" &&
-                git_push_with_rebase_retry
+                git_push_generated_paths "all/mmdb/$WARP_VERSION"
             fi) || return $?
         mkdir -- "$ipdb_checkpoint" || return $?
         cp -R -- "$geoip_target" "$ipdb_checkpoint/mmdb" || return $?
@@ -3210,7 +3248,7 @@ refresh_ip_databases () {
         if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION"; then
             git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 and ARIN databases" -- \
                 "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
-            git_push_with_rebase_retry
+            git_push_generated_paths "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION"
         fi) || return $?
     local update_summary=''
     if [ -r "$ipdb_work/bundle/update-summary.txt" ]; then

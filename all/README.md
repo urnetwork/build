@@ -37,6 +37,13 @@ The host-tool seal does not make existing container/VM package installations
 fully hermetic (for example F-Droid's buildserver tag/apt inputs). Eligible
 retried non-publishing container stages still execute their original gates.
 
+IP database publication keeps the sealed config checkout on its exact generated
+commit. If config `main` advances, one bounded retry combines only disjoint
+remote changes using a temporary Git index and publishes a merge commit; it
+does not rebase or check out those changes locally. Competing changes to the
+generated version paths fail closed. An interruption before the IP source
+transition and output checkpoint finish still requires a fresh full release.
+
 Private Go module prefixes and Git SSH rewrites are configured process-locally
 before both fresh preparation and the first resume validation. Reapplying this
 setup preserves caller settings and does not append duplicate canonical rules.
