@@ -11777,6 +11777,632 @@
           ]
         }
       ]
+    },
+    {
+      "source": {
+        "path": "/Users/builder/urnetwork/build/sdk/js/lag-cli/package-lock.json",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "fast-uri",
+            "version": "3.1.8",
+            "ecosystem": "npm"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GHSA-333x-w4r6-6crp"
+              ],
+              "aliases": [
+                "CVE-2026-110725",
+                "GHSA-333x-w4r6-6crp"
+              ],
+              "max_severity": "3.7"
+            },
+            {
+              "ids": [
+                "GHSA-w74x-v6f9-j3xg"
+              ],
+              "aliases": [
+                "CVE-2026-110306",
+                "GHSA-w74x-v6f9-j3xg"
+              ],
+              "max_severity": "6.1"
+            },
+            {
+              "ids": [
+                "GHSA-wjr9-j795-jxcr"
+              ],
+              "aliases": [
+                "CVE-2026-110180",
+                "GHSA-wjr9-j795-jxcr"
+              ],
+              "max_severity": "4.8"
+            },
+            {
+              "ids": [
+                "GHSA-xhq7-xmqj-769h"
+              ],
+              "aliases": [
+                "CVE-2026-110095",
+                "GHSA-xhq7-xmqj-769h"
+              ],
+              "max_severity": "3.7"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-333x-w4r6-6crp/GHSA-333x-w4r6-6crp.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "2.4.8"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-333x-w4r6-6crp/GHSA-333x-w4r6-6crp.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "3.0.0"
+                        },
+                        {
+                          "fixed": "3.1.9"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-333x-w4r6-6crp/GHSA-333x-w4r6-6crp.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "4.0.0"
+                        },
+                        {
+                          "fixed": "4.2.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-110725"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-116",
+                  "CWE-41"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-10-23T21:36:40Z",
+                "nvd_published_at": "2026-10-20T07:17:08Z",
+                "severity": "LOW"
+              },
+              "details": "### Impact\n\n`fast-uri`'s `serialize()`, `normalize()`, and `resolve()`, when called with the non-default option `reference: 'suffix'` on a reference that has no authority, emit a relative reference whose first path segment contains a bare colon without escaping it. RFC 3986 section 3.3 requires the first segment of a `path-noscheme` reference not to contain a colon, precisely because a bare colon makes the string reparse as an absolute URI with a scheme. `fast-uri`'s default serialization escapes that colon, but the suffix path does not.\n\nFor example, `normalize('javascript:alert(1)', { reference: 'suffix' })` returns `javascript:alert(1)`, which reparses as a live `javascript:` scheme; `data:` and `vbscript:` behave the same.\n\nApplications that serialize or normalize a relative reference with `reference: 'suffix'` and then treat the result as a URI can turn inert input into a live `javascript:`, `data:`, or `vbscript:` URL (a cross-site scripting vector), and `equal()` can conflate a scheme-bearing reference with a relative one. Exposure is limited to applications that use the non-default `reference: 'suffix'` option.\n\n### Patches\n\nUpgrade to `fast-uri` `2.4.8`, `3.1.9`, or `4.2.3`.\n\n### Workarounds\n\nDo not use the `reference: 'suffix'` option on untrusted input. If suffix output is required, percent-encode a colon in the first path segment of the result before treating it as a URI.",
+              "id": "GHSA-333x-w4r6-6crp",
+              "modified": "2026-10-23T21:45:04.900311356Z",
+              "published": "2026-10-23T21:36:40Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/security/advisories/GHSA-333x-w4r6-6crp"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-110725"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/39e6493c1356f30a0084171627eb266786e1620e"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/a9b8d67353630aab053cd727cf629023dd018d2b"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://cna.openjsf.org/security-advisories.html"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/fastify/fast-uri"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v2.4.8"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v3.1.9"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v4.2.3"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "fast-uri vulnerable to scheme injection via an unescaped first-segment colon in suffix references"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-w74x-v6f9-j3xg/GHSA-w74x-v6f9-j3xg.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "2.4.8"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-w74x-v6f9-j3xg/GHSA-w74x-v6f9-j3xg.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "3.0.0"
+                        },
+                        {
+                          "fixed": "3.1.9"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-w74x-v6f9-j3xg/GHSA-w74x-v6f9-j3xg.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "4.0.0"
+                        },
+                        {
+                          "fixed": "4.2.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-110306"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-172",
+                  "CWE-180"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-10-23T21:41:36Z",
+                "nvd_published_at": "2026-10-20T07:17:08Z",
+                "severity": "MODERATE"
+              },
+              "details": "### Impact\n\n`fast-uri` percent-decodes the scheme component with the legacy global `unescape()` before validating it, so an input whose decoded scheme is a valid but dangerous token is emitted as a live scheme. RFC 3986 section 3.1 does not allow percent-encoding in a scheme, so no RFC or WHATWG parser treats such input as having that scheme, but `fast-uri` does.\n\nFor example, `normalize('%6Aavascript:alert(1)')` returns `javascript:alert(1)`, `resolve('https://a.example/', '%6Aavascript:alert(1)')` returns `javascript:alert(1)`, and `parse('%6Aavascript:alert(1)').scheme` returns `javascript`. The `%uXXXX` form (`%u006Aavascript:`) produces the same result, and `equal('%68ttp://a/', 'http://a/')` returns `true`.\n\nAn application that screens dangerous schemes on the raw input and then stores or renders `normalize(input)` or `resolve(base, input)` turns an inert string into an executable `javascript:`, `data:`, or `vbscript:` URL, a stored or reflected cross-site scripting vector in the consuming application. `equal()` also treats an encoded and a plain scheme as the same, which can bypass equality-based allowlists.\n\n### Patches\n\nUpgrade to `fast-uri` `2.4.8`, `3.1.9`, or `4.2.3`.\n\n### Workarounds\n\nReject input whose scheme part (before the first `:`, and before any `/`, `?`, or `#`) contains `%`. Alternatively, check `parse(x).scheme` against an allowlist after normalization and use that same parsed result rather than the raw string.",
+              "id": "GHSA-w74x-v6f9-j3xg",
+              "modified": "2026-10-23T21:45:04.896137439Z",
+              "published": "2026-10-23T21:41:36Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/security/advisories/GHSA-w74x-v6f9-j3xg"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-110306"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/39933a1f1422986f14e2d844f552238feb40f5d4"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/597f254c86d151568511eeb9a1df761fd12520b3"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/e60e716f41d1d73717e2d803d20b68d2c6d20a0f"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://cna.openjsf.org/security-advisories.html"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/fastify/fast-uri"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v2.4.8"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v3.1.9"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v4.2.3"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "fast-uri vulnerable to URI scheme spoofing via percent-encoded scheme decoding"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-wjr9-j795-jxcr/GHSA-wjr9-j795-jxcr.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "2.4.2"
+                        },
+                        {
+                          "fixed": "2.4.8"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-wjr9-j795-jxcr/GHSA-wjr9-j795-jxcr.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "3.1.3"
+                        },
+                        {
+                          "fixed": "3.1.9"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-wjr9-j795-jxcr/GHSA-wjr9-j795-jxcr.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "4.0.1"
+                        },
+                        {
+                          "fixed": "4.2.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-110180"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-20",
+                  "CWE-436"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-10-23T21:37:59Z",
+                "nvd_published_at": "2026-10-20T07:17:08Z",
+                "severity": "MODERATE"
+              },
+              "details": "### Impact\n\n`fast-uri` versions `\u003e= 2.4.2, \u003c= 2.4.7`, `\u003e= 3.1.3, \u003c= 3.1.8`, and `\u003e= 4.0.1, \u003c= 4.2.2` can silently rewrite the host of an HTTP-family URL (`http`, `https`, `ws`, `wss`, or any scheme with `domainHost: true`). For those schemes `canonicalizeHost()` passes the parsed host to the WHATWG `URL` parser and adopts its `.hostname` without checking that the parser read the whole input as a host. RFC 3986 permits `@` inside the host group and the WHATWG parser strips TAB, LF, and CR, so the authority `fast-uri` reports is rewritten by that second parser with no `error` set: data before an `@` is dropped and whitespace is removed.\n\nFor example, `fast-uri` parses `http://a@b@evil.example/` to host `evil.example` (dropping the `b` segment), and a host containing a raw TAB, CR, or LF has those characters stripped. `equal()` then treats a whitespace-smuggled host as the same as the clean one, and `resolve()` rewrites the authority the same way.\n\nApplications that use `fast-uri` to enforce host-based policy (denylists, loopback filtering, redirect validation, outbound proxy routing) on one representation, such as the raw input, see a policy/use desync: the canonical host `fast-uri` returns differs from what was checked, and traffic can be steered to an unintended destination.\n\n### Patches\n\nUpgrade to `fast-uri` `2.4.8`, `3.1.9`, or `4.2.3`.\n\n### Workarounds\n\nReject URIs whose authority contains more than one `@`, or contains TAB, CR, or LF, before calling `fast-uri`. Alternatively, treat any non-empty `parse(x).error` as fatal, and compare hosts only from the same `parse()` result.",
+              "id": "GHSA-wjr9-j795-jxcr",
+              "modified": "2026-10-23T21:45:04.892054666Z",
+              "published": "2026-10-23T21:37:59Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/security/advisories/GHSA-wjr9-j795-jxcr"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-110180"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/58c183d0b168ad87f98773266444ce1f6375803a"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/ddfc6a51122dfce0365655f04479fc3adb7f6b3c"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/f6d46dfeab025d0c440485f4ae29fa4f14707646"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://cna.openjsf.org/security-advisories.html"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/fastify/fast-uri"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v2.4.8"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v3.1.9"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v4.2.3"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "fast-uri vulnerable to host confusion via unchecked WHATWG host canonicalization"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-xhq7-xmqj-769h/GHSA-xhq7-xmqj-769h.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "2.4.8"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-xhq7-xmqj-769h/GHSA-xhq7-xmqj-769h.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "3.0.0"
+                        },
+                        {
+                          "fixed": "3.1.9"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-xhq7-xmqj-769h/GHSA-xhq7-xmqj-769h.json"
+                  },
+                  "package": {
+                    "ecosystem": "npm",
+                    "name": "fast-uri",
+                    "purl": "pkg:npm/fast-uri"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "4.0.0"
+                        },
+                        {
+                          "fixed": "4.2.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-110095"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-41"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-10-23T21:39:34Z",
+                "nvd_published_at": "2026-10-20T07:17:08Z",
+                "severity": "LOW"
+              },
+              "details": "### Impact\n\n`fast-uri`'s `normalize()` and `serialize()` apply RFC 3986 dot-segment removal (`remove_dot_segments`) to the path of a relative-path reference. RFC 3986 section 5.2.4 defines that algorithm only for the merged target path during resolution, not for the reference itself, so applied to the reference it drops leading `..` segments and can turn a document-relative reference into a root-relative one.\n\nFor example, `normalize('a/../b')` returns `/b` and `normalize('../x')` returns `x`, so `resolve(base, normalize(ref))` points at a different resource than `resolve(base, ref)`, and `equal()` treats distinct references as the same.\n\nApplications that normalize attacker-supplied or user-supplied relative references and then resolve them, or use them as cache, deduplication, or authorization keys, can have a reference escape its intended directory and point at a different resource.\n\n### Patches\n\nUpgrade to `fast-uri` `2.4.8`, `3.1.9`, or `4.2.3`.\n\n### Workarounds\n\nDo not normalize a relative reference before resolving it. Resolve it against the absolute base first, then normalize the absolute result.",
+              "id": "GHSA-xhq7-xmqj-769h",
+              "modified": "2026-10-23T21:45:04.902389903Z",
+              "published": "2026-10-23T21:39:34Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/security/advisories/GHSA-xhq7-xmqj-769h"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-110095"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/048bbd0a252971be86d6579f0dfc87f8de5b9c47"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/52774a5c35df36b0bbe439cd4c12c3dc0e50e3b9"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/7c19f8b97ec51f1f20b4e3d9d5820cb8d5176058"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/9eb8759a9825c046f57f7f695f1944bc39b88abd"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/acc5c5d60c4209571789496e1732468911c7e12a"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/commit/b110a3571c37dfcf9d1c72ce2e2e178c78d1a424"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://cna.openjsf.org/security-advisories.html"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/fastify/fast-uri"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v2.4.8"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v3.1.9"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/fastify/fast-uri/releases/tag/v4.2.3"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "fast-uri vulnerable to improper path equivalence in relative reference normalization"
+            }
+          ]
+        }
+      ]
     }
   ],
   "experimental_config": {
