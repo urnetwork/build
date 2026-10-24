@@ -25,6 +25,11 @@ import (
 // the files build-arch.sh looks for in the install tree.
 const fakeBuildArchMeson = `#!/bin/sh
 set -eu
+if [ -n "${MESON_LOG:-}" ]; then printf '%s\n' "$*" >>"$MESON_LOG"; fi
+if [ "$1" = setup ]; then mkdir -p "$2"; fi
+if [ "$1" = introspect ]; then
+  printf '%s\n' '[{"name":"urnetworkd","installed":true},{"name":"urnetwork-catalog","installed":true},{"name":"urnetwork-tests","installed":false}]'
+fi
 if [ "$1" = install ]; then
   mkdir -p "$DESTDIR/usr/lib/urnetwork" "$DESTDIR/usr/share/locale/de/LC_MESSAGES"
   printf 'sdk\n' >"$DESTDIR/usr/lib/urnetwork/libURnetworkSdk.so"
@@ -343,5 +348,44 @@ func TestBuildArchMovesBuiltOptionalPackagesToOut(t *testing.T) {
 	}
 	if strings.Contains(run.output, "WARN:") {
 		t.Errorf("a clean build warned; output:\n%s", run.output)
+	}
+}
+
+func TestExplicitLinuxTestWaiverDoesNotBuildOrRunUnitTests(t *testing.T) {
+	for _, skip := range []string{"0", "1"} {
+		t.Run(skip, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "meson.log")
+			got := runBuildArchFixture(t, "ok", "ok", "UR_SKIP_TESTS="+skip, "MESON_LOG="+logPath)
+			if got.exitCode != 0 {
+				t.Fatalf("packaging failed: %s", got.output)
+			}
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var compile, install []string
+			ranTests := false
+			for _, line := range strings.Split(string(raw), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) == 0 {
+					continue
+				}
+				switch fields[0] {
+				case "compile":
+					compile = fields
+				case "install":
+					install = fields
+				case "test":
+					ranTests = true
+				}
+			}
+			if skip == "1" {
+				if ranTests || len(compile) != 5 || !slices.Contains(compile, "urnetworkd") || !slices.Contains(compile, "urnetwork-catalog") || slices.Contains(compile, "urnetwork-tests") || !slices.Contains(install, "--no-rebuild") {
+					t.Fatalf("waiver still compiled or ran test targets: %s", raw)
+				}
+			} else if !ranTests || len(compile) != 3 || slices.Contains(install, "--no-rebuild") {
+				t.Fatalf("ordinary release behavior changed: %s", raw)
+			}
+		})
 	}
 }

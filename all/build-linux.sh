@@ -28,6 +28,7 @@
 #   ROLES                  forwarded to linux/build.sh: which halves to build,
 #                          subset of "daemon gui" (default both). See that
 #                          script's header.
+#   UR_SKIP_TESTS         1 omits unit tests; ordinary release default remains enabled.
 #   UR_REQUIRE_RPM         forwarded: make a missing/failed .rpm fatal
 #                          (default false — warn and carry on)
 #   UR_REQUIRE_ARCH_PKG    forwarded: the same for the Arch .pkg.tar.zst

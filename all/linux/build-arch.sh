@@ -77,6 +77,7 @@
 #   UR_REQUIRE_ARCH_PKG  same for the Arch .pkg.tar.zst, same default (false),
 #                     for the same reason. With either knob, a failed package
 #                     never reaches /out: see build_optional_package.
+#   UR_SKIP_TESTS=1   omit unit-test compilation/execution; package installable targets only
 #   UR_SKIP_VERIFY=1  build + package only, skip verify.sh
 #   UR_CONTAINER_ROOT for the build repo's tests only (all/linux_build_arch_test.go):
 #                     a scratch directory standing in for the container's /,
@@ -90,6 +91,8 @@ set -euo pipefail
 : "${VERSION:?set VERSION}"
 : "${ROLE:?set ROLE (daemon|gui)}"
 case "${ROLE}" in daemon|gui) ;; *) echo "ERROR: ROLE must be daemon or gui (got '${ROLE}')" >&2; exit 1 ;; esac
+UR_SKIP_TESTS="${UR_SKIP_TESTS:-0}"
+case "${UR_SKIP_TESTS}" in 0|1) ;; *) echo "ERROR: UR_SKIP_TESTS must be 0 or 1" >&2; exit 1 ;; esac
 root="${UR_CONTAINER_ROOT:-}"
 src="${root}/src"
 out="${root}/out"
@@ -218,25 +221,40 @@ meson setup "${builddir}" "${app}" \
   -Dgui="${gui_opt}" \
   -Dapp_version="${VERSION}" \
   -Dglibc_floor="${glibc_gate}"
-meson compile -C "${builddir}"
+if [ "${UR_SKIP_TESTS}" = 1 ]; then
+  echo ">>> [${ARCH}/${ROLE}] unit tests omitted by explicit UR_SKIP_TESTS=1"
+  # Include installed translation/resource targets as well as binaries.
+  # Selecting just executables would leave files missing at install time.
+  meson introspect --targets "${builddir}" >"${builddir}/installable-targets.json"
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print("\n".join(t["name"] for t in data if t.get("installed")))' \
+    "${builddir}/installable-targets.json" >"${builddir}/installable-targets.txt"
+  targets=()
+  while IFS= read -r target; do
+    [ -n "${target}" ] && targets+=("${target}")
+  done <"${builddir}/installable-targets.txt"
+  [ "${#targets[@]}" -gt 0 ] || { echo "ERROR: no installable meson targets" >&2; exit 1; }
+  meson compile -C "${builddir}" "${targets[@]}"
+  DESTDIR="${staging}" meson install -C "${builddir}" --no-rebuild
+else
+  meson compile -C "${builddir}"
 
-# The unit tests plus the `glibc-floor` gate, which asserts the built daemon
-# references no glibc symbol above the floor the .deb declares. A failure here
-# is real: the package would install on an older release and then fail to exec.
-echo ">>> [${ARCH}/${ROLE}] meson test"
-if ! meson test -C "${builddir}" --print-errorlogs; then
-  {
-    echo "ERROR: meson test failed for ${ARCH}/${ROLE} — see the log above."
-    echo "       If it is the glibc-floor gate on ROLE=daemon: this image's glibc is newer"
-    echo "       than the declared floor (${glibc_gate}), so the .deb's 'Depends: libc6 (>= …)'"
-    echo "       would be a lie. Keep the daemon on the image whose glibc IS that floor"
-    echo "       (Dockerfile.daemon = Ubuntu 22.04), or raise the floor in BOTH the gate"
-    echo "       and linux/packaging/deb/nfpm.yaml."
-  } >&2
-  exit 1
+  # The unit tests plus the `glibc-floor` gate, which asserts the built daemon
+  # references no glibc symbol above the floor the .deb declares. A failure here
+  # is real: the package would install on an older release and then fail to exec.
+  echo ">>> [${ARCH}/${ROLE}] meson test"
+  if ! meson test -C "${builddir}" --print-errorlogs; then
+    {
+      echo "ERROR: meson test failed for ${ARCH}/${ROLE} — see the log above."
+      echo "       If it is the glibc-floor gate on ROLE=daemon: this image's glibc is newer"
+      echo "       than the declared floor (${glibc_gate}), so the .deb's 'Depends: libc6 (>= …)'"
+      echo "       would be a lie. Keep the daemon on the image whose glibc IS that floor"
+      echo "       (Dockerfile.daemon = Ubuntu 22.04), or raise the floor in BOTH the gate"
+      echo "       and linux/packaging/deb/nfpm.yaml."
+    } >&2
+    exit 1
+  fi
+  DESTDIR="${staging}" meson install -C "${builddir}"
 fi
-
-DESTDIR="${staging}" meson install -C "${builddir}"
 
 # The daemon package ships the SDK .so at /usr/lib/urnetwork/libURnetworkSdk.so
 # (normative — MIGRATION.md installed paths). Stage it if meson did not.
