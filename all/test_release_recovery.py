@@ -607,10 +607,31 @@ class HostBoundaries(unittest.TestCase):
                     state.recover_lock(directory, control_session_pid=6531)
                 inspect.assert_not_called()
 
+    def test_repeated_attestations_validate_each_tool_host_and_never_exempt_descendants(self):
+        with tempfile.TemporaryDirectory(prefix="release-control-host-test-") as directory:
+            uid = os.getuid()
+            rows = f"6531 974 {uid} codex\n974 1 {uid} shell\n46008 90057 {uid} codex-code-mode-host\n90057 2457 {uid} /fixture/codex\n2457 1 {uid} app\n46009 46008 {uid} build.sh\n46010 90057 {uid} codex-code-mode-host\n".encode()
+            listing = f"p6531\nn{directory}\np46008\nn{directory}\n".encode()
+            clean = [rows, listing, b"unix:///fixture/docker.sock\n", b""]
+            with mock.patch.object(state, "run", side_effect=clean), mock.patch.object(state.os, "kill", return_value=None):
+                state.inspect_workspace_writers(directory, {}, control_session_pid=[6531, 46008])
+            for attested, writer in (([6531], 46008), ([6531, 46008], 46009), ([6531, 46008], 46010)):
+                with self.subTest(attested=attested, writer=writer), mock.patch.object(state, "run", side_effect=[rows, listing + f"p{writer}\nn{directory}\n".encode()]), mock.patch.object(state.os, "kill", return_value=None), self.assertRaisesRegex(state.Refusal, "working directory"):
+                    state.inspect_workspace_writers(directory, {}, control_session_pid=attested)
+            for invalid_rows in (
+                    f"46008 1 {uid} codex-code-mode-host\n",
+                    f"46008 90057 {uid} codex-code-mode-host\n90057 1 {uid+1} codex\n",
+                    f"46008 90057 {uid+1} codex-code-mode-host\n90057 1 {uid} codex\n"):
+                with self.subTest(rows=invalid_rows), mock.patch.object(state, "run", return_value=invalid_rows.encode()), self.assertRaisesRegex(state.Refusal, "live Codex"):
+                    state.inspect_workspace_writers(directory, {}, control_session_pid=[46008])
+            with mock.patch.object(sys, "argv", ["release-state", "recover-lock", "/fixture", "--control-session-pid", "6531", "--control-session-pid", "46008"]), mock.patch.object(state, "recover_lock") as recover:
+                self.assertEqual(state.main(), 0)
+                recover.assert_called_once_with("/fixture", [6531, 46008])
+
     def test_control_session_flag_is_explicit_and_only_supported_for_recovery(self):
         with mock.patch.object(sys, "argv", ["release-state", "recover-lock", "/fixture", "--control-session-pid", "6531"]), mock.patch.object(state, "recover_lock") as recover:
             self.assertEqual(state.main(), 0)
-            recover.assert_called_once_with("/fixture", 6531)
+            recover.assert_called_once_with("/fixture", [6531])
         with mock.patch.object(sys, "argv", ["release-state", "check-lock", "/fixture", "--control-session-pid", "6531"]), self.assertRaisesRegex(state.Refusal, "only by recover-lock"):
             state.main()
         with mock.patch.object(sys, "argv", ["release-state", "recover-lock", "/fixture", "--control-session-pid", "invalid"]), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

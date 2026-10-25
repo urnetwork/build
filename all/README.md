@@ -33,12 +33,14 @@ is currently absent, a daemon-owned BuildKit job may still push it later.
 Resume never starts a second push for that intent. Only observed command
 success, a matching registry receipt and a completed checkpoint permit reuse;
 lock recovery does not establish BuildKit job termination or clear intent.
-If the operator explicitly identifies a separate Codex CLI process as their
-current controlling session, recovery may use
-`python3 -B all/release-state.py recover-lock "$WARP_HOME" --control-session-pid <pid>`.
-This attests to that session's identity; do not infer it from an idle Codex
-process. The PID must be live, owned by the current user, and named `codex`.
-Only that process and its same-user ancestors are exempt from workspace-CWD
+If the operator explicitly identifies separate Codex CLI and tool-host processes
+as their current controllers, recovery may use
+`python3 -B all/release-state.py recover-lock "$WARP_HOME" --control-session-pid <cli-pid> --control-session-pid <host-pid>`.
+The option is repeatable; attest each PID explicitly and verify it immediately
+before recovery. Never infer additional hosts from an idle Codex process. Each
+PID must be live and owned by the current user: either `codex`, or
+`codex-code-mode-host` with a same-user `codex` ancestor.
+Only the specified processes and their same-user ancestors are exempt from workspace-CWD
 inventory. Descendants, other workspace processes, recorded release groups,
 QEMU VMs, writable container binds, and the kernel lock still block recovery.
 The flag is accepted only by `recover-lock` and grants no resume eligibility.

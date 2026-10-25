@@ -196,20 +196,28 @@ def inspect_workspace_writers(workspace, owner, uncertain=True, control_session_
         current = processes[current][0]
         ancestors.add(current)
     control_ancestors = set()
-    if control_session_pid is not None:
-        # The operator attests this separate CLI is the current controller.
-        # Exempt only its CWD ancestry, never descendants or VM/container checks.
-        if (control_session_pid <= 0 or control_session_pid not in processes or
-                Path(processes[control_session_pid][1]).name != "codex"):
+    # Support one programmatic PID or the explicit repeatable CLI option.
+    control_pids = [control_session_pid] if isinstance(control_session_pid, int) else (control_session_pid or ())
+    for control_pid in control_pids:
+        # Each CLI/tool host must be attested separately. Never infer sibling
+        # hosts or exempt descendants, even when their parent is a controller.
+        if control_pid <= 0 or control_pid not in processes:
             raise Refusal("control-session PID must be a live Codex process owned by this user")
+        session_ancestors = set()
+        current = control_pid
+        while current in processes and current not in session_ancestors:
+            session_ancestors.add(current)
+            current = processes[current][0]
+        command_name = Path(processes[control_pid][1]).name
+        codex_parent = any(Path(processes[pid][1]).name == "codex"
+                           for pid in session_ancestors if pid != control_pid)
+        if command_name != "codex" and not (command_name == "codex-code-mode-host" and codex_parent):
+            raise Refusal("control-session PID must be a live Codex process or a Codex-owned tool host owned by this user")
         try:
-            os.kill(control_session_pid, 0)
+            os.kill(control_pid, 0)
         except OSError:
             raise Refusal("control-session PID is no longer a live process owned by this user") from None
-        current = control_session_pid
-        while current in processes and current not in control_ancestors:
-            control_ancestors.add(current)
-            current = processes[current][0]
+        control_ancestors.update(session_ancestors)
     for pid, (_, command) in processes.items():
         if pid not in ancestors and "qemu-system" in Path(command).name:
             raise Refusal("a QEMU VM is still running for this user; verify/stop owned release VMs before lock recovery")
@@ -736,8 +744,8 @@ def main():
     rest = args.arguments
     if args.command == "recover-lock":
         recovery_parser = argparse.ArgumentParser(prog="release-state.py recover-lock")
-        recovery_parser.add_argument("--control-session-pid", type=int,
-                                     help="operator-attested current Codex session PID; exempt only its CWD ancestry")
+        recovery_parser.add_argument("--control-session-pid", type=int, action="append", default=[],
+                                     help="operator-attested Codex CLI/tool-host PID (repeatable); exempt only its CWD ancestry")
         recovery_args = recovery_parser.parse_args(rest)
         recover_lock(args.workspace, recovery_args.control_session_pid)
         return 0
