@@ -568,6 +568,73 @@ class HostBoundaries(unittest.TestCase):
             with mock.patch.object(state,"run",side_effect=responses),self.assertRaisesRegex(state.Refusal,"writable workspace"):
                 state.inspect_workspace_writers(directory,{"state":"finished"},uncertain=False)
 
+    def test_attested_control_session_exempts_only_same_user_codex_ancestry(self):
+        with tempfile.TemporaryDirectory(prefix="release-control-test-") as directory:
+            uid = os.getuid()
+            rows = f"6531 974 {uid} /fixture/bin/codex\n974 972 {uid} -zsh\n972 1 {uid} login\n8000 6531 {uid} build.sh\n"
+            listing = "".join(f"p{pid}\nn{directory}\n" for pid in (6531, 974, 972)).encode()
+            clean = [rows.encode(), listing, b"unix:///fixture/docker.sock\n", b""]
+            with mock.patch.object(state, "run", side_effect=clean), self.assertRaisesRegex(state.Refusal, "working directory"):
+                state.inspect_workspace_writers(directory, {})
+            with mock.patch.object(state, "run", side_effect=clean), mock.patch.object(state.os, "kill", return_value=None) as live:
+                state.inspect_workspace_writers(directory, {}, control_session_pid=6531)
+                live.assert_called_once_with(6531, 0)
+            for pid in (8000, 9999):
+                with self.subTest(writer=pid), mock.patch.object(state, "run", side_effect=[rows.encode(), listing + f"p{pid}\nn{directory}/build\n".encode()]), mock.patch.object(state.os, "kill", return_value=None), self.assertRaisesRegex(state.Refusal, "working directory"):
+                    state.inspect_workspace_writers(directory, {}, control_session_pid=6531)
+            for pid in (0, -1, 9999, 974):
+                with self.subTest(invalid=pid), mock.patch.object(state, "run", return_value=rows.encode()), self.assertRaisesRegex(state.Refusal, "live Codex"):
+                    state.inspect_workspace_writers(directory, {}, control_session_pid=pid)
+            foreign = f"6531 974 {uid + 1} /fixture/bin/codex\n".encode()
+            with mock.patch.object(state, "run", return_value=foreign), self.assertRaisesRegex(state.Refusal, "live Codex"):
+                state.inspect_workspace_writers(directory, {}, control_session_pid=6531)
+            with mock.patch.object(state, "run", return_value=rows.encode()), mock.patch.object(state.os, "kill", side_effect=ProcessLookupError), self.assertRaisesRegex(state.Refusal, "no longer"):
+                state.inspect_workspace_writers(directory, {}, control_session_pid=6531)
+
+    def test_control_session_keeps_process_group_vm_container_and_kernel_lock_guards(self):
+        with tempfile.TemporaryDirectory(prefix="release-control-guard-test-") as directory:
+            rows = f"6531 974 {os.getuid()} /fixture/bin/codex\n974 1 {os.getuid()} shell\n".encode()
+            for label, responses in {
+                "VM": [rows + f"8000 6531 {os.getuid()} qemu-system-aarch64\n".encode()],
+                "container": [rows, b"", b"unix:///fixture/docker.sock\n", b"abcdef123456\n", json.dumps([{"Type":"bind", "RW":True, "Source":directory}]).encode()],
+            }.items():
+                with self.subTest(guard=label), mock.patch.object(state, "run", side_effect=responses), mock.patch.object(state.os, "kill", return_value=None), self.assertRaises(state.Refusal):
+                    state.inspect_workspace_writers(directory, {}, control_session_pid=6531)
+            with mock.patch.object(state.os, "killpg", return_value=None), self.assertRaisesRegex(state.Refusal, "group still exists"):
+                state.inspect_workspace_writers(directory, {"pgid":123456}, control_session_pid=6531)
+            with mock.patch.object(state.fcntl, "flock", side_effect=BlockingIOError), mock.patch.object(state, "inspect_workspace_writers") as inspect:
+                with self.assertRaisesRegex(state.Refusal, "still held"):
+                    state.recover_lock(directory, control_session_pid=6531)
+                inspect.assert_not_called()
+
+    def test_control_session_flag_is_explicit_and_only_supported_for_recovery(self):
+        with mock.patch.object(sys, "argv", ["release-state", "recover-lock", "/fixture", "--control-session-pid", "6531"]), mock.patch.object(state, "recover_lock") as recover:
+            self.assertEqual(state.main(), 0)
+            recover.assert_called_once_with("/fixture", 6531)
+        with mock.patch.object(sys, "argv", ["release-state", "check-lock", "/fixture", "--control-session-pid", "6531"]), self.assertRaisesRegex(state.Refusal, "only by recover-lock"):
+            state.main()
+        with mock.patch.object(sys, "argv", ["release-state", "recover-lock", "/fixture", "--control-session-pid", "invalid"]), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            state.main()
+
+    def test_control_recovery_changes_only_advisory_owner_after_inventory_passes(self):
+        with tempfile.TemporaryDirectory(prefix="release-control-owner-test-") as directory:
+            root = state.state_root(directory)
+            owner = {"state":"active", "run":"preserved-run"}
+            state.atomic_json(root / "lock-owner.json", owner)
+            journal = root / "manifest-fixture.json"
+            journal.write_bytes(b"preserve publication intent and checkpoint\n")
+            rows = f"6531 974 {os.getuid()} codex\n974 1 {os.getuid()} shell\n".encode()
+            listing = f"p6531\nn{directory}\np974\nn{directory}\n".encode()
+            with mock.patch.object(state, "run", side_effect=[rows, listing]), self.assertRaises(state.Refusal):
+                state.recover_lock(directory)
+            self.assertEqual(json.loads((root / "lock-owner.json").read_text()), owner)
+            with mock.patch.object(state, "run", side_effect=[rows, listing, b"unix:///fixture/docker.sock\n", b""]), mock.patch.object(state.os, "kill", return_value=None), contextlib.redirect_stdout(io.StringIO()):
+                state.recover_lock(directory, control_session_pid=6531)
+            recovered = json.loads((root / "lock-owner.json").read_text())
+            self.assertEqual(recovered["state"], "finished")
+            self.assertEqual(recovered["run"], "preserved-run")
+            self.assertEqual(journal.read_bytes(), b"preserve publication intent and checkpoint\n")
+
 
 class PublicationReadRetries(unittest.TestCase):
     def error(self, code, headers=None, message="private response marker"):

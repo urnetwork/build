@@ -171,7 +171,7 @@ def locked(workspace, command):
     return code if code >= 0 else 128 - code
 
 
-def inspect_workspace_writers(workspace, owner, uncertain=True):
+def inspect_workspace_writers(workspace, owner, uncertain=True, control_session_pid=None):
     """Read-only conservative cleanup proof; never stops processes/containers."""
     workspace = Path(workspace).resolve()
     if owner.get("pgid"):
@@ -195,6 +195,21 @@ def inspect_workspace_writers(workspace, owner, uncertain=True):
     while current in processes and processes[current][0] not in ancestors:
         current = processes[current][0]
         ancestors.add(current)
+    control_ancestors = set()
+    if control_session_pid is not None:
+        # The operator attests this separate CLI is the current controller.
+        # Exempt only its CWD ancestry, never descendants or VM/container checks.
+        if (control_session_pid <= 0 or control_session_pid not in processes or
+                Path(processes[control_session_pid][1]).name != "codex"):
+            raise Refusal("control-session PID must be a live Codex process owned by this user")
+        try:
+            os.kill(control_session_pid, 0)
+        except OSError:
+            raise Refusal("control-session PID is no longer a live process owned by this user") from None
+        current = control_session_pid
+        while current in processes and current not in control_ancestors:
+            control_ancestors.add(current)
+            current = processes[current][0]
     for pid, (_, command) in processes.items():
         if pid not in ancestors and "qemu-system" in Path(command).name:
             raise Refusal("a QEMU VM is still running for this user; verify/stop owned release VMs before lock recovery")
@@ -207,7 +222,7 @@ def inspect_workspace_writers(workspace, owner, uncertain=True):
         for line in listing.splitlines():
             if line.startswith("p"):
                 pid = int(line[1:])
-            elif line.startswith("n") and pid not in ancestors:
+            elif line.startswith("n") and pid not in (ancestors | control_ancestors):
                 cwd = Path(line[1:]).resolve()
                 if cwd == workspace or cwd.is_relative_to(workspace):
                     raise Refusal("another process has a working directory in this workspace (PID " + str(pid) + "); finish cleanup or move idle terminals outside it")
@@ -227,7 +242,7 @@ def inspect_workspace_writers(workspace, owner, uncertain=True):
                 raise Refusal("running Docker container has a writable workspace bind mount; finish owned-container cleanup before lock recovery")
 
 
-def recover_lock(workspace):
+def recover_lock(workspace, control_session_pid=None):
     root = state_root(workspace)
     fd = os.open(root / "workspace.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
@@ -237,7 +252,7 @@ def recover_lock(workspace):
             raise Refusal("release lock is still held; recovery cannot bypass an active writer") from None
         path = root / "lock-owner.json"
         owner = json.loads(path.read_text()) if path.exists() else {}
-        inspect_workspace_writers(workspace, owner)
+        inspect_workspace_writers(workspace, owner, control_session_pid=control_session_pid)
         atomic_json(path, dict(owner, state="finished", recovered=time.time()))
         print("verified no recorded process-group, workspace-CWD, QEMU or writable Docker-bind writer; advisory lock state recovered")
     finally:
@@ -720,8 +735,14 @@ def main():
     args = parser.parse_args()
     rest = args.arguments
     if args.command == "recover-lock":
-        recover_lock(args.workspace)
+        recovery_parser = argparse.ArgumentParser(prog="release-state.py recover-lock")
+        recovery_parser.add_argument("--control-session-pid", type=int,
+                                     help="operator-attested current Codex session PID; exempt only its CWD ancestry")
+        recovery_args = recovery_parser.parse_args(rest)
+        recover_lock(args.workspace, recovery_args.control_session_pid)
         return 0
+    if any(arg == "--control-session-pid" or arg.startswith("--control-session-pid=") for arg in rest):
+        raise Refusal("--control-session-pid is accepted only by recover-lock")
     if args.command == "locked":
         if rest[:1] == ["--"]:
             rest = rest[1:]
