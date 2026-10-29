@@ -3243,12 +3243,22 @@ refresh_ip_databases () {
         mv -- "$geoip_target" "$ipdb_work/bundle/mmdb" || return $?
         return 1
     fi
+    # Processes read only the newest arindb release directory, and its
+    # arin-old.mmdb already holds the canary's copy of the previous database
+    # (server arindbctl/ARINDB.md, "Release directories"). The older
+    # directories go in the same commit, so the config image and every host's
+    # config tree carry one database pair instead of one per release.
+    local old_arin_release
+    for old_arin_release in "$config_root/all/arindb"/*(N/); do
+        [[ "${old_arin_release:t}" = "$WARP_VERSION" ]] && continue
+        rm -rf -- "$old_arin_release" || return $?
+    done
     (cd "$config_root" &&
-        git add -- "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
-        if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION"; then
+        git add -A -- "all/mmdb/$WARP_VERSION" "all/arindb" &&
+        if ! git diff --cached --quiet -- "all/mmdb/$WARP_VERSION" "all/arindb"; then
             git commit -m "${EXTERNAL_WARP_VERSION} GeoLite2 and ARIN databases" -- \
-                "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION" &&
-            git_push_generated_paths "all/mmdb/$WARP_VERSION" "all/arindb/$WARP_VERSION"
+                "all/mmdb/$WARP_VERSION" "all/arindb" &&
+            git_push_generated_paths "all/mmdb/$WARP_VERSION" "all/arindb"
         fi) || return $?
     local update_summary=''
     if [ -r "$ipdb_work/bundle/update-summary.txt" ]; then

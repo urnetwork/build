@@ -154,6 +154,82 @@ func TestReleaseRefreshesIpDatabasesFromVersionedServer(t *testing.T) {
 	}
 }
 
+// Older release directories the refresh must remove or keep: two ARIN
+// releases, the second with its canary copy, and an older GeoLite2 release.
+func writeOlderIpDatabaseReleases(t *testing.T, warpHome string) {
+	t.Helper()
+	for _, path := range []string{
+		filepath.Join("arindb", "1.0.0", "arin.mmdb"),
+		filepath.Join("arindb", "1.1.0", "arin.mmdb"),
+		filepath.Join("arindb", "1.1.0", "arin-old.mmdb"),
+		filepath.Join("mmdb", "1.1.0", "geolite2.mmdb"),
+	} {
+		path = filepath.Join(warpHome, "config", "all", path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("synthetic older release\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Processes read only the newest ARIN release directory, so publishing one
+// removes the older ones in the same commit; GeoLite2 releases are kept.
+func TestReleaseIpDatabaseRefreshRemovesOlderArinReleases(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false)
+	writeOlderIpDatabaseReleases(t, warpHome)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	entries, err := os.ReadDir(filepath.Join(warpHome, "config", "all", "arindb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "1.2.3+4" {
+		t.Fatalf("ARIN release directories %v, want only the new release", entries)
+	}
+	if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "mmdb", "1.1.0", "geolite2.mmdb")); err != nil {
+		t.Fatalf("an older GeoLite2 release was removed: %v", err)
+	}
+	events, err := os.ReadFile(filepath.Join(dir, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"git:add -A -- all/mmdb/1.2.3+4 all/arindb\n",
+		"git:commit -m 1.2.3-4 GeoLite2 and ARIN databases -- all/mmdb/1.2.3+4 all/arindb\n",
+		"push\n",
+	} {
+		if !strings.Contains(string(events), want) {
+			t.Errorf("events %q lack %q", events, want)
+		}
+	}
+}
+
+// A paused ARIN refresh publishes no ARIN release, so the selected one and the
+// releases before it stay.
+func TestReleaseIpDatabaseRefreshPauseKeepsTheArinReleases(t *testing.T) {
+	dir, warpHome, command := ipDatabaseRefreshFixture(t, false, "IP_DATABASE_TEST_BASELINE=pause the canary decision is version 2, not 1")
+	decision := filepath.Join(dir, "decision.json")
+	if err := os.WriteFile(decision, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command.Env = append(command.Env, "ARIN_CANARY_DECISION_FILE="+decision)
+	writeOlderIpDatabaseReleases(t, warpHome)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("refresh: %v\n%s", err, output)
+	}
+	for _, release := range []string{"1.0.0", "1.1.0"} {
+		if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", release, "arin.mmdb")); err != nil {
+			t.Errorf("a pause removed ARIN release %s: %v", release, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(warpHome, "config", "all", "arindb", "1.2.3+4")); !os.IsNotExist(err) {
+		t.Fatal("a pause published an ARIN release")
+	}
+}
+
 // Download/build failure must not publish even the already-generated GeoLite
 // half, commit config, or advance the existing cache versions.
 func TestReleaseIpDatabaseRefreshFailurePreservesCachedVersions(t *testing.T) {
