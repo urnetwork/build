@@ -3554,6 +3554,27 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
             git_push_with_rebase_retry
         fi)
     error_trap 'onboarding templates config push'
+
+    # The re-engagement program's templates, the same way
+    # (mmm/reengagement/build.sh renders mmm/reengagement/templates with the
+    # shared shell and lib, upload creates or updates them by name, no sends;
+    # write-config merges the ids into config/main/reengagement.yml). Upload
+    # refuses while any key is still a draft. The program sends nothing until
+    # reengagement.yml says `enabled: true`. Skipped while the config has no
+    # reengagement.yml, so this step can merge before the config does.
+    if [ -f "$WARP_HOME/config/main/reengagement.yml" ]; then
+        (cd $WARP_HOME/mmm/reengagement &&
+            ./build.sh upload &&
+            ./build.sh write-config --config "$WARP_HOME/config/main/reengagement.yml")
+        error_trap 're-engagement email templates export to Brevo'
+        (cd $WARP_HOME/config &&
+            git add main/reengagement.yml &&
+            if ! git diff --cached --quiet; then
+                git commit -m "${EXTERNAL_WARP_VERSION} re-engagement email templates" &&
+                git_push_with_rebase_retry
+            fi)
+        error_trap 're-engagement templates config push'
+    fi
     release_transition onboarding
 
     # the release's config, template ids included (see build_config_updater)
