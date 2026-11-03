@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -124,7 +125,7 @@ printf '%s\n' "$PATH" > "$FDROID_PATH_LOG"
 	// Remap only the container's fixed mount/install locations into the test
 	// directory. The function body and PATH behavior otherwise run verbatim.
 	functionSource = strings.ReplaceAll(functionSource, "/usr/local/go", "${FAKE_GO_ROOT}")
-	functionSource = strings.ReplaceAll(functionSource, "/urnetwork/build", "${FDROID_BUILD_ROOT}")
+	functionSource = strings.ReplaceAll(functionSource, "/home/vagrant/build/com.bringyour.network", "${FDROID_BUILD_ROOT}")
 	functionSource = strings.ReplaceAll(functionSource, "/urnetwork", "${FDROID_ROOT}")
 
 	harness := `
@@ -172,5 +173,65 @@ container_build
 	wantPrefix := filepath.Join(fakeGoRoot, "bin") + string(os.PathListSeparator)
 	if !strings.HasPrefix(strings.TrimSpace(string(pathData))+string(os.PathListSeparator), wantPrefix) {
 		t.Fatalf("Gradle child PATH = %q, want installed Go first", strings.TrimSpace(string(pathData)))
+	}
+}
+
+// F-Droid rebuilds this app at /home/vagrant/build/com.bringyour.network and compares
+// the APK with the published one byte for byte. gomobile writes its generated go.mod
+// with absolute replace paths and -trimpath leaves those alone, so the path of the
+// build tree lands in the module info of libgojni.so. The published build has to run
+// at the path F-Droid builds at, or the rebuild can never match (build#13).
+func TestFdroidContainerBuildsAtTheFdroidBuildPath(t *testing.T) {
+	const fdroidBuildPath = "/home/vagrant/build/com.bringyour.network"
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf 'vfixture-ungoogle\\n'\n")
+	writeExecutable(t, filepath.Join(bin, "docker"), `#!/bin/sh
+set -eu
+if [ "$1" = pull ]; then exit 0; fi
+[ "$1" = run ]
+printf '%s\n' "$@" > "$FDROID_DOCKER_ARGS"
+`)
+	buildHome := filepath.Join(root, "build")
+	command := exec.Command("bash", filepath.Join(rolloutRoot(t), "build-fdroid.sh"))
+	command.Env = []string{
+		"PATH=" + bin + ":/usr/bin:/bin",
+		"WARP_HOME=" + root,
+		"BUILD_HOME=" + buildHome,
+		"FDROID_DOCKER_ARGS=" + filepath.Join(root, "docker-args"),
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("F-Droid host phase failed at fake Docker boundary: %v\n%s", err, output)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "docker-args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := strings.Split(strings.TrimSpace(string(data)), "\n")
+	argumentAfter := func(flag string) []string {
+		values := []string{}
+		for i, arg := range arguments {
+			if arg == flag && i+1 < len(arguments) {
+				values = append(values, arguments[i+1])
+			}
+		}
+		return values
+	}
+	wantMount := buildHome + ":" + fdroidBuildPath + ":Z"
+	if !slices.Contains(argumentAfter("-v"), wantMount) {
+		t.Errorf("container mounts = %q, want the build tree at %q", argumentAfter("-v"), wantMount)
+	}
+	wantEntrypoint := fdroidBuildPath + "/all/build-fdroid.sh"
+	if got := argumentAfter("--entrypoint"); !slices.Equal(got, []string{wantEntrypoint}) {
+		t.Errorf("container entrypoint = %q, want %q", got, wantEntrypoint)
+	}
+
+	// the container phase builds in the tree it was given, and gradle finds the sdk through this
+	functionSource := fdroidContainerBuildFunction(t)
+	if want := "export BRINGYOUR_HOME=" + fdroidBuildPath + "\n"; !strings.Contains(functionSource, want) {
+		t.Errorf("container_build does not %q", strings.TrimSpace(want))
 	}
 }
