@@ -1802,6 +1802,53 @@ git_tag_fdroid () {
     release_git_tag "$tag" "$commit"
 }
 
+# F-Droid rebuilds the github flavor at this path and compares its APKs with
+# the published ones byte for byte. all/build-fdroid.sh builds at the same path
+# (fdroid_release_tag_test.go keeps the two equal).
+FDROID_BUILD_PATH=/home/vagrant/build/com.bringyour.network
+
+# Succeed only when each APK given holds a libgojni.so, and every local
+# directory recorded in the Go module info of each one lies under
+# FDROID_BUILD_PATH.
+#
+# gomobile writes its generated go.mod with absolute replace paths and
+# -trimpath leaves them alone, so the build tree's path is part of libgojni.so.
+# An APK built anywhere else differs from F-Droid's rebuild and can never
+# verify, so its version must not get the -fdroid tag that asks F-Droid to
+# build it. This catches, for example, a resumed run whose F-Droid APKs were
+# built before all/build-fdroid.sh moved to F-Droid's path.
+fdroid_build_path_check () {
+    local apk library module_info replacement extracted
+    local -a libraries
+    local failed=0
+    [ "$#" -gt 0 ] || return 2
+    for apk in "$@"; do
+        extracted=$(mktemp -d "${TMPDIR:-/tmp}/fdroid-build-path.XXXXXXXX") || return $?
+        unzip -q -o "$apk" 'lib/*/libgojni.so' -d "$extracted" 2> /dev/null
+        libraries=("$extracted"/lib/*/libgojni.so(N))
+        if (( ${#libraries} == 0 )); then
+            builder_message "error: ${apk:t} is missing or has no libgojni.so"
+            failed=1
+        fi
+        for library in "${libraries[@]}"; do
+            if ! module_info=$(go version -m "$library" 2>&1); then
+                builder_message "error: cannot read the Go module info of ${library#$extracted/} in ${apk:t}: $module_info"
+                failed=1
+                continue
+            fi
+            for replacement in ${(f)"$(print -r -- "$module_info" | awk -F '\t' '$2 == "=>" && substr($3, 1, 1) == "/" { print $3 }')"}; do
+                [ -n "$replacement" ] || continue
+                if [[ "$replacement" != "$FDROID_BUILD_PATH"/* ]]; then
+                    builder_message "error: ${library#$extracted/} in ${apk:t} was built from \`$replacement\`, outside F-Droid's build path \`$FDROID_BUILD_PATH\`"
+                    failed=1
+                fi
+            done
+        done
+        rm -rf -- "$extracted"
+    done
+    return $failed
+}
+
 
 if [[ -z "${BUILD_RESUME:-}" ]]; then
 (cd $BUILD_HOME/glog &&
@@ -3093,11 +3140,19 @@ error_trap 'android github armeabi-v7a reproducible pre-release'
 error_trap 'android github arm64-v8a reproducible pre-release'
 
 # Every APK F-Droid verifies against is now published (each upload and release
-# above exits the run on failure), so mark this version as ready for F-Droid.
+# above exits the run on failure), so mark this version as ready for F-Droid,
+# if F-Droid can reproduce those APKs (see fdroid_build_path_check). A version
+# it cannot reproduce keeps its releases and gets no -fdroid tag.
+if fdroid_build_path_check \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-armeabi-v7a-release.apk" \
+    "$BUILD_HOME/android/app/app/build/outputs/apk/github/release/com.bringyour.network-${EXTERNAL_WARP_VERSION}-github-arm64-v8a-release.apk"; then
 (cd $BUILD_HOME &&
     git_tag_fdroid)
 error_trap 'push fdroid tag'
 builder_message "android fdroid tag \`v${EXTERNAL_WARP_VERSION}-fdroid\` pushed"
+else
+builder_message "warning: no \`v${EXTERNAL_WARP_VERSION}-fdroid\` tag: F-Droid could not reproduce these APKs, which were not built at \`${FDROID_BUILD_PATH}\` (errors above). The releases stay published."
+fi
 
 
 # Warp services
