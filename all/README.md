@@ -264,6 +264,10 @@ flaked. Uploading to the GitHub release stays in `run.sh`.
   Its fixed 12 GiB memory cap fits the host's Docker minimum of 16 GiB. The
   previous 8 GiB cap could stall SDK compilation in reclaim with OOM kills
   disabled even when the Docker VM had spare memory.
+  The container sees the build tree at `/home/vagrant/build/com.bringyour.network`,
+  the path F-Droid builds this app at: gomobile's absolute replace paths reach the
+  module info of `libgojni.so`, so F-Droid's rebuild can only match the published
+  APK if both ran at the same path.
   The script is both the host launcher and the container entrypoint (its
   `container-build` phase), and the fdroiddata recipe seds the pinned go
   version out of it — keep the recipe's prebuild path in sync if it moves.

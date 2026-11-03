@@ -44,8 +44,14 @@ set -euo pipefail
 
 # ----------------------------------------------------------------------------
 # container phase — runs INSIDE the fdroid buildserver container (user vagrant,
-# debian amd64), with the build tree mounted at /urnetwork/build and the
-# release signing config at /urnetwork/release
+# debian amd64), with the build tree mounted at
+# /home/vagrant/build/com.bringyour.network and the release signing config at
+# /urnetwork/release
+#
+# The tree's path is the one F-Droid builds this app at, on purpose. gomobile
+# writes its generated go.mod with absolute replace paths and -trimpath leaves
+# those alone, so the path lands in the module info of libgojni.so, and F-Droid's
+# rebuild can only match the published APK if both builds ran at the same path.
 # ----------------------------------------------------------------------------
 container_build() {
     echo ">>> root init"
@@ -102,7 +108,7 @@ container_build() {
     fi
 
     export WARP_HOME=/urnetwork
-    export BRINGYOUR_HOME=/urnetwork/build
+    export BRINGYOUR_HOME=/home/vagrant/build/com.bringyour.network
     export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process"
 
     cd "$BRINGYOUR_HOME/android/app"
@@ -140,8 +146,8 @@ docker pull registry.gitlab.com/fdroid/fdroidserver:buildserver
 # kills disabled despite ample VM memory. Keep a fixed 12 GiB cap; the release
 # host contract already requires at least 16 GiB assigned to Docker Desktop.
 docker run --oom-kill-disable --memory="12g" --rm -u vagrant \
-    --entrypoint /urnetwork/build/all/build-fdroid.sh \
+    --entrypoint /home/vagrant/build/com.bringyour.network/all/build-fdroid.sh \
     -v "$WARP_HOME/release:/urnetwork/release:z" \
-    -v "$BUILD_HOME:/urnetwork/build:Z" \
+    -v "$BUILD_HOME:/home/vagrant/build/com.bringyour.network:Z" \
     registry.gitlab.com/fdroid/fdroidserver:buildserver \
     container-build
