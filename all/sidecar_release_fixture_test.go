@@ -23,6 +23,7 @@ package allbuild
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -264,6 +265,14 @@ func (self *releaseFixture) goCommand(directory string, extra []string, argument
 	return stdout.String(), nil
 }
 
+// go list -m all in directory. -e because the go command asks the proxy for a .info it does not need
+// here, and the real cache holds only the .mod of a module nothing compiles. The proxy stays offline
+// on purpose: a network fallback could resolve a path the rewrite got wrong, and pass. A module that
+// does not resolve still prints its path, which is what the checks read.
+func (self *releaseFixture) moduleList(directory string) (string, error) {
+	return self.goCommand(directory, nil, "list", "-e", "-m", "all")
+}
+
 // §4.9: the modules go list -m all shows hold one root path, the versioned one, and neither the
 // unversioned path nor the one a misordered rewrite writes.
 func sidecarPathFindings(label string, moduleList string) []string {
@@ -417,7 +426,7 @@ func main() {
 	if _, err := self.goCommand(scratch, nil, "build", "-trimpath", "-o", filepath.Join(self.root, "scratch-bin"), "."); err != nil {
 		return append(findings, fmt.Sprintf("the scratch module does not build at the tag: %v", err))
 	}
-	moduleList, err := self.goCommand(scratch, nil, "list", "-m", "all")
+	moduleList, err := self.moduleList(scratch)
 	if err != nil {
 		return append(findings, fmt.Sprintf("go list -m all in the scratch module: %v", err))
 	}
@@ -468,7 +477,7 @@ func (self *releaseFixture) urFindings() []string {
 	} else if want := "ur " + fixtureInternalVersion + "\n"; string(output) != want {
 		findings = append(findings, fmt.Sprintf("ur --version prints %q, want %q", output, want))
 	}
-	moduleList, err := self.goCommand(copied, nil, "list", "-m", "all")
+	moduleList, err := self.moduleList(copied)
 	if err != nil {
 		return append(findings, fmt.Sprintf("go list -m all in ur's module: %v", err))
 	}
@@ -478,31 +487,51 @@ func (self *releaseFixture) urFindings() []string {
 	return append(findings, sidecarPathFindings("ur's module", moduleList)...)
 }
 
-// The modules that come only with smtpproof: its graph without the root's.
+// What only smtpproof brings: the third-party modules its go.mod requires directly, less what the
+// root's graph holds. A module further down its graph can reach sdk by another route, as yaml.v2
+// does, and sdk holding that is not a prover in sdk. smtpproof itself is matched by name.
 func (self *releaseFixture) proverModules() []string {
 	self.t.Helper()
-	modulesOf := func(directory string) map[string]bool {
-		self.t.Helper()
-		graph, err := self.goCommand(directory, nil, "mod", "graph")
-		if err != nil {
-			self.t.Fatal(err)
-		}
-		modules := map[string]bool{}
-		for _, field := range strings.Fields(graph) {
-			modulePath, _, _ := strings.Cut(field, "@")
-			modules[modulePath] = true
-		}
-		return modules
+	rootGraph, err := self.goCommand(filepath.Join(self.buildHome, "sidecar", "v2026"), nil, "mod", "graph")
+	if err != nil {
+		self.t.Fatal(err)
 	}
-	root := modulesOf(filepath.Join(self.buildHome, "sidecar", "v2026"))
+	editJson, err := self.goCommand(filepath.Join(self.buildHome, "sidecar", "smtpproof", "v2026"), nil, "mod", "edit", "-json")
+	if err != nil {
+		self.t.Fatal(err)
+	}
+	provers, err := proverPaths(editJson, rootGraph)
+	if err != nil {
+		self.t.Fatal(err)
+	}
+	return provers
+}
+
+// The third-party modules a go.mod requires directly, from go mod edit -json, less those the root's
+// go mod graph output holds.
+func proverPaths(editJson string, rootGraph string) ([]string, error) {
+	root := map[string]bool{}
+	for _, field := range strings.Fields(rootGraph) {
+		modulePath, _, _ := strings.Cut(field, "@")
+		root[modulePath] = true
+	}
+	var goMod struct {
+		Require []struct {
+			Path     string
+			Indirect bool
+		}
+	}
+	if err := json.Unmarshal([]byte(editJson), &goMod); err != nil {
+		return nil, err
+	}
 	provers := []string{}
-	for modulePath := range modulesOf(filepath.Join(self.buildHome, "sidecar", "smtpproof", "v2026")) {
-		if !root[modulePath] {
-			provers = append(provers, modulePath)
+	for _, require := range goMod.Require {
+		if !require.Indirect && !root[require.Path] && !strings.HasPrefix(require.Path, "github.com/urnetwork/") {
+			provers = append(provers, require.Path)
 		}
 	}
 	slices.Sort(provers)
-	return provers
+	return provers, nil
 }
 
 // Each of sdk's four modules at its tag.
@@ -548,6 +577,11 @@ func TestSidecarReleaseFixture(t *testing.T) {
 	}
 	for _, finding := range fixture.findings() {
 		t.Error(finding)
+	}
+	// the sdk check reads a list, so an empty one would pass it, as would a prover the root's graph
+	// already holds
+	if provers := fixture.proverModules(); !slices.Contains(provers, "github.com/consensys/gnark") {
+		t.Errorf("the prover modules are %q, which leaves gnark out", provers)
 	}
 }
 
@@ -755,6 +789,29 @@ func main() {
 	}
 	if findings := descriptorListingFindings("", []string{"protocol/absent.proto"}); len(findings) != 1 {
 		t.Fatalf("a descriptor that never registered gave %q", findings)
+	}
+}
+
+// A prover is what smtpproof requires itself. What it requires indirectly, and what the root's graph
+// already holds, can reach sdk by another route, so neither is one.
+func TestFixtureProversAreSmtpproofsOwnDirectRequires(t *testing.T) {
+	editJson := `{"Module": {"Path": "` + fixtureSmtpproof + `"}, "Require": [
+		{"Path": "github.com/consensys/gnark", "Version": "v0.15.0"},
+		{"Path": "github.com/consensys/gnark-crypto", "Version": "v0.20.1"},
+		{"Path": "` + fixtureSidecarRoot + `", "Version": "v` + fixtureExternalVersion + `"},
+		{"Path": "golang.org/x/crypto", "Version": "v0.58.0"},
+		{"Path": "gopkg.in/yaml.v2", "Version": "v2.4.0", "Indirect": true}]}`
+	rootGraph := fixtureSidecarRoot + " " + fixtureConnectRoot + "@v" + fixtureExternalVersion + "\n" +
+		fixtureConnectRoot + "@v" + fixtureExternalVersion + " golang.org/x/crypto@v0.58.0\n"
+	provers, err := proverPaths(editJson, rootGraph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"github.com/consensys/gnark", "github.com/consensys/gnark-crypto"}; !slices.Equal(provers, want) {
+		t.Fatalf("provers = %q, want %q", provers, want)
+	}
+	if _, err := proverPaths("not json", rootGraph); err == nil {
+		t.Fatal("an unreadable go.mod gave provers")
 	}
 }
 
