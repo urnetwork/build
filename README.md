@@ -104,8 +104,11 @@ root through the SDK. In every repository smtpproof's path is rewritten before t
 root's, because the root's pass skips only a line already holding `/vN`.
 
 `TestSidecarReleaseFixture` runs this real code on copies, with each tag served
-from a file proxy, then builds consumers at those tags with no replaces. It needs
-this checkout's real path, so run it without `-trimpath`:
+from a file proxy, on through the `make check` that follows the tags, then builds
+consumers at those tags with no replaces. A failure only the moved module shows
+would otherwise come after both tags exist and burn the version. The whole of
+`make check` runs, so the fixture takes as long as it does. It needs this
+checkout's real path, so run it without `-trimpath`:
 
 ```sh
 cd all && go test -tags sidecar_release_fixture -timeout 60m -run Fixture .

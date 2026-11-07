@@ -8,6 +8,10 @@
 // also writes its module into the proxy, gVisor keeps its local path, and npm has nothing to do.
 // Nothing is pushed, and no value comes from vault.
 //
+// The real run goes on through run.sh's make check in the moved module, as the release does once
+// both tags exist, so a rule or test that only the release layout breaks stops a release here, while
+// no version does. That takes the whole of make check, smtpproof's circuits included.
+//
 // A consumer here has no replaces, so it links upstream gVisor and pion/sctp, which compile. This
 // proves module paths and nothing about the forks: `ur` as the release builds it keeps both.
 //
@@ -57,13 +61,20 @@ var fixtureFunctionNames = []string{
 	"smtpproof_git_tag", "sidecar_cli_release_edit", "sidecar_release_publish", "sidecar_release_consumer_edit",
 }
 
+// Where sidecar's region ends, and where it ends once it runs on to make check, which run.sh runs
+// from the moved module after both tags are pushed.
+const (
+	fixtureSidecarRegionEnd = "error_trap 'sidecar push branch'"
+	fixtureMakeCheckEnd     = "error_trap 'sidecar make check'"
+)
+
 // run.sh's own blocks, start and end, in the order it runs them. proxy and userwireguard are left
 // out, because nothing here requires them.
 var fixtureRegions = [][2]string{
 	{"(cd $BUILD_HOME/glog &&\n    go_mod_edit_module", "error_trap 'glog push branch'"},
 	{"(cd $BUILD_HOME/connect &&\n    go_mod_edit_module", "error_trap 'connect push branch'"},
 	{"(cd $BUILD_HOME/goidenticons &&\n    go_mod_edit_module", "error_trap 'goidenticons push branch'"},
-	{"(cd $BUILD_HOME/sidecar &&\n    sidecar_release_edit)", "error_trap 'sidecar push branch'"},
+	{"(cd $BUILD_HOME/sidecar &&\n    sidecar_release_edit)", fixtureSidecarRegionEnd},
 	{"(cd $BUILD_HOME/sdk/build &&\n    go_mod_edit_gvisor", "error_trap 'sdk push branch'"},
 }
 
@@ -101,6 +112,8 @@ type releaseFixture struct {
 	proxy     *fileProxy
 	// the go environment every step and check runs under
 	environment []string
+	// whether the release runs on to run.sh's make check, which reads the real tree's siblings
+	makeCheck bool
 }
 
 // The module cache's download directory, which the proxy falls back on for third-party modules.
@@ -194,13 +207,19 @@ func (self *releaseFixture) write(name string, files map[string]string) {
 	self.commitCopy(destination)
 }
 
-// run.sh's regions, as one script.
-func fixtureRegionSource(t *testing.T) string {
+// run.sh's regions, as one script. With withMakeCheck, sidecar's region runs on through run.sh's
+// make check: a failure only the moved module shows would otherwise come after both tags exist, and
+// burn the version, so the fixture meets it first, where nothing is lost.
+func fixtureRegionSource(t *testing.T, withMakeCheck bool) string {
 	t.Helper()
 	var source strings.Builder
 	for _, region := range fixtureRegions {
-		source.WriteString(componentRegion(t, region[0], region[1]))
-		source.WriteString(region[1] + "\n")
+		end := region[1]
+		if withMakeCheck && end == fixtureSidecarRegionEnd {
+			end = fixtureMakeCheckEnd
+		}
+		source.WriteString(componentRegion(t, region[0], end))
+		source.WriteString(end + "\n")
 	}
 	return source.String()
 }
@@ -220,7 +239,7 @@ func (self *releaseFixture) release(patch func(string) string) (string, error) {
 	if err != nil {
 		self.t.Fatal(err)
 	}
-	command := exec.Command("zsh", "-c", fixtureHarness, "sidecar-release-fixture", source, fixtureRegionSource(self.t))
+	command := exec.Command("zsh", "-c", fixtureHarness, "sidecar-release-fixture", source, fixtureRegionSource(self.t, self.makeCheck))
 	command.Dir = self.buildHome
 	command.Env = append(slices.Clone(self.environment),
 		"BUILD_HOME="+self.buildHome, "BUILD_SED="+sidecarTestSed(self.t), "FIXTURE_BINARY="+binary,
@@ -568,9 +587,14 @@ func TestSidecarReleaseFixture(t *testing.T) {
 	for _, name := range []string{"glog", "connect", "goidenticons", "sidecar", "sdk"} {
 		fixture.archive(name)
 	}
-	// go_mod_edit_gvisor is a stand-in here, so the local replace stays and must resolve
-	if err := os.Symlink(fixtureCheckout(t, "gvisor"), filepath.Join(fixture.buildHome, "gvisor")); err != nil {
-		t.Fatal(err)
+	fixture.makeCheck = true
+	// go_mod_edit_gvisor is a stand-in here, so the local replace stays and must resolve. make check
+	// compares against server's requirements and holds toRelease to run.sh's functions, which the
+	// release host's $BUILD_HOME holds as server/ and all/.
+	for link, target := range map[string]string{"gvisor": fixtureCheckout(t, "gvisor"), "server": fixtureCheckout(t, "server"), "all": rolloutRoot(t)} {
+		if err := os.Symlink(target, filepath.Join(fixture.buildHome, link)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if output, err := fixture.release(nil); err != nil {
 		t.Fatalf("the release step failed: %v\n%s", err, output)
@@ -639,6 +663,21 @@ func main() {
 		"js/main.go":    "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
 	})
 	return fixture
+}
+
+// The real run's script holds run.sh's own make check between sidecar's tags and sdk's first edit,
+// and a planted run's does not, since a small tree holds nothing for it to read.
+func TestFixtureRunsRunShsMakeCheckAfterSidecarsTags(t *testing.T) {
+	withMakeCheck := fixtureRegionSource(t, true)
+	publish := strings.Index(withMakeCheck, "sidecar_release_publish)\n")
+	makeCheck := strings.Index(withMakeCheck, "make check)\n"+fixtureMakeCheckEnd+"\n")
+	sdk := strings.Index(withMakeCheck, "(cd $BUILD_HOME/sdk/build &&")
+	if publish < 0 || makeCheck < 0 || sdk < 0 || !(publish < makeCheck && makeCheck < sdk) {
+		t.Fatalf("the real run's script holds sidecar's publish at %d, make check at %d and sdk's edit at %d", publish, makeCheck, sdk)
+	}
+	if strings.Contains(fixtureRegionSource(t, false), "make check") {
+		t.Fatal("a planted run's script runs make check")
+	}
 }
 
 // The small tree passes, so what a planted run finds is what it planted.
