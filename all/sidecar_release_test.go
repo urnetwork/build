@@ -284,8 +284,8 @@ func (self *sidecarReleaseTree) events(t *testing.T) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-// What each go.mod names, read with the real parser's view of a line: the release must leave no
-// unversioned first-party require or local replace of a tagged module anywhere.
+// Holds a go.mod's text to the lines it must and must not contain, so a test can say that the release
+// left no unversioned require or local replace of a tagged module.
 func requireGoMod(t *testing.T, content string, want []string, forbidden []string) {
 	t.Helper()
 	for _, line := range want {
