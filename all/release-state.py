@@ -52,9 +52,11 @@ TOOLS = (("go", "version"), ("java", "-version"), ("node", "--version"),
          ("docker", "--version"), ("zig", "version"), ("python3", "--version"))
 # This is the exact set tagged by immutable preparation in run.sh. gvisor and
 # standalone candidate inputs are source-pinned but are not release-tagged.
-TAGGED_COMPONENTS = ("glog", "connect", "userwireguard", "goidenticons", "proxy", "sdk",
-                     "sn", "server", "android", "apple", "windows", "linux", "web",
+TAGGED_COMPONENTS = ("glog", "connect", "userwireguard", "goidenticons", "proxy", "sidecar",
+                     "sdk", "sn", "server", "android", "apple", "windows", "linux", "web",
                      "warp", "localizations", "extension")
+# A nested module's tag sits under its directory, beside its repository's own tag.
+NESTED_TAG_PREFIXES = {"sidecar": ("smtpproof/",)}
 
 
 class Refusal(Exception):
@@ -440,7 +442,7 @@ def repositories(workspace):
     build = workspace / "build"
     repos = {"build": build}
     for name in ("config", "vault", "release", "localizations", "gvisor", "sdk", "mmm",
-                 "goidenticons", "connect", "glog", "userwireguard", "examples", "xops"):
+                 "goidenticons", "connect", "glog", "sidecar", "userwireguard", "examples", "xops"):
         repos[name] = workspace / name
     lines = git(build, "config", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$")
     for line in lines.decode().splitlines():
@@ -573,11 +575,13 @@ def published_refs_snapshot(workspace, version):
     for component in ("", *TAGGED_COMPONENTS):
         repo = build / component
         refs = {}
-        for variant in variants if not component else [version]:
-            tag = "refs/tags/v" + variant
+        tags = ["refs/tags/v" + variant for variant in (variants if not component else [version])]
+        tags += ["refs/tags/" + prefix + "v" + version for prefix in NESTED_TAG_PREFIXES.get(component, ())]
+        for tag in tags:
             commit = git(repo, "rev-parse", "--verify", tag + "^{commit}").decode().strip()
             # SDK intentionally commits generated nested lockfiles after its
-            # immutable root-module tag. It must still descend from that tag.
+            # immutable root-module tag, and sidecar its untagged nested modules
+            # after both of its tags. Each must still descend from its tag.
             git(repo, "merge-base", "--is-ancestor", commit, "HEAD")
             refs[tag] = commit
         result["build" + ("/" + component if component else "")] = {

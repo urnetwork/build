@@ -171,9 +171,9 @@ class CanonicalEntrypoint(unittest.TestCase):
         # that exact function here; the unchanged resume entrypoint must derive
         # identical settings BEFORE its first validation, with no adoption.
         cls.env = cls.private_go_environment(cls.env)
-        modules=("glog","connect","userwireguard","goidenticons","proxy","sdk","sn","server","android","apple","windows","linux","web","warp","localizations","extension")
+        modules=("glog","connect","userwireguard","goidenticons","proxy","sidecar","sdk","sn","server","android","apple","windows","linux","web","warp","localizations","extension")
         cls.write(cls.build/".gitmodules", "".join(f'[submodule "{name}"]\n\tpath = {name}\n' for name in modules))
-        standalone=("config","vault","release","localizations","gvisor","sdk","mmm","goidenticons","connect","glog","userwireguard","examples","xops")
+        standalone=("config","vault","release","localizations","gvisor","sdk","mmm","goidenticons","connect","glog","sidecar","userwireguard","examples","xops")
         for name in (*standalone, *("build/"+n for n in modules)):
             repo=cls.root/name
             repo.mkdir(parents=True,exist_ok=True)
@@ -196,6 +196,8 @@ class CanonicalEntrypoint(unittest.TestCase):
             for offset in (0,2,3) if repo==cls.build else (0,):
                 version=VERSION.rsplit("-",1)[0]+"-"+str(int(VERSION.rsplit("-",1)[1])+offset)
                 subprocess.run([cls.real_git,"-C",str(repo),"tag","v"+version],check=True,capture_output=True)
+                if repo==cls.build/"sidecar":
+                    subprocess.run([cls.real_git,"-C",str(repo),"tag","smtpproof/v"+version],check=True,capture_output=True)
         for name in ("sdk/build/go.sum","sdk/cgo/go.sum","sdk/js/go.sum"):
             cls.write(cls.build/name,"pinned generated module graph\n")
         cls.write(cls.build/"sdk/cgo/go.mod", "module fixture.invalid/sdk\n\ngo 1.27.3\n")

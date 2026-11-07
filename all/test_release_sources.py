@@ -285,5 +285,38 @@ class RealSourceProvenance(unittest.TestCase):
         with self.assertRaisesRegex(state.Refusal,"tag changed"):
             state.verify_published_refs(self.root,expected)
 
+    def test_a_nested_modules_tag_is_sealed_with_its_repository(self):
+        build=self.root/"build"
+        sidecar=build/"sidecar"
+        sidecar.mkdir()
+        self.git(sidecar,"init","-q")
+        self.git(sidecar,"config","user.name","Release Fixture")
+        self.git(sidecar,"config","user.email","fixture@example.invalid")
+        self.write(sidecar/"source.txt","tagged tree\n")
+        self.commit(sidecar)
+        base,code=VERSION.rsplit("-",1)
+        for repo,tags in ((build,["v%s-%d"%(base,int(code)+offset) for offset in (0,2,3)]),(sidecar,["v"+VERSION,"smtpproof/v"+VERSION])):
+            remote=self.root/(repo.name+"-remote.git")
+            subprocess.run(["git","init","--bare","-q",str(remote)],check=True)
+            self.git(repo,"remote","add","origin",str(remote))
+            for tag in tags:
+                self.git(repo,"tag","-a",tag,"-m","immutable")
+                self.git(repo,"push","origin","refs/tags/"+tag)
+        self.write(sidecar/"source.txt","the untagged commit after both tags\n")
+        self.commit(sidecar)
+        with mock.patch.object(state,"TAGGED_COMPONENTS",("sidecar",)):
+            published=state.published_refs_snapshot(self.root,VERSION)
+            self.assertEqual(sorted(published["build/sidecar"]["refs"]),["refs/tags/smtpproof/v"+VERSION,"refs/tags/v"+VERSION])
+            nested="refs/tags/smtpproof/v"+VERSION
+            remote=self.root/"sidecar-remote.git"
+            moved=self.git(sidecar,"rev-parse","HEAD")
+            self.git(sidecar,"push","origin","HEAD:refs/heads/main")
+            self.git(remote,"update-ref",nested,moved)
+            with self.assertRaisesRegex(state.Refusal,"tag changed"):
+                state.verify_published_refs(self.root,published)
+            self.git(sidecar,"tag","-d","smtpproof/v"+VERSION)
+            with self.assertRaises(state.Refusal):
+                state.published_refs_snapshot(self.root,VERSION)
+
 
 if __name__=="__main__": unittest.main()
