@@ -500,6 +500,28 @@ func TestRunPublishesImmutableAcyclicGoModuleTags(t *testing.T) {
 	if !strings.Contains(sdkBlock, `test "$sdk_tagged_module_tree" = `+"`"+`git rev-parse HEAD:v${GO_MOD_VERSION}`+"`"+`)`) {
 		t.Fatal("SDK release does not prove nested lock commits preserve the tagged root module tree")
 	}
+
+	// sidecar publishes two tags, each before the module that tidies against it, and proves the
+	// later commits left both tagged trees alone
+	publish := runFunction(t, "sidecar_release_publish")
+	if got := strings.Count(publish, "\n    git_tag &&"); got != 1 {
+		t.Fatalf("sidecar root tag publication count = %d, want 1", got)
+	}
+	if got := strings.Count(publish, "smtpproof_git_tag"); got != 1 {
+		t.Fatalf("smtpproof tag publication count = %d, want 1", got)
+	}
+	rootTag := strings.Index(publish, "\n    git_tag &&")
+	smtpproofEdit := strings.Index(publish, "smtpproof_release_edit")
+	smtpproofTag := strings.Index(publish, "smtpproof_git_tag")
+	cliEdit := strings.Index(publish, "sidecar_cli_release_edit")
+	if smtpproofEdit < 0 || cliEdit < 0 || !(rootTag < smtpproofEdit && smtpproofEdit < smtpproofTag && smtpproofTag < cliEdit) {
+		t.Fatalf("sidecar module order is root-tag=%d smtpproof-edit=%d smtpproof-tag=%d cli-edit=%d", rootTag, smtpproofEdit, smtpproofTag, cliEdit)
+	}
+	for _, proof := range []string{`test "$root_tree" = `, `test "$smtpproof_tree" = `} {
+		if index := strings.Index(publish, proof); index < cliEdit {
+			t.Fatalf("sidecar release does not prove %q after its untagged commit", proof)
+		}
+	}
 }
 
 // SDK commits its nested build-module locks after its root module tag has been

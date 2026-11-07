@@ -84,6 +84,37 @@ build host:
 If you want to join the test tracks to get regular test builds via TestFlight and Google Play, please send a request to <support@ur.io>.
 
 
+## The sidecar repository's release
+
+`all/run.sh` releases the sidecar repository after connect's and glog's tags and
+before the SDK's first edit. One repository holds three things:
+
+- the root module, moved into `v2026/` and tagged `v<version>`;
+- `smtpproof`, a module of its own in `smtpproof/v2026/`, tagged
+  `smtpproof/v<version>`, since Go leaves the `/v2026` directory out of a nested
+  module's tag;
+- `cli` and `mlsinterop`, which stay in place, require both tags and are never
+  tagged.
+
+The design documents stay beside the module, out of every consumer's module
+cache. `.pb.go` files are committed and never regenerated on a version branch.
+`make check` then runs from the moved module. The SDK's four modules and server
+take the tags, server smtpproof's too, and SN drops both with server, reaching the
+root through the SDK. In every repository smtpproof's path is rewritten before the
+root's, because the root's pass skips only a line already holding `/vN`.
+
+`TestSidecarReleaseFixture` runs this real code on copies, with each tag served
+from a file proxy, then builds consumers at those tags with no replaces. It needs
+this checkout's real path, so run it without `-trimpath`:
+
+```sh
+cd all && go test -tags sidecar_release_fixture -timeout 60m -run Fixture .
+```
+
+`run.sh` runs it, and sidecar's `make size`, in the `BUILD_TEST` candidate gate,
+before a version is allocated. Sidecar's `make check` holds its own idea of this
+transformation to these same functions (`check/release_step_test.go`).
+
 ## Reproducible builds
 
 Builds use the semver `<version>-<version_code>`. Each semver has a corresponding tag in each repo, `v<version>-<version_code>`. You can check out the `build` repo at this tag to get all the repos at the correct tag also.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -444,6 +445,82 @@ func TestRunPreservesWarpVersionLookupFailures(t *testing.T) {
 	} {
 		if !strings.Contains(runSource, required) {
 			t.Errorf("run.sh lacks checked Warp version lookup %q", required)
+		}
+	}
+}
+
+// §19.11's classes, ahead of each service's image, so landing an image cannot mean choosing one.
+func TestRolloutClassesSidecarServices(t *testing.T) {
+	for _, service := range []string{"evs", "gkm", "sockets", "dns", "tlsedge", "mxedge"} {
+		result := runRollout(t, "SINGLE_SERVICE="+service)
+		if want := []string{deployEvent(service, 25, true), deployMessage(service, 25, true)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
+			t.Errorf("%s exit = %d, events = %q, want %q; output=%s", service, result.exitCode, result.events, want, result.output)
+		}
+	}
+	result := runRollout(t, "SINGLE_SERVICE=smtpedge", "SINGLE_PERCENT=100")
+	if want := []string{deployEvent("smtpedge", 100, false), deployMessage("smtpedge", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
+		t.Errorf("smtpedge exit = %d, events = %q, want %q; output=%s", result.exitCode, result.events, want, result.output)
+	}
+}
+
+// A class this function cannot honor fails closed. dnsedge's is one host at a time with a stop
+// rule, and this deploys every host at once, so it stays unknown until that rollout exists.
+func TestRolloutRefusesAServiceWithoutAClass(t *testing.T) {
+	for _, service := range []string{"dnsedge", "mxedge-platform", "not-a-service"} {
+		result := runRollout(t, "SINGLE_SERVICE="+service)
+		if result.exitCode != 64 || len(result.events) != 0 {
+			t.Errorf("%s exit = %d, events = %q, want 64 and nothing deployed", service, result.exitCode, result.events)
+		}
+		if !strings.Contains(result.output, "Unknown rollout service classification: "+service) {
+			t.Errorf("%s output = %q", service, result.output)
+		}
+	}
+}
+
+// The services run.sh publishes images for, by the name warpctl deploys. web/manager's image is
+// published under the app service (TestRunPublishesManagerImageUnderAppServiceNameBeforeRollout).
+func rolloutImageServices(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := []string{}
+	for _, match := range regexp.MustCompile(`(?m)^[^#\n]*warpctl build \$BUILD_ENV [^ ]*/([^/ ]+)/Makefile`).FindAllStringSubmatch(string(data), -1) {
+		service := match[1]
+		if service == "manager" {
+			service = "app"
+		}
+		services = append(services, service)
+	}
+	if len(services) == 0 {
+		t.Fatal("run.sh builds no images, so this test reads nothing")
+	}
+	return services
+}
+
+// An image with no class would exit 64 in the middle of a production rollout, after every build
+// has passed. This stops it at the change that adds the image.
+func TestEveryImageRunShBuildsHasARolloutClass(t *testing.T) {
+	for _, service := range rolloutImageServices(t) {
+		if result := runRollout(t, "SINGLE_SERVICE="+service); result.exitCode != 0 {
+			t.Errorf("%s has an image and no class: exit %d; output=%s", service, result.exitCode, result.output)
+		}
+	}
+}
+
+// A service named in a wave with no image fails every release at that service, so a class landing
+// early must not bring its name into the lists with it.
+func TestRolloutDeploysOnlyServicesWithImages(t *testing.T) {
+	images := rolloutImageServices(t)
+	result := runRollout(t)
+	if result.exitCode != 0 {
+		t.Fatalf("rollout exit = %d; output=%s", result.exitCode, result.output)
+	}
+	for _, event := range result.events {
+		fields := strings.Split(event, "\t")
+		if len(fields) > 3 && fields[0] == "warpctl" && fields[1] == "deploy" && !slices.Contains(images, fields[3]) {
+			t.Errorf("the rollout deploys %s, and run.sh builds no image for it", fields[3])
 		}
 	}
 }

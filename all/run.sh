@@ -133,6 +133,7 @@ required_build_tools=(
     pip
     productbuild
     productsign
+    protoc
     python
     python3
     qemu-img
@@ -770,6 +771,7 @@ error_trap 'pull warp release'
 
 if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf connect)
+    (cd $BUILD_HOME && rm -rf sidecar)
     (cd $BUILD_HOME && rm -rf gvisor)
     (cd $BUILD_HOME && rm -rf sdk)
     (cd $BUILD_HOME && rm -rf android)
@@ -824,6 +826,8 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 
 (cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'
+(cd $BUILD_HOME/sidecar && git_main)
+error_trap 'pull sidecar'
 # gVisor's Go-consumable source lives on the fork's go branch. Keep its
 # module/import path gvisor.dev/gvisor; release consumers use an immutable
 # fork revision, while local checkouts replace it with this sibling source.
@@ -1079,7 +1083,7 @@ if [ ! "$BUILD_SKIP_VULN_SCAN" ]; then
         error_trap 'install osv-scanner'
         export PATH="$(go env GOPATH)/bin:$PATH"
     fi
-    for scan_dir in warp sdk server; do
+    for scan_dir in warp sdk server sidecar; do
         scan_vulnerabilities "$scan_dir"
     done
     builder_message "dependency vulnerability scan passed."
@@ -1154,6 +1158,17 @@ if [ "$BUILD_TEST" ]; then
         error_trap "sdk/$sdk_platform tests"
         builder_message "sdk/$sdk_platform tests passed."
     done
+
+    # The sidecar release on copies, then its size gates, while no version exists:
+    # a broken rewrite stops here, before any tag does. The fixture needs this
+    # checkout's real path, and make size needs Xcode, which this host has.
+    (cd "$BUILD_HOME/all" &&
+        go test -count=1 -timeout 60m -tags sidecar_release_fixture -run 'Fixture' .)
+    error_trap 'sidecar release fixture'
+    builder_message "sidecar release fixture passed."
+    (cd "$BUILD_HOME/sidecar" && make size)
+    error_trap 'sidecar make size'
+    builder_message "sidecar make size passed."
 
     # Tests done — stop the local environment and re-arm the apple identity
     # cleanup as the EXIT trap (a no-op when BUILD_APPLE_IDENTITY is unset).
@@ -1301,6 +1316,8 @@ error_trap 'linux localizations push'
 
 (cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'connect prepare version branch'
+(cd $BUILD_HOME/sidecar && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'sidecar prepare version branch'
 (cd $BUILD_HOME/sdk && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'sdk prepare version branch'
 (cd $BUILD_HOME/android && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -1694,6 +1711,103 @@ go_mod_fork_update () {
 }
 
 
+# The sidecar repository's release, as named functions so that its tests run this
+# code and not a copy of it. One repository holds three things: the root module,
+# smtpproof, which is a module of its own with its own tag, and cli and mlsinterop,
+# which stay in place and are never tagged.
+#
+# go_edit_require_subpackages skips only a line already holding /vN, so in every
+# repository that names smtpproof its rewrite runs before the root's. The other way
+# round writes .../sidecar/v2026/smtpproof, a package that does not exist.
+#
+# go_mod_edit_module changes the go.mod in its working directory while the seds walk
+# the whole tree, so each nested go.mod takes its own edits below. A subpackage of
+# cli/ or mlsinterop/ would be rewritten as one of the root's: keep each one package.
+#
+# The generated .pb.go files are committed and go through the seds like any other
+# Go file. protoc never runs on a version branch, so one module identity registers
+# each descriptor once.
+#
+# Run in sidecar/. The design documents stay beside the module, as server's
+# sim-latency baseline does, so they stay out of every consumer's module cache.
+sidecar_release_edit () {
+    [ -n "$WARP_VERSION" ] &&
+    go_edit_require_subpackages github.com/urnetwork/sidecar/smtpproof &&
+    go_mod_edit_module github.com/urnetwork/sidecar &&
+    go_edit_require_subpackages github.com/urnetwork/sidecar &&
+    go_mod_edit_gvisor &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
+    # Binaries carry the version with its +, as sdk's does. sed reports nothing when
+    # it misses, and a release must not ship a ur that prints no version.
+    $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sidecar.go &&
+    grep -Fq "Version string = \"${WARP_VERSION}\"" sidecar.go &&
+    go_mod_fork 'design' 'research_notes' 'DESIGN.*' 'HANDOFF\.md' 'FEEDBACK-SYSTEM\.md'
+}
+
+# Run in sidecar/smtpproof, once the root's tag is pushed for this tidy to resolve.
+# The root's seds have already rewritten this tree's imports.
+smtpproof_release_edit () {
+    go_mod_edit_module github.com/urnetwork/sidecar/smtpproof &&
+    go_mod_edit_gvisor &&
+    go_mod_edit_require github.com/urnetwork/sidecar &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_fork
+}
+
+# Go reads a nested module's versions from tags under its directory, and leaves the
+# /vNNNN directory out of that tag's name, so the module at smtpproof/v2026 is tagged
+# smtpproof/v<version>.
+smtpproof_git_tag () {
+    local commit
+    commit=$(git rev-parse HEAD) || return $?
+    release_git_tag "smtpproof/v${EXTERNAL_WARP_VERSION}" "$commit"
+}
+
+# Run in sidecar/, once both tags are pushed. Neither module moves or is tagged, so
+# the replaces still climb correctly and go_mod_fork has nothing to do.
+sidecar_cli_release_edit () {
+    local module
+    for module in cli mlsinterop; do
+        (cd "$module" &&
+            go_mod_edit_gvisor &&
+            go_mod_edit_require github.com/urnetwork/sidecar/smtpproof &&
+            go_mod_edit_require github.com/urnetwork/sidecar &&
+            go_mod_edit_require github.com/urnetwork/connect &&
+            go_mod_edit_require github.com/urnetwork/glog &&
+            go mod tidy) || return $?
+    done
+}
+
+# Run in sidecar/ after sidecar_release_edit. A published tag is immutable, so the
+# root's is pushed before smtpproof tidies against it, smtpproof's before cli tidies
+# against both, and neither later commit may change a tagged module's tree.
+sidecar_release_publish () {
+    local root_tree smtpproof_tree
+    git_commit &&
+    root_tree=$(git rev-parse "HEAD:v${GO_MOD_VERSION}") &&
+    git_tag &&
+    (cd smtpproof && smtpproof_release_edit) &&
+    git_commit &&
+    smtpproof_tree=$(git rev-parse "HEAD:smtpproof/v${GO_MOD_VERSION}") &&
+    smtpproof_git_tag &&
+    sidecar_cli_release_edit &&
+    git_commit &&
+    test "$root_tree" = "$(git rev-parse "HEAD:v${GO_MOD_VERSION}")" &&
+    test "$smtpproof_tree" = "$(git rev-parse "HEAD:smtpproof/v${GO_MOD_VERSION}")"
+}
+
+# What each module that requires sidecar adds to its release edit. server adds
+# smtpproof's two lines first, which is why this does not name smtpproof.
+sidecar_release_consumer_edit () {
+    go_mod_edit_require github.com/urnetwork/sidecar &&
+    go_edit_require_subpackages github.com/urnetwork/sidecar
+}
+
+
 npm_edit_module () {
     jq --arg p "$1" --arg v "$EXTERNAL_WARP_VERSION" '.dependencies.[$p] = $v' package.json > package.json.2 && mv package.json.2 package.json
     jq --arg p "$1" --arg v "$EXTERNAL_WARP_VERSION" '.packages.[""].dependencies.[$p] = $v' package-lock.json > package-lock.json.2 && mv package-lock.json.2 package-lock.json
@@ -1920,11 +2034,26 @@ error_trap 'proxy edit'
 error_trap 'proxy push branch'
 
 
+(cd $BUILD_HOME/sidecar &&
+    sidecar_release_edit)
+error_trap 'sidecar edit'
+
+(cd $BUILD_HOME/sidecar &&
+    sidecar_release_publish)
+error_trap 'sidecar push branch'
+
+# The rules run from the moved module, against the tree that was tagged (Makefile).
+(cd $BUILD_HOME/sidecar/v${GO_MOD_VERSION} &&
+    make check)
+error_trap 'sidecar make check'
+
+
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    sidecar_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
@@ -1933,6 +2062,7 @@ error_trap 'sdk build edit'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    sidecar_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk cgo edit'
 
@@ -1940,6 +2070,7 @@ error_trap 'sdk cgo edit'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    sidecar_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk js edit'
 
@@ -1957,6 +2088,7 @@ error_trap 'sdk js edit'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    sidecar_release_consumer_edit &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
@@ -2006,6 +2138,10 @@ error_trap 'js-sdk publish'
     # need unpublished server packages stay outside the versioned module below;
     # remaining library tests can resolve an already-published server version.
     go_mod_drop_require github.com/urnetwork/server &&
+    # Server's requirements go with it. SN imports neither module itself, and its
+    # tidy below takes the root's tag from the SDK's module.
+    go_mod_drop_require github.com/urnetwork/sidecar/smtpproof &&
+    go_mod_drop_require github.com/urnetwork/sidecar &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urfoundation/sn &&
@@ -2039,6 +2175,9 @@ error_trap 'sn push branch'
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urfoundation/sn &&
+    go_mod_edit_require github.com/urnetwork/sidecar/smtpproof &&
+    go_edit_require_subpackages github.com/urnetwork/sidecar/smtpproof &&
+    sidecar_release_consumer_edit &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&

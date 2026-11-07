@@ -133,7 +133,7 @@ WEB = "https://github.com"
 COMPONENT_ORDER = [
     "android", "apple", "linux", "windows", "extension", "web",
     "build",
-    "sdk", "connect", "warp", "sn",
+    "sdk", "connect", "sidecar", "warp", "sn",
     "server", "proxy", "userwireguard",
     "localizations", "docs", "gvisor", "glog", "goidenticons",
 ]
