@@ -4,7 +4,14 @@
 # Warpctl's status before reporting success.
 # Config-updater, lb, transparent proxy, statusless Gossip, and unexposed Alt
 # blocks cannot observe their live versions through per-block LB status routes,
-# so Warpctl deliberately rejects --only-older for those services.
+# so Warpctl deliberately rejects --only-older for those services. smtpedge is
+# classed with them, to deploy in one pass.
+#
+# Sidecar's services are classed here ahead of their images, as §19.11 of its
+# design has them. dnsedge deliberately has no class yet: it deploys one host at a
+# time and stops on a canary-signature failure or an NS serial divergence, and this
+# function would deploy every host at once. It stays an unknown service until that
+# rollout exists, as does mxedge-platform, which §19.11 does not class.
 warp_rollout_deploy() {
     local service="$1"
     local percent="$2"
@@ -21,7 +28,7 @@ warp_rollout_deploy() {
         --timeout 0
     )
     case "$service" in
-        config-updater|lb|proxy|gossip|alt)
+        config-updater|lb|proxy|gossip|alt|smtpedge)
             ;;
         mmm)
             # New MMM blocks have no selector or old-LB status route. The
@@ -30,7 +37,7 @@ warp_rollout_deploy() {
             deploy_args+=(--only-older --initialize-unset)
             success_suffix=" (only older; initialize unset)"
             ;;
-        grafana|taskworker|api|connect|web|app|mcp)
+        grafana|taskworker|api|connect|web|app|mcp|evs|gkm|sockets|dns|tlsedge|mxedge)
             deploy_args+=(--only-older)
             success_suffix=" (only older)"
             ;;
@@ -84,6 +91,8 @@ warp_rollout() {
     # mmm goes first in every wave. The load balancer routes the mmm sites'
     # hostnames to mmm (vault services.yml v26), so each wave starts mmm's
     # blocks before it brings any lb onto that routing (mmm/mmm/PLAN.md).
+    # A service joins a list only with its image in run.sh: without one, every
+    # release's rollout would fail at that service.
     staged_services=(mmm lb taskworker api connect web app mcp)
     # Gossip has no status route, while Alt and Proxy intentionally bypass the
     # load balancer. Without --only-older, a cumulative rollout would retag and
