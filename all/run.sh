@@ -1159,6 +1159,17 @@ if [ "$BUILD_TEST" ]; then
         builder_message "sdk/$sdk_platform tests passed."
     done
 
+    # The sidecar release on copies, then its size gates, while no version exists:
+    # a broken rewrite stops here, before any tag does. The fixture needs this
+    # checkout's real path, and make size needs Xcode, which this host has.
+    (cd "$BUILD_HOME/all" &&
+        go test -count=1 -timeout 60m -tags sidecar_release_fixture -run 'Fixture' .)
+    error_trap 'sidecar release fixture'
+    builder_message "sidecar release fixture passed."
+    (cd "$BUILD_HOME/sidecar" && make size)
+    error_trap 'sidecar make size'
+    builder_message "sidecar make size passed."
+
     # Tests done — stop the local environment and re-arm the apple identity
     # cleanup as the EXIT trap (a no-op when BUILD_APPLE_IDENTITY is unset).
     builder_message "stopping local test environment"
