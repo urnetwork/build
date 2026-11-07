@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -135,6 +136,18 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 	if err := os.MkdirAll(proxy.directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The go command leaves the module cache's directories read-only, and make check's rules run go
+	// with GOFLAGS of their own, without -modcacherw, so the temporary directory could not be removed.
+	// Cleanups run last first, so this opens the directories before t.TempDir's removal.
+	modcache := filepath.Join(root, "modcache")
+	t.Cleanup(func() {
+		filepath.WalkDir(modcache, func(walkPath string, entry fs.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				os.Chmod(walkPath, 0o755)
+			}
+			return nil
+		})
+	})
 	return &releaseFixture{
 		t:         t,
 		root:      root,
@@ -145,7 +158,7 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 			// -modcacherw only so the temp directory can be removed afterwards
 			"GOFLAGS=-mod=mod -modcacherw",
 			"GOPROXY="+proxy.url()+",file://"+fixtureRealCache(t),
-			"GOMODCACHE="+filepath.Join(root, "modcache"),
+			"GOMODCACHE="+modcache,
 			"GONOPROXY=", "GOPRIVATE=", "GONOSUMDB=", "GONOSUMCHECK=1", "GOVCS=*:off",
 		),
 	}
