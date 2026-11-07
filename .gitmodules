@@ -50,3 +50,6 @@
 [submodule "goidenticons"]
 	path = goidenticons
 	url = git@github.com:urnetwork/goidenticons.git
+[submodule "sidecar"]
+	path = sidecar
+	url = git@github.com:urnetwork/sidecar.git

@@ -42,10 +42,10 @@ win_windows_build_plan
 # LOCAL (possibly uncommitted) changes. No-op unless SRC_HOME / SRC_<REPO> is set
 # (release builds via run.sh stage BUILD_HOME themselves and pass no SRC_*).
 # shellcheck source=stage-local-repos.sh
-# sdk/cgo/go.mod replaces sdk, connect, gvisor, glog and goidenticons with
-# local paths. Stage the complete dependency closure together.
+# sdk/cgo/go.mod replaces sdk, connect, gvisor, glog, goidenticons and sidecar
+# with local paths. Stage the complete dependency closure together.
 source "$here/stage-local-repos.sh"
-stage_local_repos sdk connect gvisor glog goidenticons windows
+stage_local_repos sdk connect gvisor glog goidenticons sidecar windows
 
 # Say plainly WHICH tree is about to be built. This script builds
 # $BUILD_HOME/windows — a release-staged checkout — and stage_local_repos is a

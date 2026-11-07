@@ -151,8 +151,10 @@ COMPONENT_ORDER = [
 # `gomobile bind -target ios/arm64,iossimulator/arm64,macos/arm64,macos/amd64`
 # of the same package (sdk build/Makefile, target build_apple), and linux and
 # windows both build sdk/cgo -- all/build-linux.sh and all/build-windows.sh each
-# stage exactly `sdk connect gvisor glog goidenticons` over the build root, because
-# sdk/cgo/go.mod replaces all of them with local paths at once.
+# stage `sdk connect gvisor glog goidenticons` over the build root, because
+# sdk/cgo/go.mod replaces all of them with local paths at once. They stage sidecar
+# too, which sdk/cgo/go.mod also replaces, but no app links it yet, so it joins
+# this list with the first real import in sdk (sdk/sidecar_require.go says when).
 SHARED_COMPONENTS = ["sdk", "connect", "gvisor", "glog", "goidenticons"]
 
 # THE STOREFRONT TABLE.

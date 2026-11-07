@@ -50,7 +50,7 @@ stage_local_repos connect gvisor >/dev/null
 
 vm_source="$run_dir/vm-source"
 vm_dest="$run_dir/vm-dest"
-for repo in windows sdk connect gvisor glog goidenticons; do
+for repo in windows sdk connect gvisor glog goidenticons sidecar; do
   mkdir -p "$vm_source/$repo/tests/__acceptance__/run-one"
   printf 'required source\n' >"$vm_source/$repo/required.txt"
   printf 'private artifact\n' >"$vm_source/$repo/tests/__acceptance__/run-one/result.json"
@@ -65,9 +65,9 @@ win_source_rsync_excludes
 rsync -a --delete --delete-excluded \
   "${WIN_SOURCE_RSYNC_EXCLUDES[@]}" \
   "$vm_source/windows" "$vm_source/sdk" "$vm_source/connect" "$vm_source/gvisor" \
-  "$vm_source/glog" "$vm_source/goidenticons" "$vm_dest/"
+  "$vm_source/glog" "$vm_source/goidenticons" "$vm_source/sidecar" "$vm_dest/"
 
-for repo in windows sdk connect gvisor glog goidenticons; do
+for repo in windows sdk connect gvisor glog goidenticons sidecar; do
   [ -f "$vm_dest/$repo/required.txt" ] || fail "VM sync omitted $repo source"
   [ ! -e "$vm_dest/$repo/tests/__acceptance__" ] || fail "VM sync retained $repo acceptance artifacts"
   [ ! -e "$vm_dest/$repo/$repo.test" ] || fail "VM sync retained $repo compiled test"
