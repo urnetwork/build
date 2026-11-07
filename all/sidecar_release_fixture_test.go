@@ -67,6 +67,17 @@ var fixtureFunctionNames = []string{
 const (
 	fixtureSidecarRegionEnd = "error_trap 'sidecar push branch'"
 	fixtureMakeCheckEnd     = "error_trap 'sidecar make check'"
+	// make check's own step in run.sh, from its first line
+	fixtureMakeCheckStart = "(cd $BUILD_HOME/sidecar/v${GO_MOD_VERSION} &&"
+)
+
+// The fixture's environment turns cgo off for every step, where run.sh turns it off only for sn's CLI
+// cross builds (sn_cli_release). Its make check therefore runs with the host's own cgo, as the
+// release's does, so a test that fails only with cgo stops here and not after both tags exist. The
+// steps after it get the fixture's setting back.
+const (
+	fixtureMakeCheckCgo = "unset CGO_ENABLED\n"
+	fixtureStepsCgo     = "export CGO_ENABLED=0\n"
 )
 
 // run.sh's own blocks, start and end, in the order it runs them. proxy and userwireguard are left
@@ -231,8 +242,18 @@ func fixtureRegionSource(t *testing.T, withMakeCheck bool) string {
 		if withMakeCheck && end == fixtureSidecarRegionEnd {
 			end = fixtureMakeCheckEnd
 		}
-		source.WriteString(componentRegion(t, region[0], end))
+		text := componentRegion(t, region[0], end)
+		if end == fixtureMakeCheckEnd {
+			if strings.Count(text, fixtureMakeCheckStart) != 1 {
+				t.Fatalf("sidecar's region holds %d of make check's step %q", strings.Count(text, fixtureMakeCheckStart), fixtureMakeCheckStart)
+			}
+			text = strings.Replace(text, fixtureMakeCheckStart, fixtureMakeCheckCgo+fixtureMakeCheckStart, 1)
+		}
+		source.WriteString(text)
 		source.WriteString(end + "\n")
+		if end == fixtureMakeCheckEnd {
+			source.WriteString(fixtureStepsCgo)
+		}
 	}
 	return source.String()
 }
@@ -690,6 +711,32 @@ func TestFixtureRunsRunShsMakeCheckAfterSidecarsTags(t *testing.T) {
 	}
 	if strings.Contains(fixtureRegionSource(t, false), "make check") {
 		t.Fatal("a planted run's script runs make check")
+	}
+}
+
+// The real run's make check has the host's cgo and only it does: the script drops the fixture's
+// setting just before make check's step and puts it back just after, and in the shell the fixture
+// runs, that leaves the step's processes no CGO_ENABLED and the next step the fixture's.
+func TestFixtureRunsMakeCheckWithTheHostsCgo(t *testing.T) {
+	if !slices.Contains(newReleaseFixture(t).environment, "CGO_ENABLED=0") {
+		t.Fatal("the fixture's environment no longer turns cgo off, so the script puts back a setting it never had")
+	}
+	withMakeCheck := fixtureRegionSource(t, true)
+	if strings.Count(withMakeCheck, fixtureMakeCheckCgo) != 1 || !strings.Contains(withMakeCheck, fixtureMakeCheckCgo+fixtureMakeCheckStart) {
+		t.Error("the real run's script does not drop the fixture's cgo just before make check's step")
+	}
+	if strings.Count(withMakeCheck, fixtureStepsCgo) != 1 || !strings.Contains(withMakeCheck, fixtureMakeCheckEnd+"\n"+fixtureStepsCgo) {
+		t.Error("the real run's script does not put the fixture's cgo back just after make check's step")
+	}
+	if strings.Contains(fixtureRegionSource(t, false), "CGO_ENABLED") {
+		t.Error("a planted run's script changes cgo")
+	}
+	command := exec.Command("zsh", "-c", fixtureMakeCheckCgo+"env | grep '^CGO_ENABLED=' || print -r -- none\n"+
+		fixtureStepsCgo+"env | grep '^CGO_ENABLED='\n")
+	command.Env = append(os.Environ(), "CGO_ENABLED=0")
+	output, err := command.CombinedOutput()
+	if err != nil || string(output) != "none\nCGO_ENABLED=0\n" {
+		t.Errorf("the lines left %q: %v", output, err)
 	}
 }
 
