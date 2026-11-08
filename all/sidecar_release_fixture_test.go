@@ -624,8 +624,10 @@ func TestSidecarReleaseFixture(t *testing.T) {
 	fixture.makeCheck = true
 	// go_mod_edit_gvisor is a stand-in here, so the local replace stays and must resolve. make check
 	// compares against server's requirements and holds toRelease to run.sh's functions, which the
-	// release host's $BUILD_HOME holds as server/ and all/.
-	for link, target := range map[string]string{"gvisor": fixtureCheckout(t, "gvisor"), "server": fixtureCheckout(t, "server"), "all": rolloutRoot(t)} {
+	// release host's $BUILD_HOME holds as server/ and all/. It also tests sidecarctl, which no
+	// release edit touches and which replaces warp with the checkout beside sidecar (C-23), which
+	// the release host pulls and never moves.
+	for link, target := range map[string]string{"gvisor": fixtureCheckout(t, "gvisor"), "server": fixtureCheckout(t, "server"), "warp": fixtureCheckout(t, "warp"), "all": rolloutRoot(t)} {
 		if err := os.Symlink(target, filepath.Join(fixture.buildHome, link)); err != nil {
 			t.Fatal(err)
 		}
