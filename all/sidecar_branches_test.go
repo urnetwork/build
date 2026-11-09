@@ -94,7 +94,6 @@ const branchesX9Test = `//go:build sidecar_check
 package check
 
 import (
-	"maps"
 	"os"
 	"testing"
 )
