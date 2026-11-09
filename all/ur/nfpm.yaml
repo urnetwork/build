@@ -1,0 +1,56 @@
+# ur's Linux packages (DESIGN.md §4.10; REPO-M1-03): one nfpm definition for the .deb, the .rpm and
+# the .pkg.tar.zst, at nfpm v2.47.0, build/all/linux/Dockerfile.daemon's pin.
+#
+# A TEMPLATE: build-ur-linux.sh fills each @...@ itself, since nfpm expands no environment variable in
+# contents[].src. @VERSION_BASE@ and @VERSION_RELEASE@ are EXTERNAL_WARP_VERSION split at its last
+# hyphen: handed the whole string, nfpm reads "-<code>" as a semver prerelease and emits
+# 2026.7.6~985989570, which sorts below the base. @ARCH@ is amd64 or arm64, which nfpm spells x86_64
+# and aarch64 for rpm and pacman.
+#
+# ur is static (CGO_ENABLED=0), so the packages depend on nothing. They carry no maintainer script and
+# no unit: the daemon runs as the person (Q-CORE-3), and `ur install-daemon` writes its unit
+# (CORE-M1-12). git-remote-ur is a link to ur, which dispatches on argv[0].
+name: ur
+arch: "@ARCH@"
+platform: linux
+version: "@VERSION_BASE@"
+release: "@VERSION_RELEASE@"
+section: devel
+priority: optional
+maintainer: "URnetwork <support@ur.io>"
+vendor: "URnetwork"
+homepage: "https://ur.io"
+license: "MPL-2.0"
+description: |
+  ur, the URnetwork sidecar
+  The command line for recURd and the URnetwork sidecar: its daemon, its MCP
+  server for agent harnesses, and git-remote-ur for ur:// remotes.
+contents:
+  # owned, so a removal takes it too and leaves nothing behind
+  - dst: /usr/share/doc/ur
+    type: dir
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: "@BINARY@"
+    dst: /usr/bin/ur
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: /usr/bin/ur
+    dst: /usr/bin/git-remote-ur
+    type: symlink
+  - src: "@LICENSE@"
+    dst: /usr/share/doc/ur/LICENSE
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: "@NOTICE@"
+    dst: /usr/share/doc/ur/NOTICE
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
