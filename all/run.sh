@@ -3667,6 +3667,66 @@ release_image_receipt mcp
 error_trap 'verify retained mcp image digest'
 builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
+# The sidecar's dns engine (DNS-M5-18): one binary, the API role's image from
+# server/cli/dns and the edge role's from server/cli/dnsedge. The edge runs as two
+# services, dnsedge-1 and dnsedge-2, one NS host each, so a release never takes
+# both NS at once (warp-w5w6-dnsedge-one-host); warpctl names an image after its
+# Makefile's directory, so the one verified dnsedge image is published under
+# each service name, as manager's is under app. These are images only: each
+# service joins the rollout's waves with its blocks (warp-w5w6-w6-ownership), and
+# deploy-rollout.zsh already classes all three.
+if release_build image-dns "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dns.json"; then
+release_image_publication_begin dns
+error_trap 'verify unpublished dns image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/dns/Makefile)
+error_trap 'warpctl build dns'
+release_image_publication_complete dns
+error_trap 'record dns image digest'
+release_complete image-dns "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dns.json"
+fi
+release_image_receipt dns
+error_trap 'verify retained dns image digest'
+builder_message "service dns \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-dnsedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge.json"; then
+release_image_publication_begin dnsedge
+error_trap 'verify unpublished dnsedge image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/dnsedge/Makefile)
+error_trap 'warpctl build dnsedge'
+release_image_publication_complete dnsedge
+error_trap 'record dnsedge image digest'
+release_complete image-dnsedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge.json"
+fi
+release_image_receipt dnsedge
+error_trap 'verify retained dnsedge image digest'
+builder_message "service dnsedge \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-dnsedge-1 "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge-1.json"; then
+release_image_publication_begin dnsedge-1
+error_trap 'verify unpublished dnsedge-1 image'
+(cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-dnsedge:${EXTERNAL_WARP_VERSION}" --service_name=dnsedge-1)
+error_trap 'warpctl import dnsedge image as dnsedge-1'
+release_image_publication_complete dnsedge-1
+error_trap 'record dnsedge-1 image digest'
+release_complete image-dnsedge-1 "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge-1.json"
+fi
+release_image_receipt dnsedge-1
+error_trap 'verify retained dnsedge-1 image digest'
+builder_message "service dnsedge-1 \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-dnsedge-2 "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge-2.json"; then
+release_image_publication_begin dnsedge-2
+error_trap 'verify unpublished dnsedge-2 image'
+(cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-dnsedge:${EXTERNAL_WARP_VERSION}" --service_name=dnsedge-2)
+error_trap 'warpctl import dnsedge image as dnsedge-2'
+release_image_publication_complete dnsedge-2
+error_trap 'record dnsedge-2 image digest'
+release_complete image-dnsedge-2 "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dnsedge-2.json"
+fi
+release_image_receipt dnsedge-2
+error_trap 'verify retained dnsedge-2 image digest'
+builder_message "service dnsedge-2 \`${EXTERNAL_WARP_VERSION}\` available"
+
 if release_build image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"; then
 release_image_publication_begin gossip
 error_trap 'verify unpublished gossip image'

@@ -868,14 +868,16 @@ class ShellSideEffectGuards(unittest.TestCase):
 
     def test_all_canonical_image_builds_and_imports_bracket_publication_intent(self):
         source = (HERE / "run.sh").read_text()
-        stages = list(re.finditer(r'(?m)^\s*if release_build image-([a-z-]+) ', source))
-        self.assertEqual({stage[1] for stage in stages}, {"config-updater","grafana","lb","taskworker","api","connect","mcp","gossip","alt","proxy","web","mmm","manager","app"})
+        stages = list(re.finditer(r'(?m)^\s*if release_build image-([a-z0-9-]+) ', source))
+        self.assertEqual({stage[1] for stage in stages}, {"config-updater","grafana","lb","taskworker","api","connect","mcp","dns","dnsedge","dnsedge-1","dnsedge-2","gossip","alt","proxy","web","mmm","manager","app"})
+        # images republished under another service's name: manager's as app, dnsedge's as each NS's
+        imports = {"app", "dnsedge-1", "dnsedge-2"}
         for stage in stages:
             name = stage[1]
             end = source.index("release_complete image-" + name + " ", stage.end())
             block = source[stage.start():end]
             begin = block.index("release_image_publication_begin " + name)
-            operation = block.index("warpctl import " if name == "app" else "warpctl build ")
+            operation = block.index("warpctl import " if name in imports else "warpctl build ")
             observed = block.index("release_image_publication_complete " + name)
             self.assertLess(begin, operation, name)
             self.assertLess(operation, observed, name)

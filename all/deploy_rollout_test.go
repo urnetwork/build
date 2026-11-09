@@ -353,6 +353,48 @@ func TestRunPublishesManagerImageUnderAppServiceNameBeforeRollout(t *testing.T) 
 	}
 }
 
+// The dns edge's one image is published under each NS's service, after it is built and before the
+// rollout starts, so neither dnsedge-1 nor dnsedge-2 can be promoted from a tag nothing published; the
+// bare role name dnsedge, which no rollout class names, is never deployed from it.
+func TestRunPublishesTheDnsedgeImageUnderEachNsServiceBeforeRollout(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSource := string(runData)
+	rolloutAt := strings.Index(runSource, `source "$BUILD_HOME/all/deploy-rollout.zsh"`)
+	if rolloutAt < 0 {
+		t.Fatal("run.sh does not enter the canonical rollout")
+	}
+	for _, service := range []string{"dns", "dnsedge"} {
+		build := fmt.Sprintf("(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/%s/Makefile)\nerror_trap 'warpctl build %s'", service, service)
+		buildAt := strings.Index(runSource, build)
+		if buildAt < 0 || rolloutAt < buildAt {
+			t.Fatalf("run.sh does not build the %s image before the rollout", service)
+		}
+	}
+	edgeBuildAt := strings.Index(runSource, "warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/dnsedge/Makefile")
+	for _, service := range []string{"dnsedge-1", "dnsedge-2"} {
+		alias := fmt.Sprintf(`(cd $BUILD_HOME && warpctl import $BUILD_ENV "bringyour/${BUILD_ENV}-dnsedge:${EXTERNAL_WARP_VERSION}" --service_name=%s)`, service)
+		aliasAt := strings.Index(runSource, alias)
+		if aliasAt < 0 {
+			t.Fatalf("run.sh does not publish the dnsedge image as %s", service)
+		}
+		if aliasAt < edgeBuildAt || rolloutAt < aliasAt {
+			t.Errorf("run.sh publishes %s before the dnsedge image is built or after the rollout starts", service)
+		}
+	}
+	services := rolloutImageServices(t)
+	for _, service := range []string{"dns", "dnsedge-1", "dnsedge-2"} {
+		if !slices.Contains(services, service) {
+			t.Errorf("the images run.sh publishes leave out %s: %q", service, services)
+		}
+	}
+	if slices.Contains(services, "dnsedge") {
+		t.Errorf("the bare dnsedge image counts as a service: %q", services)
+	}
+}
+
 // Keep new rollout services fail closed until their observation capability is
 // classified explicitly.
 func TestRolloutRejectsUnknownServiceBeforeWarpctl(t *testing.T) {
@@ -499,21 +541,27 @@ func TestRolloutRefusesAServiceWithoutAClass(t *testing.T) {
 	}
 }
 
-// The services run.sh publishes images for, by the name warpctl deploys. web/manager's image is
-// published under the app service (TestRunPublishesManagerImageUnderAppServiceNameBeforeRollout).
+// The services run.sh publishes images for, by the name warpctl deploys. An image run.sh imports under
+// other service names is deployed under those alone: web/manager's as app
+// (TestRunPublishesManagerImageUnderAppServiceNameBeforeRollout), and dnsedge's as dnsedge-1 and
+// dnsedge-2 (TestRunPublishesTheDnsedgeImageUnderEachNsServiceBeforeRollout).
 func rolloutImageServices(t *testing.T) []string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	imported := map[string][]string{}
+	for _, match := range regexp.MustCompile(`(?m)^[^#\n]*warpctl import \$BUILD_ENV "bringyour/\$\{BUILD_ENV\}-([^:"]+):\$\{EXTERNAL_WARP_VERSION\}" --service_name=([^ )\n]+)`).FindAllStringSubmatch(string(data), -1) {
+		imported[match[1]] = append(imported[match[1]], match[2])
+	}
 	services := []string{}
 	for _, match := range regexp.MustCompile(`(?m)^[^#\n]*warpctl build \$BUILD_ENV [^ ]*/([^/ ]+)/Makefile`).FindAllStringSubmatch(string(data), -1) {
-		service := match[1]
-		if service == "manager" {
-			service = "app"
+		if names, ok := imported[match[1]]; ok {
+			services = append(services, names...)
+		} else {
+			services = append(services, match[1])
 		}
-		services = append(services, service)
 	}
 	if len(services) == 0 {
 		t.Fatal("run.sh builds no images, so this test reads nothing")
@@ -525,7 +573,8 @@ func rolloutImageServices(t *testing.T) []string {
 // has passed. This stops it at the change that adds the image.
 func TestEveryImageRunShBuildsHasARolloutClass(t *testing.T) {
 	for _, service := range rolloutImageServices(t) {
-		if result := runRollout(t, "SINGLE_SERVICE="+service); result.exitCode != 0 {
+		// dnsedge-2's stop rule reads the first NS clean here, so the run shows its class alone
+		if result := runRollout(t, "SINGLE_SERVICE="+service, "DNS_ROLLOUT_CHECK=true"); result.exitCode != 0 {
 			t.Errorf("%s has an image and no class: exit %d; output=%s", service, result.exitCode, result.output)
 		}
 	}
