@@ -3667,6 +3667,22 @@ release_image_receipt mcp
 error_trap 'verify retained mcp image digest'
 builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
+# The sidecar's evs engine (EVS1-M2-21, OPS-M2-03): server/cli/evs, a block of its own with no Postgres
+# (DESIGN §19.4), which joins the rollout's staged waves with its fragment in
+# warp/services/sidecar-blocks/evs.yml. gkm joins the same way once server/cli/gkm exists (KEYS-M2-17).
+if release_build image-evs "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-evs.json"; then
+release_image_publication_begin evs
+error_trap 'verify unpublished evs image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/evs/Makefile)
+error_trap 'warpctl build evs'
+release_image_publication_complete evs
+error_trap 'record evs image digest'
+release_complete image-evs "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-evs.json"
+fi
+release_image_receipt evs
+error_trap 'verify retained evs image digest'
+builder_message "service evs \`${EXTERNAL_WARP_VERSION}\` available"
+
 # The sidecar's dns engine (DNS-M5-18): one binary, the API role's image from
 # server/cli/dns and the edge role's from server/cli/dnsedge. The edge runs as two
 # services, dnsedge-1 and dnsedge-2, one NS host each, so a release never takes

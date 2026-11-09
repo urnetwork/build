@@ -202,7 +202,7 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 		deployMessage("grafana", 100, true),
 	}
 	// mmm leads every wave, so no lb routes the mmm sites before mmm runs.
-	services := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp"}
+	services := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "evs"}
 	for _, percent := range []int{25, 50, 75, 100} {
 		for _, service := range services {
 			onlyOlder := service != "lb"
@@ -492,8 +492,9 @@ func TestRunPreservesWarpVersionLookupFailures(t *testing.T) {
 }
 
 // §19.11's classes, ahead of each service's image, so landing an image cannot mean choosing one.
+// mxedge's platform listener is staged as mxedge is (QD-243).
 func TestRolloutClassesSidecarServices(t *testing.T) {
-	for _, service := range []string{"evs", "gkm", "sockets", "dns", "tlsedge", "mxedge"} {
+	for _, service := range []string{"evs", "gkm", "sockets", "dns", "tlsedge", "mxedge", "mxedge-platform"} {
 		result := runRollout(t, "SINGLE_SERVICE="+service)
 		if want := []string{deployEvent(service, 25, true), deployMessage(service, 25, true)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
 			t.Errorf("%s exit = %d, events = %q, want %q; output=%s", service, result.exitCode, result.events, want, result.output)
@@ -528,9 +529,9 @@ func TestRolloutDeploysTheDnsEdgesOneHostAtATime(t *testing.T) {
 }
 
 // A class this function cannot honor fails closed. The bare role name dnsedge names no service, since
-// each NS is a service of its own, and mxedge-platform is not classed.
+// each NS is a service of its own.
 func TestRolloutRefusesAServiceWithoutAClass(t *testing.T) {
-	for _, service := range []string{"dnsedge", "mxedge-platform", "not-a-service"} {
+	for _, service := range []string{"dnsedge", "not-a-service"} {
 		result := runRollout(t, "SINGLE_SERVICE="+service)
 		if result.exitCode != 64 || len(result.events) != 0 {
 			t.Errorf("%s exit = %d, events = %q, want 64 and nothing deployed", service, result.exitCode, result.events)
@@ -592,6 +593,37 @@ func TestRolloutDeploysOnlyServicesWithImages(t *testing.T) {
 		fields := strings.Split(event, "\t")
 		if len(fields) > 3 && fields[0] == "warpctl" && fields[1] == "deploy" && !slices.Contains(images, fields[3]) {
 			t.Errorf("the rollout deploys %s, and run.sh builds no image for it", fields[3])
+		}
+	}
+}
+
+// §19.11's staged list, which each sidecar service joins with its image and block (plan-OPS-small-readings
+// #12): the services each wave deploys keep that list's order, whatever has joined so far.
+func TestRolloutStagesServicesInTheDesignOrder(t *testing.T) {
+	designOrder := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge"}
+	result := runRollout(t)
+	if result.exitCode != 0 {
+		t.Fatalf("rollout exit = %d; output=%s", result.exitCode, result.output)
+	}
+	for _, percent := range []int{25, 50, 75, 100} {
+		wave := []string{}
+		for _, event := range result.events {
+			fields := strings.Split(event, "\t")
+			if len(fields) > 5 && fields[1] == "deploy" && fields[5] == fmt.Sprintf("--percent=%d", percent) && slices.Contains(designOrder, fields[3]) {
+				wave = append(wave, fields[3])
+			}
+		}
+		next := 0
+		for _, service := range wave {
+			index := slices.Index(designOrder, service)
+			if index < next {
+				t.Errorf("the %d%% wave deploys %q, out of §19.11's order %q", percent, wave, designOrder)
+				break
+			}
+			next = index + 1
+		}
+		if !slices.Contains(wave, "evs") {
+			t.Errorf("the %d%% wave leaves evs out: %q", percent, wave)
 		}
 	}
 }

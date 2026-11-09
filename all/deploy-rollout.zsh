@@ -8,11 +8,11 @@
 # classed with them, to deploy in one pass.
 #
 # Sidecar's services are classed here ahead of their images, as §19.11 of its
-# design has them. dnsedge runs as two services, dnsedge-1 and dnsedge-2, one host
+# design has them, with mxedge-platform, mxedge's platform listener, staged beside
+# it (QD-243). dnsedge runs as two services, dnsedge-1 and dnsedge-2, one host
 # each (warp-w5w6-dnsedge-one-host), so a release never takes both NS at once:
 # each deploys in one pass, and dnsedge-2 only once dns_rollout_stop_check says the
-# first serves clean (Q-OPS-5). The bare role name dnsedge stays unknown, as does
-# mxedge-platform, which §19.11 does not class.
+# first serves clean (Q-OPS-5). The bare role name dnsedge stays unknown.
 
 # Q-OPS-5's stop rule before the second NS: a clean canary signature and equal NS
 # serials. DNS_ROLLOUT_CHECK names a command that exits 0 only when both hold; with
@@ -62,7 +62,7 @@ warp_rollout_deploy() {
             deploy_args+=(--only-older --initialize-unset)
             success_suffix=" (only older; initialize unset)"
             ;;
-        grafana|taskworker|api|connect|web|app|mcp|evs|gkm|sockets|dns|tlsedge|mxedge)
+        grafana|taskworker|api|connect|web|app|mcp|evs|gkm|sockets|dns|tlsedge|mxedge|mxedge-platform)
             deploy_args+=(--only-older)
             success_suffix=" (only older)"
             ;;
@@ -117,8 +117,13 @@ warp_rollout() {
     # hostnames to mmm (vault services.yml v26), so each wave starts mmm's
     # blocks before it brings any lb onto that routing (mmm/mmm/PLAN.md).
     # A service joins a list only with its image in run.sh: without one, every
-    # release's rollout would fail at that service.
-    staged_services=(mmm lb taskworker api connect web app mcp)
+    # release's rollout would fail at that service. A sidecar service also needs
+    # its block, a fragment in warp/services/sidecar-blocks/ that the owner applies
+    # to the vault before these branches merge to main, since warpctl deploy stops
+    # on a service with no blocks. The sidecar's take §19.11's order, mmm lb
+    # taskworker api connect web app mcp dns gkm evs sockets tlsedge mxedge, as each
+    # joins: evs now, gkm with server/cli/gkm's image (plan-OPS-small-readings #12).
+    staged_services=(mmm lb taskworker api connect web app mcp evs)
     # Gossip has no status route, while Alt and Proxy intentionally bypass the
     # load balancer. Without --only-older, a cumulative rollout would retag and
     # restart already selected unobservable blocks in every later wave.

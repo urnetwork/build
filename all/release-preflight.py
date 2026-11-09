@@ -17,7 +17,7 @@ sys.dont_write_bytecode = True
 
 SERVICES = (
     "config-updater", "grafana", "mmm", "lb", "taskworker", "api", "connect",
-    "web", "app", "mcp", "gossip", "alt", "proxy",
+    "web", "app", "mcp", "evs", "gossip", "alt", "proxy",
 )
 PARALLEL_SERVICES = 2
 PASS_SECONDS = 300

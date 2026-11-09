@@ -18,7 +18,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 SERVICES = ("config-updater", "grafana", "mmm", "lb", "taskworker", "api", "connect",
-            "web", "app", "mcp", "gossip", "alt", "proxy")
+            "web", "app", "mcp", "evs", "gossip", "alt", "proxy")
 
 FAKE_PROVIDER = r'''
 import fcntl, json, os, pathlib, signal, subprocess, sys, time
@@ -220,7 +220,7 @@ exit "$code"
                     expected = ["deploy", "main", name, "9999.0.0+0", "--percent=100", "--timeout", "0"]
                     if name == "mmm":
                         expected += ["--only-older", "--initialize-unset"]
-                    elif name in ("grafana", "taskworker", "api", "connect", "web", "app", "mcp"):
+                    elif name in ("grafana", "taskworker", "api", "connect", "web", "app", "mcp", "evs"):
                         expected += ["--only-older"]
                     expected += ["--preflight"]
                     if phase == "future":
