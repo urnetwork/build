@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ur.app's entitlements (D-CORE-12; plan-REPO-small-readings #7 and #8), signed in by codesign
+     outside Xcode, so every value is literal: Xcode's AppIdentifierPrefix expands only inside Xcode. The
+     keychain group is newOsKeyStore's (CORE-M1-03). ur claims both app groups, the bundle's own and the
+     direct-download app's (apple/app/network/network-macOS-direct.entitlements), or a direct-download app
+     cannot reach the daemon's app-group socket. Each is restricted, so the `ur Download` profile embedded
+     in the bundle must grant it, or the process is killed at launch. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.application-identifier</key>
+	<string>6BGU69Q742.network.ur.cli</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>6BGU69Q742</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>6BGU69Q742.network.ur.cli</string>
+	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>6BGU69Q742.group.network.ur</string>
+		<string>6BGU69Q742.group.com.bringyour.urnetwork</string>
+	</array>
+</dict>
+</plist>

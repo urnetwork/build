@@ -1,0 +1,18 @@
+#!/bin/sh
+# ur's .pkg postinstall (DESIGN.md §4.10, D-CORE-12; plan-REPO-small-readings #7): /usr/local/bin/ur
+# and /usr/local/bin/git-remote-ur as links to the bundle's executable at /usr/local/lib/ur/ur.app.
+# Links, never copies: a copied binary finds no embedded profile beside it, and its restricted
+# entitlements kill it at launch. git runs git-remote-ur from PATH, and ur dispatches on argv[0].
+# Installer passes the target volume as $3; a link names the path as that volume sees itself.
+#
+# SPDX-License-Identifier: MPL-2.0
+set -eu
+
+target_volume="${3:-/}"
+executable=/usr/local/lib/ur/ur.app/Contents/MacOS/ur
+bin_directory="${target_volume%/}/usr/local/bin"
+
+mkdir -p "$bin_directory"
+for name in ur git-remote-ur; do
+  ln -sfn "$executable" "$bin_directory/$name"
+done

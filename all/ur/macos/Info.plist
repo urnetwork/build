@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ur.app's Info.plist (DESIGN.md §4.10, D-CORE-12; plan-REPO-small-readings #7). build-ur-macos.sh
+     fills @VERSION_BASE@ and @VERSION_RELEASE@, EXTERNAL_WARP_VERSION split at its last hyphen. ur is a
+     command-line tool in a bundle only so its restricted entitlements have a profile to stand on, so it
+     shows no Dock icon. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>network.ur.cli</string>
+	<key>CFBundleName</key>
+	<string>ur</string>
+	<key>CFBundleExecutable</key>
+	<string>ur</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION_BASE@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION_RELEASE@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>

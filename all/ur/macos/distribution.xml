@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ur's .pkg (DESIGN.md §4.10; REPO-M1-02): one component, ur.app at /usr/local/lib/ur, for one
+     architecture. build-ur-macos.sh fills @ARCH@ (x86_64 or arm64) and @VERSION_BASE@. -->
+<installer-gui-script minSpecVersion="2">
+    <title>ur</title>
+    <options customize="never" require-scripts="false" hostArchitectures="@ARCH@"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="network.ur.cli"/>
+    </choices-outline>
+    <choice id="network.ur.cli" visible="false" title="ur">
+        <pkg-ref id="network.ur.cli.pkg"/>
+    </choice>
+    <pkg-ref id="network.ur.cli.pkg" version="@VERSION_BASE@" onConclusion="none">ur-component.pkg</pkg-ref>
+</installer-gui-script>
