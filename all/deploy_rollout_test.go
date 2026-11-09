@@ -463,8 +463,30 @@ func TestRolloutClassesSidecarServices(t *testing.T) {
 	}
 }
 
-// A class this function cannot honor fails closed. dnsedge's is one host at a time with a stop
-// rule, and this deploys every host at once, so it stays unknown until that rollout exists.
+// dnsedge-1 deploys its one host in one pass, and dnsedge-2 only once Q-OPS-5's stop rule reads the
+// first NS clean: with nothing to read the canary and serials, or a check that fails, it stops with
+// nothing deployed; a passing check, or an operator's override by name, deploys it.
+func TestRolloutDeploysTheDnsEdgesOneHostAtATime(t *testing.T) {
+	result := runRollout(t, "SINGLE_SERVICE=dnsedge-1", "SINGLE_PERCENT=100")
+	if want := []string{deployEvent("dnsedge-1", 100, false), deployMessage("dnsedge-1", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
+		t.Errorf("dnsedge-1 exit = %d, events = %q, want %q; output=%s", result.exitCode, result.events, want, result.output)
+	}
+	for _, stopped := range [][]string{{}, {"DNS_ROLLOUT_CHECK=false"}} {
+		result := runRollout(t, append([]string{"SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100"}, stopped...)...)
+		if result.exitCode != 65 || len(result.events) != 0 {
+			t.Errorf("dnsedge-2 with %q: exit = %d, events = %q, want 65 and nothing deployed", stopped, result.exitCode, result.events)
+		}
+	}
+	for _, clean := range []string{"DNS_ROLLOUT_CHECK=true", "ROLLOUT_STOP_OVERRIDE=dnsedge-2"} {
+		result := runRollout(t, "SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100", clean)
+		if want := []string{deployEvent("dnsedge-2", 100, false), deployMessage("dnsedge-2", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
+			t.Errorf("dnsedge-2 with %s: exit = %d, events = %q, want %q; output=%s", clean, result.exitCode, result.events, want, result.output)
+		}
+	}
+}
+
+// A class this function cannot honor fails closed. The bare role name dnsedge names no service, since
+// each NS is a service of its own, and mxedge-platform is not classed.
 func TestRolloutRefusesAServiceWithoutAClass(t *testing.T) {
 	for _, service := range []string{"dnsedge", "mxedge-platform", "not-a-service"} {
 		result := runRollout(t, "SINGLE_SERVICE="+service)

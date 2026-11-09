@@ -8,10 +8,29 @@
 # classed with them, to deploy in one pass.
 #
 # Sidecar's services are classed here ahead of their images, as §19.11 of its
-# design has them. dnsedge deliberately has no class yet: it deploys one host at a
-# time and stops on a canary-signature failure or an NS serial divergence, and this
-# function would deploy every host at once. It stays an unknown service until that
-# rollout exists, as does mxedge-platform, which §19.11 does not class.
+# design has them. dnsedge runs as two services, dnsedge-1 and dnsedge-2, one host
+# each (warp-w5w6-dnsedge-one-host), so a release never takes both NS at once:
+# each deploys in one pass, and dnsedge-2 only once dns_rollout_stop_check says the
+# first serves clean (Q-OPS-5). The bare role name dnsedge stays unknown, as does
+# mxedge-platform, which §19.11 does not class.
+
+# Q-OPS-5's stop rule before the second NS: a clean canary signature and equal NS
+# serials. DNS_ROLLOUT_CHECK names a command that exits 0 only when both hold; with
+# none set nothing can read them, which stops the step, as a burn state the monitor
+# cannot read does (plan-OPS-small-readings #11). An operator who has checked by
+# hand overrides by naming the service in ROLLOUT_STOP_OVERRIDE.
+dns_rollout_stop_check() {
+    local service="$1"
+    if [[ " ${ROLLOUT_STOP_OVERRIDE:-} " == *" $service "* ]]; then
+        printf '%s: the stop rule is overridden by name\n' "$service" >&2
+        return 0
+    fi
+    if [[ -z "${DNS_ROLLOUT_CHECK:-}" ]]; then
+        printf '%s waits: no DNS_ROLLOUT_CHECK reads the canary signature and NS serials\n' "$service" >&2
+        return 1
+    fi
+    ${(z)DNS_ROLLOUT_CHECK}
+}
 warp_rollout_deploy() {
     local service="$1"
     local percent="$2"
@@ -28,7 +47,13 @@ warp_rollout_deploy() {
         --timeout 0
     )
     case "$service" in
-        config-updater|lb|proxy|gossip|alt|smtpedge)
+        config-updater|lb|proxy|gossip|alt|smtpedge|dnsedge-1)
+            ;;
+        dnsedge-2)
+            # a preflight checks the class alone; the stop rule reads the first NS at deploy time
+            if [[ "${3:-}" != preflight ]] && ! dns_rollout_stop_check "$service"; then
+                return 65
+            fi
             ;;
         mmm)
             # New MMM blocks have no selector or old-LB status route. The
