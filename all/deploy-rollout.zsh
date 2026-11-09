@@ -15,7 +15,9 @@
 # first serves clean (Q-OPS-5). The bare role name dnsedge stays unknown.
 
 # Q-OPS-5's stop rule before the second NS: a clean canary signature and equal NS
-# serials. DNS_ROLLOUT_CHECK names a command that exits 0 only when both hold; with
+# serials. DNS_ROLLOUT_CHECK names a command that exits 0 only when both hold, such
+# as `monitor check-burn --service=dnsedge-1`, which reads them from the dns canary
+# (SIGNALS.md §30); with
 # none set nothing can read them, which stops the step, as a burn state the monitor
 # cannot read does (plan-OPS-small-readings #11). An operator who has checked by
 # hand overrides by naming the service in ROLLOUT_STOP_OVERRIDE.
