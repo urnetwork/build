@@ -107,7 +107,7 @@ first_build_line=$(grep -n '^warpctl stage version' "$run_sh" | head -n 1 | cut 
 # are installed under their UUID next to the identity import, and every name
 # is proved for the signing certificate before the release starts and again
 # in the region
-grep -q '^MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")$' "$run_sh" || fail "required profile names changed"
+grep -q '^MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download" "ur Download")$' "$run_sh" || fail "required profile names changed"
 grep -q '^MACOS_PROFILES_SOURCE_DIR="\$HOME/.provisionprofiles"$' "$run_sh" || fail "profiles are not read from ~/.provisionprofiles"
 grep -q '^MACOS_PROFILES_INSTALL_DIR="\$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"$' "$run_sh" || fail "profiles are not installed into Xcode's profile directory"
 install_fn=$(sed -n '/^macos_install_provisioning_profiles () {/,/^}/p' "$run_sh")
