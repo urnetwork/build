@@ -1,0 +1,23 @@
+# ur's winget installer manifest (sidecar DESIGN.md §4.10, §4.18), rendered by
+# build/all/ur-channels.zsh from a promoted release's signed SHA256SUMS: the signed zip, portable, with
+# git-remote-ur under its own alias so that git finds it on PATH.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+PackageIdentifier: URnetwork.ur
+PackageVersion: 2026.11.6-1234567
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: ur.exe
+    PortableCommandAlias: ur
+  - RelativeFilePath: git-remote-ur.exe
+    PortableCommandAlias: git-remote-ur
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/urnetwork/build/releases/download/v2026.11.6-1234567/ur-2026.11.6-1234567-windows-amd64.zip
+    InstallerSha256: 89C40E08FA28B2E4FC53DA1BCFB0997F431A547A1C69BAA3372C182574C31C8E
+  - Architecture: arm64
+    InstallerUrl: https://github.com/urnetwork/build/releases/download/v2026.11.6-1234567/ur-2026.11.6-1234567-windows-arm64.zip
+    InstallerSha256: F809D3E53C53B717A37F9A65593AA7D1398DF5BF796B84FF5546561F13F60E4D
+ManifestType: installer
+ManifestVersion: 1.6.0

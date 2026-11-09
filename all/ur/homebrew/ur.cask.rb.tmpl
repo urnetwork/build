@@ -1,0 +1,22 @@
+# ur's Homebrew cask for macOS (sidecar DESIGN.md §4.10, §4.18), rendered by build/all/ur-channels.zsh
+# from a promoted release's signed SHA256SUMS. It installs the notarized ur.app as the release built
+# it, never a bare binary, since ur's restricted entitlements need the bundle's embedded profile
+# (D-CORE-12), and links ur and git-remote-ur to its executable in Homebrew's bin directory. That is
+# not /usr/local/bin on Apple silicon, so harness configs take ur's own absolute path.
+cask "ur" do
+  arch arm: "arm64", intel: "amd64"
+
+  version "@VERSION@"
+  sha256 arm:   "@SHA256_DARWIN_ARM64@",
+         intel: "@SHA256_DARWIN_AMD64@"
+
+  url "https://github.com/urnetwork/build/releases/download/v#{version}/ur-#{version}-darwin-#{arch}.tar.gz"
+  name "ur"
+  desc "Command-line client and git remote helper for recURd"
+  homepage "https://ur.io/recurd"
+
+  depends_on macos: ">= :monterey"
+
+  binary "ur.app/Contents/MacOS/ur", target: "ur"
+  binary "ur.app/Contents/MacOS/ur", target: "git-remote-ur"
+end

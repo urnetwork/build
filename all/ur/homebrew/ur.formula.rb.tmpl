@@ -1,0 +1,30 @@
+# ur's Homebrew formula for Linux (sidecar DESIGN.md §4.10, §4.18), rendered by
+# build/all/ur-channels.zsh from a promoted release's signed SHA256SUMS. Linux only: on macOS ur is the
+# cask's bundle, since a formula's bare binary would lose the bundle's profile, and with it the
+# keychain (D-CORE-12). It installs the release's static binary and never builds from source.
+class Ur < Formula
+  desc "Command-line client and git remote helper for recURd"
+  homepage "https://ur.io/recurd"
+  version "@VERSION@"
+  license "MPL-2.0"
+
+  on_intel do
+    url "https://github.com/urnetwork/build/releases/download/v@VERSION@/ur-@VERSION@-linux-amd64.tar.gz"
+    sha256 "@SHA256_LINUX_AMD64@"
+  end
+  on_arm do
+    url "https://github.com/urnetwork/build/releases/download/v@VERSION@/ur-@VERSION@-linux-arm64.tar.gz"
+    sha256 "@SHA256_LINUX_ARM64@"
+  end
+
+  depends_on :linux
+
+  def install
+    bin.install "ur"
+    bin.install_symlink "ur" => "git-remote-ur"
+  end
+
+  test do
+    assert_match "ur ", shell_output("#{bin}/ur --version")
+  end
+end

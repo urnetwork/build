@@ -1,0 +1,8 @@
+# ur's winget version manifest (sidecar DESIGN.md §4.10, §4.18), rendered by build/all/ur-channels.zsh.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+
+PackageIdentifier: URnetwork.ur
+PackageVersion: 2026.11.6-1234567
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0
