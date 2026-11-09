@@ -118,6 +118,41 @@ cd all && go test -tags sidecar_release_fixture -timeout 60m -run Fixture .
 before a version is allocated. Sidecar's `make check` holds its own idea of this
 transformation to these same functions (`check/release_step_test.go`).
 
+## The sidecar branches
+
+Every repository the sidecar work touches has a `sidecar` branch (DESIGN.md §4.8).
+`all/sidecar-branches.zsh` keeps them one commit set, over the monoroot of sibling
+checkouts that holds this one (`SIDECAR_BRANCHES_ROOT` names another):
+
+- `check` reports each branch, the pins and the commit-msg scan, and changes nothing.
+- `repin` writes each sibling's `sidecar` commit into server's
+  `local/source-graph/lock.yml` and this repository's gitlinks, and commits both, so
+  server's `TestSidecarPinsEqualBuildSubmodules` holds. It refuses a sibling with
+  uncommitted changes, one checked out off its `sidecar` branch, and a commit no
+  branch holds, since a pin must stay reachable.
+- `merge-in` merges `main` into `sidecar` in §4.8's order (connect, sidecar, sdk, sn,
+  server, then warp, config, vault, xops, mmm and minio, whose `master` plays `main`,
+  then build), stops at the first conflict and names the repository, and re-pins
+  once every merge is in.
+- `merge-out <gate> <commit-set>` merges the commit set a gate recorded (the
+  "Commit set" table of server's `local/sidecar-gate` report, or `<repo> <commit>`
+  lines) into each `main` in the same order, connect first, never the tip. It merges
+  nothing until every commit passes `.githooks/commit-msg --scan main..<commit>` and
+  sidecar's `TestX9ReadyForMain` passes at the gate over the recorded sidecar and
+  connect.
+- `scan` runs the commit-msg scan of `main..sidecar` in every repository.
+
+It merges and never rebases, since a rebase orphans pinned commits and skips the
+commit-msg hook, and it never pushes: each command that commits prints the pushes
+for the owner. Until the owner's first re-pin, server's lock still holds main's pins
+beside this repository's, so `TestSidecarPinsEqualBuildSubmodules` fails, as the
+source graph's checkout tests fail on anything that moved since the last re-pin.
+The tests run on fixture repositories and need this checkout's real path:
+
+```sh
+cd all && go test -run 'MergeIn|MergeOut|Repin|CheckReports|ScanReports|ScriptNeverPushes' .
+```
+
 ## Reproducible builds
 
 Builds use the semver `<version>-<version_code>`. Each semver has a corresponding tag in each repo, `v<version>-<version_code>`. You can check out the `build` repo at this tag to get all the repos at the correct tag also.
