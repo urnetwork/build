@@ -59,6 +59,22 @@ builder_message() {
     record_event message "$1"
 }
 
+# the burn check: clear unless BURN_AT_CHECK names the call that reports a burn
+slo_burn_check() {
+    local check_index=0
+    if [[ -r "$sample_count_file.burn" ]]; then
+        read check_index < "$sample_count_file.burn"
+    fi
+    (( check_index += 1 ))
+    printf '%d\n' "$check_index" > "$sample_count_file.burn"
+    record_event check-burn "$@"
+    if [[ -n "${BURN_AT_CHECK:-}" && "$check_index" = "$BURN_AT_CHECK" ]]; then
+        return 1
+    fi
+    return 0
+}
+SLO_BURN_CHECK=${SLO_BURN_CHECK-slo_burn_check}
+
 sleep() {
     record_event sleep "$1"
 }
@@ -204,6 +220,8 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 	// mmm leads every wave, so no lb routes the mmm sites before mmm runs.
 	services := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "evs"}
 	for _, percent := range []int{25, 50, 75, 100} {
+		// D-OPS-9: each wave reads the sidecar services' burn before it deploys
+		expected = append(expected, "check-burn\t--service=evs")
 		for _, service := range services {
 			onlyOlder := service != "lb"
 			expected = append(
@@ -625,5 +643,78 @@ func TestRolloutStagesServicesInTheDesignOrder(t *testing.T) {
 		if !slices.Contains(wave, "evs") {
 			t.Errorf("the %d%% wave leaves evs out: %q", percent, wave)
 		}
+	}
+}
+
+// D-OPS-9's stop: a burn read before a wave stops that wave, and only that, before any of it deploys, the
+// waves before it standing.
+func TestRolloutBurnStopsTheNextWaveAndOnlyThat(t *testing.T) {
+	result := runRollout(t, "BURN_AT_CHECK=2")
+	if result.exitCode != 65 {
+		t.Fatalf("rollout exit = %d, want 65; output=%s", result.exitCode, result.output)
+	}
+	if !slices.Contains(result.events, deployEvent("evs", 25, true)) {
+		t.Errorf("the 25%% wave before the burn did not deploy: %q", result.events)
+	}
+	for _, event := range result.events {
+		if strings.Contains(event, "--percent=50") || strings.Contains(event, "--percent=75") {
+			t.Errorf("the stopped wave deployed: %s", event)
+		}
+	}
+	if last := result.events[len(result.events)-1]; last != "check-burn\t--service=evs" {
+		t.Errorf("the rollout went on past the burn: %s", last)
+	}
+	if !strings.Contains(result.output, "the 50% wave stops: evs") {
+		t.Errorf("output = %q", result.output)
+	}
+}
+
+// A burn nothing can read stops the first wave, nothing deployed; an operator's override by name passes
+// the stop and is posted.
+func TestRolloutUnknownBurnStopsAndAnOverridePassesLogged(t *testing.T) {
+	result := runRollout(t, "SLO_BURN_CHECK=")
+	if result.exitCode != 65 || !strings.Contains(result.output, "evs waits: no SLO_BURN_CHECK reads its SLO burn") {
+		t.Fatalf("unknown: exit = %d; output=%s", result.exitCode, result.output)
+	}
+	for _, event := range result.events {
+		if strings.HasPrefix(event, "warpctl\tdeploy\tmain\tmmm") {
+			t.Errorf("a wave deployed with its burn unread: %s", event)
+		}
+	}
+	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE=evs")
+	if result.exitCode != 0 {
+		t.Fatalf("override: exit = %d; output=%s", result.exitCode, result.output)
+	}
+	overrides := 0
+	for _, event := range result.events {
+		if event == "message\tmain evs: the SLO burn stop is overridden by name" {
+			overrides++
+		}
+	}
+	if overrides != 4 || !slices.Contains(result.events, deployEvent("evs", 100, true)) {
+		t.Errorf("override: %d overrides posted, events %q", overrides, result.events)
+	}
+}
+
+// Only the sidecar's services are gated: a release with none of them in its waves reads no burn.
+func TestRolloutGatesOnlyTheSidecarServices(t *testing.T) {
+	result := runRollout(t, "SINGLE_SERVICE=api")
+	for _, event := range result.events {
+		if strings.HasPrefix(event, "check-burn") {
+			t.Errorf("a single deploy read a burn: %s", event)
+		}
+	}
+	gated := runRollout(t)
+	checks := 0
+	for _, event := range gated.events {
+		if strings.HasPrefix(event, "check-burn") {
+			checks++
+			if event != "check-burn\t--service=evs" {
+				t.Errorf("a burn read for %s", event)
+			}
+		}
+	}
+	if checks != 4 {
+		t.Errorf("%d burn reads, want one a wave", checks)
 	}
 }

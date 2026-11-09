@@ -31,6 +31,32 @@ dns_rollout_stop_check() {
     fi
     ${(z)DNS_ROLLOUT_CHECK}
 }
+# The sidecar's services, whose SLO burn gates every rollout wave they are in
+# (D-OPS-9, §19.8; OPS-M3-02).
+sidecar_burn_gated_services=(evs gkm sockets dns tlsedge mxedge mxedge-platform smtpedge)
+
+# D-OPS-9's stop before a wave: SLO_BURN_CHECK names a command that takes
+# --service=<svc> and exits 0 only while the service's SLOs read clear, which is
+# server/cli/monitor's `monitor check-burn` with the monitor's settings. With none
+# set nothing reads the burn, which stops the step, as a burn the monitor cannot
+# read does (plan-OPS-small-readings #11); so does a service whose SLOs cannot be
+# read yet, such as one under 30 days old. An operator who has checked by hand
+# overrides by naming the service in ROLLOUT_STOP_OVERRIDE, and the override is
+# posted with the rollout's messages.
+warp_rollout_gate() {
+    local service="$1"
+    if [[ " ${ROLLOUT_STOP_OVERRIDE:-} " == *" $service "* ]]; then
+        printf '%s: the SLO burn stop is overridden by name\n' "$service" >&2
+        builder_message "${BUILD_ENV} ${service}: the SLO burn stop is overridden by name"
+        return 0
+    fi
+    if [[ -z "${SLO_BURN_CHECK:-}" ]]; then
+        printf '%s waits: no SLO_BURN_CHECK reads its SLO burn\n' "$service" >&2
+        return 1
+    fi
+    ${(z)SLO_BURN_CHECK} --service="$service"
+}
+
 warp_rollout_deploy() {
     local service="$1"
     local percent="$2"
@@ -140,6 +166,17 @@ warp_rollout() {
     warp_rollout_deploy grafana 100 || return $?
 
     for percent in 25 50 75 100; do
+        # D-OPS-9: a sidecar service burning its budget, or whose burn cannot
+        # be read, stops this wave before any of it deploys; the waves before
+        # it stand
+        for service in "${staged_services[@]}"; do
+            if (( ${sidecar_burn_gated_services[(Ie)$service]} )); then
+                if ! warp_rollout_gate "$service"; then
+                    printf 'the %s%% wave stops: %s\n' "$percent" "$service" >&2
+                    return 65
+                fi
+            fi
+        done
         for service in "${staged_services[@]}"; do
             warp_rollout_deploy "$service" "$percent" || return $?
         done
