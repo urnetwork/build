@@ -1,0 +1,18 @@
+# ur's release artifacts (DESIGN.md §4.10; plan-REPO-small-readings #9): 14 files for six targets,
+# following build/all/linux/README.md's spellings. {version} is EXTERNAL_WARP_VERSION. build-ur.sh
+# writes each, run.sh's require_ur_artifacts requires each and uploads each, and ursums lists each in
+# SHA256SUMS. The one table: a name changes here or nowhere.
+ur-{version}-darwin-amd64.tar.gz
+ur-{version}-darwin-amd64.pkg
+ur-{version}-darwin-arm64.tar.gz
+ur-{version}-darwin-arm64.pkg
+ur-{version}-linux-amd64.tar.gz
+ur-{version}-linux-arm64.tar.gz
+ur_{version}_amd64.deb
+ur_{version}_arm64.deb
+ur-{version}.x86_64.rpm
+ur-{version}.aarch64.rpm
+ur-{version}-x86_64.pkg.tar.zst
+ur-{version}-aarch64.pkg.tar.zst
+ur-{version}-windows-amd64.zip
+ur-{version}-windows-arm64.zip

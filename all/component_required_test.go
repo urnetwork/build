@@ -44,13 +44,19 @@ func componentRegion(t *testing.T, start, end string) string {
 	return source[startIndex : startIndex+len(start)+endIndex]
 }
 
-// Helpers remain production-owned; optional lookup permits the before-fix controls.
+// Helpers remain production-owned; optional lookup permits the before-fix controls. run.sh sources
+// macos-notarize.zsh, so its function is read as run.sh's own.
 func componentFunctions(t *testing.T, names ...string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	notarize, err := os.ReadFile(filepath.Join(rolloutRoot(t), "macos-notarize.zsh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, notarize...)
 	var source strings.Builder
 	for _, name := range names {
 		pattern := regexp.MustCompile(`(?ms)^` + regexp.QuoteMeta(name) + ` \(\) \{\n.*?^\}\n`)
@@ -714,7 +720,7 @@ func macosDirectRegion(t *testing.T) string {
 // built, notarized, stapled and Gatekeeper-assessed, then published twice --
 // the updater zip (ditto --keepParent of the stapled app) first, the DMG
 // second -- each upload scanned. "scan" and "publish" therefore occur twice.
-var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "profile:splittunnel", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "assess-app", "zip-asset", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.zip", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
+var macosDirectSteps = []string{"identity", "profile:download", "profile:extension", "profile:splittunnel", "profile:ur", "clean", "archive", "export", "zip", "notarize-app", "staple-app", "assess-app", "zip-asset", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.zip", "stage", "dmg", "sign-dmg", "notarize-dmg", "staple-dmg", "assess-dmg", "scan", "publish", "asset:URnetwork-0.0.0-123-macos.dmg", "release-continued"}
 
 // The synthetic Developer ID Application certificate: the identity stub prints
 // its SHA-1 (as security find-identity does) and the healthy profile fixtures
@@ -723,15 +729,15 @@ const macosDirectCertificate = "synthetic developer id certificate"
 
 var macosDirectCertificateSha1 = fmt.Sprintf("%X", sha1.Sum([]byte(macosDirectCertificate)))
 
-// Manual signing: the three Developer ID profiles are already installed (plain
-// plist fixtures; the security stub "decodes" them by printing them).
-// DIRECT_PROFILE_MODE breaks the extension profile: missing, expired,
-// wrong-name or wrong-cert.
+// Manual signing: the four Developer ID profiles, ur's included (REPO-M1-02),
+// are already installed (plain plist fixtures; the security stub "decodes"
+// them by printing them). DIRECT_PROFILE_MODE breaks the extension profile and
+// UR_PROFILE_MODE ur's: missing, expired, wrong-name or wrong-cert.
 const macosDirectSetup = `
 APPLE_API_KEY_P8="$BUILD_HOME/AuthKey_synthetic-key.p8"
 printf 'synthetic p8\n' > "$APPLE_API_KEY_P8"
 NOTARY_STATUS="${NOTARY_STATUS:-Accepted}"
-MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download" "ur Download")
 MACOS_PROFILES_SOURCE_DIR="$BUILD_HOME/provisionprofiles"
 MACOS_PROFILES_INSTALL_DIR="$BUILD_HOME/profiles"
 mkdir -p "$MACOS_PROFILES_INSTALL_DIR"
@@ -746,6 +752,13 @@ case "${DIRECT_PROFILE_MODE:-healthy}" in
     expired) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2020-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
     wrong-name) write_profile extension "URnetwork Extension" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
     wrong-cert) write_profile extension "URnetwork Extension Download" 22222222-2222-2222-2222-222222222222 2099-01-01T00:00:00Z b3RoZXIgY2VydGlmaWNhdGU= ;;
+esac
+case "${UR_PROFILE_MODE:-healthy}" in
+    healthy) write_profile ur "ur Download" 44444444-4444-4444-4444-444444444444 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    missing) ;;
+    expired) write_profile ur "ur Download" 44444444-4444-4444-4444-444444444444 2020-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    wrong-name) write_profile ur "ur" 44444444-4444-4444-4444-444444444444 2099-01-01T00:00:00Z SYNTHETIC_CERT_BASE64 ;;
+    wrong-cert) write_profile ur "ur Download" 44444444-4444-4444-4444-444444444444 2099-01-01T00:00:00Z b3RoZXIgY2VydGlmaWNhdGU= ;;
 esac
 security() {
     if [[ "$1" == cms ]]; then

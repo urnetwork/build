@@ -283,6 +283,19 @@ macos_developer_id_identity () {
     echo "$identity"
 }
 
+# The "Developer ID Installer" identity that signs ur's .pkg (REPO-M1-02), as
+# its SHA-1. An installer certificate signs packages and not code, so it is not
+# under the codesigning policy macos_developer_id_identity reads.
+macos_developer_id_installer_identity () {
+    local identity
+    identity=$(security find-identity -v | grep "Developer ID Installer" | head -n 1 | awk '{ print $2 }')
+    if [ ! "$identity" ]; then
+        builder_message "error: no 'Developer ID Installer' identity in the signing keychains, so ur's .pkg cannot be signed. Import ~/.identity-installer.p12 (Account Holder creates the certificate; REMOTEBUILD.md) and rerun" >&2
+        return 1
+    fi
+    echo "$identity"
+}
+
 # Developer ID provisioning profiles for the macOS direct-download build. The
 # URnetworkDirect scheme signs MANUALLY (apple/app/ExportOptions-DeveloperID.plist
 # is signingStyle manual with a provisioningProfiles map), so its xcodebuild
@@ -299,10 +312,11 @@ macos_developer_id_identity () {
 # above -> pick the "Developer ID Application" certificate (the one assembled
 # by all/make-apple-dist-identity.sh developer-id) -> name it exactly as above
 # -> download the .provisionprofile into ~/.provisionprofiles/ on this host.
+#   "ur Download"                     -> network.ur.cli (ur.app, REPO-M1-02)
 # Profiles expire (yearly). The gate below (macos_require_direct_profiles)
 # fails the build before anything is built when any profile is missing,
 # expired, or was not issued for the Developer ID Application identity.
-MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download")
+MACOS_DIRECT_PROFILE_NAMES=("URnetwork Download" "URnetwork Extension Download" "URnetwork Split Tunnel Download" "ur Download")
 MACOS_PROFILES_SOURCE_DIR="$HOME/.provisionprofiles"
 MACOS_PROFILES_INSTALL_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 
@@ -476,6 +490,54 @@ require_linux_artifacts () {
         *) builder_message "error: invalid Flatpak architecture plan"; return 2 ;;
     esac
     require_build_artifacts "$output_directory/URnetwork-${version}-${flatpak_arch}.flatpak"
+}
+
+# ur's 14 release artifacts (DESIGN.md §4.10; plan-REPO-small-readings #9), from
+# all/ur/artifacts.txt, the one table, with {version} filled.
+ur_artifact_names () {
+    local template table="$BUILD_HOME/all/ur/artifacts.txt"
+    if [ ! -r "$table" ]; then
+        builder_message "error: the ur artifact table $table is not readable"
+        return 1
+    fi
+    while IFS= read -r template; do
+        [[ -z "$template" || "$template" == \#* ]] && continue
+        print -r -- "${template//\{version\}/$1}"
+    done < "$table"
+}
+
+# Every ur artifact of the table, each nonempty.
+require_ur_artifacts () {
+    local output_directory="$1" version="$2" name
+    local -a names
+    names=("${(@f)$(ur_artifact_names "$version")}") || return 1
+    if [ "${#names}" -ne 14 ]; then
+        builder_message "error: the ur artifact table names ${#names} files, and six targets make 14"
+        return 2
+    fi
+    for name in "${names[@]}"; do
+        require_build_artifacts "$output_directory/$name" || return $?
+    done
+}
+
+# ur's step needs its scripts and sidecar's cli build before hours of other
+# work, so a release that cannot ship ur stops at its start.
+ur_release_preflight () {
+    local script
+    for script in build-ur.sh build-ur-macos.sh build-ur-linux.sh build-ur-windows.sh ur/distro-smoke.sh macos-notarize.zsh; do
+        if [ ! -x "$BUILD_HOME/all/$script" ] && [[ "$script" != *.zsh || ! -r "$BUILD_HOME/all/$script" ]]; then
+            builder_message "error: all/$script is missing or not executable, so ur cannot be released"
+            return 1
+        fi
+    done
+    if [ "$(ur_artifact_names 0.0.0-0 | wc -l | tr -d ' ')" != 14 ]; then
+        builder_message "error: all/ur/artifacts.txt does not name ur's 14 artifacts"
+        return 1
+    fi
+    if ! grep -q '^build:' "$BUILD_HOME/sidecar/cli/Makefile" 2>/dev/null; then
+        builder_message "error: sidecar/cli/Makefile has no build target, so ur cannot be built"
+        return 1
+    fi
 }
 
 export BUILD_HOME=`realpath ..`
@@ -662,6 +724,11 @@ MACOS_DIRECT_IDENTITY=$(macos_developer_id_identity)
 error_trap 'macos direct: Developer ID Application identity'
 macos_require_direct_profiles "$MACOS_DIRECT_IDENTITY"
 error_trap 'macos direct: Developer ID provisioning profiles'
+# ur's .pkg (REPO-M1-02) is signed with a "Developer ID Installer" identity;
+# its bundle takes the Application identity and the `ur Download` profile
+# proved just above.
+UR_INSTALLER_IDENTITY=$(macos_developer_id_installer_identity)
+error_trap 'ur: Developer ID Installer identity'
 
 
 git_main () {
@@ -828,6 +895,8 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 error_trap 'pull connect'
 (cd $BUILD_HOME/sidecar && git_main)
 error_trap 'pull sidecar'
+ur_release_preflight
+error_trap 'ur: release preflight'
 # gVisor's Go-consumable source lives on the fork's go branch. Keep its
 # module/import path gvisor.dev/gvisor; release consumers use an immutable
 # fork revision, while local checkouts replace it with this sibling source.
@@ -2781,36 +2850,9 @@ macos_dmg_size_mb () {
     echo "$size_mb"
 }
 
-# macos_notarize_and_staple <path> — submit an .app (zipped for the upload) or
-# a .dmg to Apple's notary service with the App Store Connect API key, wait for
-# the verdict, require "Accepted" (a non-accepted verdict is a failure even
-# when notarytool exits 0), then staple the ticket to the path.
-macos_notarize_and_staple () {
-    local target="$1" submission="$1" verdict verdict_status
-    if [ ! -f "$APPLE_API_KEY_P8" ]; then
-        builder_message "error: notarytool needs the App Store Connect API key AuthKey_${APPLE_API_KEY}.p8 in ~/.private_keys, ~/private_keys or ~/.appstoreconnect/private_keys"
-        return 1
-    fi
-    if [ -d "$target" ]; then
-        submission="${target%.app}-notarize.zip"
-        rm -f "$submission"
-        ditto -c -k --keepParent "$target" "$submission" || return $?
-    fi
-    verdict=$(xcrun notarytool submit "$submission" --key "$APPLE_API_KEY_P8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait 2>&1)
-    verdict_status=$?
-    echo "$verdict"
-    if [ $verdict_status != 0 ]; then
-        return $verdict_status
-    fi
-    if ! echo "$verdict" | grep -q 'status: Accepted'; then
-        builder_message "error: notarization of $target was not accepted"
-        return 1
-    fi
-    if [ "$submission" != "$target" ]; then
-        rm -f "$submission"
-    fi
-    xcrun stapler staple "$target"
-}
+# macos_notarize_and_staple lives in all/macos-notarize.zsh, which build-ur-macos.sh sources too.
+source "$BUILD_HOME/all/macos-notarize.zsh"
+error_trap 'load macOS notarization'
 
 # Headless provisioning auth (REMOTEBUILD.md): hand -allowProvisioningUpdates the
 # App Store Connect API key explicitly (Xcode 13+) so profile downloads never
@@ -3237,6 +3279,48 @@ fi
 # Upload releases to testing channels
 
 builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+
+# =============================================================================
+# ur, the sidecar's command (DESIGN.md §4.10; REPO-M1-01 to REPO-M1-03).
+# all/build-ur.sh builds it for six targets from sidecar/cli and makes the 14
+# files of all/ur/artifacts.txt: the notarized ur.app's .tar.gz and .pkg (the
+# Installer identity and the `ur Download` profile proved at the start), the
+# Linux .tar.gz, .deb, .rpm and .pkg.tar.zst (nfpm in the daemon image
+# build-linux.sh built above, then installed on four distributions with no
+# network), and the Windows .zip signed in the VM build-windows.sh used. Every
+# file is required, and each upload runs VirusTotal.
+# =============================================================================
+
+UR_OUT="${BUILD_OUT:-$BUILD_HOME/out}/ur"
+if release_build cli-ur "$UR_OUT"; then
+rm -rf "$UR_OUT"
+UR_APPLICATION_IDENTITY="$MACOS_DIRECT_IDENTITY" UR_INSTALLER_IDENTITY="$UR_INSTALLER_IDENTITY" \
+    APPLE_API_KEY_P8="$APPLE_API_KEY_P8" OUT_DIR="$UR_OUT" "$BUILD_HOME/all/build-ur.sh"
+error_trap 'ur build'
+require_ur_artifacts "$UR_OUT" "$EXTERNAL_WARP_VERSION"
+error_trap 'required ur artifacts'
+release_complete cli-ur "$UR_OUT"
+fi
+require_ur_artifacts "$UR_OUT" "$EXTERNAL_WARP_VERSION"
+error_trap 'retained required ur artifacts'
+for ur_artifact in "${(@f)$(ur_artifact_names "$EXTERNAL_WARP_VERSION")}"; do
+    github_release_upload "$ur_artifact" "$UR_OUT/$ur_artifact"
+done
+# SHA256SUMS over ur's artifacts and ur-release.json (REPO-M3-01), made once
+# every artifact is final, since notarization, stapling and Authenticode all
+# change the bytes, and uploaded after each artifact's VirusTotal scan. Nothing
+# waits for a person: the two holders sign a release's sums offline when they
+# promote it (all/ur-sign-release.zsh, all/ur-promote.zsh;
+# plan-REPO-release-signature-flow).
+UR_SUMS_OUT="${BUILD_OUT:-$BUILD_HOME/out}/ur-sums"
+rm -rf "$UR_SUMS_OUT"
+(cd "$BUILD_HOME/all" &&
+    GOWORK=off GOFLAGS= go run ./ursums -dir "$UR_OUT" -version "$EXTERNAL_WARP_VERSION" -table ur/artifacts.txt -o "$UR_SUMS_OUT")
+error_trap 'ur sums'
+github_release_upload "ur-release.json" "$UR_SUMS_OUT/ur-release.json"
+github_release_upload "SHA256SUMS" "$UR_SUMS_OUT/SHA256SUMS"
+builder_message "ur \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
 
 github_create_release

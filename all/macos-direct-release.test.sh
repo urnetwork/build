@@ -85,7 +85,7 @@ dmg_line=$(echo "$region" | grep -n 'hdiutil create' | cut -d: -f1)
 [ "$staple_line" -lt "$zip_line" ] && [ "$zip_line" -lt "$dmg_line" ] || fail "the updater zip is not made after stapling the app and before the DMG"
 
 # the notarization helper: explicit API key, --wait, an Accepted verdict, staple
-helper=$(sed -n '/^macos_notarize_and_staple () {/,/^}/p' "$run_sh")
+helper=$(sed -n '/^macos_notarize_and_staple () {/,/^}/p' "$here/macos-notarize.zsh")
 [ -n "$helper" ] || fail "macos_notarize_and_staple helper is missing"
 echo "$helper" | grep -Eq 'xcrun notarytool submit "\$submission" --key "\$APPLE_API_KEY_P8" --key-id "\$APPLE_API_KEY" --issuer "\$APPLE_API_ISSUER" --wait' || fail "notarytool submit --wait with the API key"
 echo "$helper" | grep -q "grep -q 'status: Accepted'" || fail "notarization verdict is not required to be Accepted"
