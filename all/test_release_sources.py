@@ -266,6 +266,45 @@ class RealSourceProvenance(unittest.TestCase):
         with self.assertRaisesRegex(state.Refusal,"started with tracked edits"):
             state.allowed_transition(self.root,staged,self.snapshot(),"ip-databases",VERSION,dirty)
 
+    def test_ip_transition_removes_older_arin_releases_in_the_same_commit(self):
+        # refresh_ip_databases publishes the new ARIN release and removes the
+        # older ones in one commit (server arindbctl/ARINDB.md, "Release
+        # directories"); older GeoLite2 releases are kept
+        for path in ("arindb/2026.10.14+1/arin.mmdb","arindb/2026.10.14+1/arin-old.mmdb","mmdb/2026.10.14+1/database.mmdb"):
+            self.write(self.root/"config/all"/path,"older release\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        shutil.rmtree(self.root/"config/all/arindb/2026.10.14+1")
+        self.commit(self.root/"config")
+        state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+
+    def test_ip_transition_rejects_removed_geolite_and_changed_older_arin(self):
+        for path in ("arindb/2026.10.14+1/arin.mmdb","mmdb/2026.10.14+1/database.mmdb"):
+            self.write(self.root/"config/all"/path,"older release\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        shutil.rmtree(self.root/"config/all/mmdb/2026.10.14+1")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+        self.write(self.root/"config/all/mmdb/2026.10.14+1/database.mmdb","older release\n")
+        self.write(self.root/"config/all/arindb/2026.10.14+1/arin.mmdb","rewritten older release\n")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unexpected commit/rebase"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+        # one commit that rewrites an older release instead of removing it
+        self.git(self.root/"config","reset","-q","--hard",before["config"]["head"])
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        self.write(self.root/"config/all/arindb/2026.10.14+1/arin.mmdb","rewritten older release\n")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+
     def test_exact_remote_ref_is_revalidated_and_main_may_advance(self):
         repo=self.root/"config"
         remote=self.root/"remote.git"

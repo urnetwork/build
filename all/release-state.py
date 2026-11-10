@@ -652,9 +652,15 @@ def verify_outputs(record):
 
 
 def allowed_transition(workspace, before, after, transition, version, origin):
+    # Trees whose existing paths a transition may only delete: the older
+    # release directories that the new one replaces in the same commit.
+    removable = {}
+    release = version.replace("-", "+", 1)
     if transition == "ip-databases":
-        allowed = {"config": ["all/mmdb/" + version.replace("-", "+", 1),
-                              "all/arindb/" + version.replace("-", "+", 1)]}
+        allowed = {"config": ["all/mmdb/" + release, "all/arindb/" + release]}
+        # processes read only the newest ARIN release directory (server
+        # arindbctl/ARINDB.md, "Release directories")
+        removable = {"config": ["all/arindb"]}
     elif transition == "onboarding":
         allowed = {"config": ["main/onboarding.yml"]}
     elif transition in ("fdroid-prepare", "fdroid-restore"):
@@ -675,10 +681,14 @@ def allowed_transition(workspace, before, after, transition, version, origin):
             parent = git(repo, "rev-parse", after[name]["head"] + "^").decode().strip()
             if parent != before[name]["head"]:
                 raise Refusal("source transition incorporated an unexpected commit/rebase: " + name)
-        paths = git(repo, "diff", "--name-only", "--no-renames", before[name]["head"], after[name]["head"]).decode().splitlines()
-        for path in paths:
-            if not any(path == prefix or path.startswith(prefix + "/") for prefix in allowed[name]):
-                raise Refusal("source transition changed an unrelated path: " + name + "/" + path)
+        changes = git(repo, "diff", "--name-status", "--no-renames", before[name]["head"], after[name]["head"]).decode().splitlines()
+        for change in changes:
+            status, path = change.split("\t", 1)
+            if any(path == prefix or path.startswith(prefix + "/") for prefix in allowed[name]):
+                continue
+            if status == "D" and any(path.startswith(prefix + "/") for prefix in removable.get(name, [])):
+                continue
+            raise Refusal("source transition changed an unrelated path: " + name + "/" + path)
     if transition == "fdroid-prepare":
         repo = Path(workspace) / "build/android"
         for name in allowed["build/android"]:
