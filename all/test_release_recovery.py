@@ -234,6 +234,41 @@ refresh_ip_databases() {
         self.assertEqual((artifact / "mmdb" / "GeoLite2-City.mmdb").read_text(), "geolite\n")
         self.assertEqual((self.workspace / "refresh-events").read_text().splitlines(), ["refreshed"])
 
+    def test_crypto_sanctions_canonical_stage_completes_and_resumes(self):
+        self.checkpoint_boundary()
+        source = (HERE / "run.sh").read_text()
+        stage = re.search(r'(?ms)^if release_build crypto-sanctions .*?^fi\n', source)
+        self.assertIsNotNone(stage)
+        body = r"""
+source "$BUILD_HOME/all/release-checkpoints.zsh"
+python3() { "$FIXTURE_PYTHON" -B "$WARP_HOME/checkpoint-boundary.py" "$@"; }
+error_trap() { local result=$?; if (( result != 0 )); then exit "$result"; fi; }
+refresh_crypto_sanctions() {
+    print refreshed >> "$WARP_HOME/refresh-events"
+    mkdir -p "$BUILD_OUT/crypto-sanctions/release-$WARP_VERSION/crypto"
+    print '{"btc": []}' > "$BUILD_OUT/crypto-sanctions/release-$WARP_VERSION/crypto/addresses.json"
+    print 'OFAC SDN list of 2026-11-09: btc 536' > "$BUILD_OUT/crypto-sanctions/release-$WARP_VERSION/summary.txt"
+}
+"""
+        environment = dict(os.environ, WARP_HOME=str(self.workspace), BUILD_HOME=str(HERE.parent),
+                           BUILD_OUT=str(self.workspace / "out"), WARP_VERSION=VERSION,
+                           EXTERNAL_WARP_VERSION=VERSION, FIXTURE_PYTHON=sys.executable)
+        def run():
+            return subprocess.run(["/bin/zsh", "-c", body + stage[0]], env=environment,
+                                  pass_fds=(self.fd,), capture_output=True, text=True, timeout=15)
+        first = run()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertEqual(self.manifest()["stages"]["crypto-sanctions"]["state"], "complete")
+        self.assertEqual([item["name"] for item in self.manifest()["transitions"]], ["crypto-sanctions"])
+        artifact = self.workspace / "out" / "crypto-sanctions" / ("release-" + VERSION)
+        shutil.rmtree(artifact)
+        resumed = run()
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        self.assertIn("reuse crypto-sanctions: verified", resumed.stderr)
+        self.assertEqual((artifact / "summary.txt").read_text(), "OFAC SDN list of 2026-11-09: btc 536\n")
+        self.assertEqual((artifact / "crypto" / "addresses.json").read_text(), '{"btc": []}\n')
+        self.assertEqual((self.workspace / "refresh-events").read_text().splitlines(), ["refreshed"])
+
     def test_interrupted_canonical_image_stage_never_retries_an_absent_pending_push(self):
         first = self.run_image_stage("api", "killed")
         self.assertEqual(first.returncode, -signal.SIGKILL, first.stdout + first.stderr)

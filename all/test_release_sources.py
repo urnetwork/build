@@ -305,6 +305,42 @@ class RealSourceProvenance(unittest.TestCase):
         with self.assertRaisesRegex(state.Refusal,"unrelated path"):
             state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
 
+    def test_crypto_transition_publishes_the_release_and_removes_older_ones(self):
+        self.write(self.root/"config/all/crypto/2026.10.14+1/addresses.json","{}\n")
+        self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{}\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        release=self.root/"config/all/crypto"/VERSION.replace("-","+",1)
+        self.write(release/"addresses.json","{\"btc\": []}\n")
+        self.write(release/"manifest.json","{\"format\": \"urnetwork-crypto-sanctions-1\"}\n")
+        shutil.rmtree(self.root/"config/all/crypto/2026.10.14+1")
+        self.commit(self.root/"config")
+        state.allowed_transition(self.root,before,self.snapshot(),"crypto-sanctions",VERSION,before)
+        # a kept list changes nothing, which is allowed too
+        same=self.snapshot()
+        state.allowed_transition(self.root,same,same,"crypto-sanctions",VERSION,before)
+
+    def test_crypto_transition_rejects_other_paths(self):
+        self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{}\n")
+        self.commit(self.root/"config")
+        cases={
+            "another release": lambda:self.write(self.root/"config/all/crypto/2026.10.16+1/manifest.json","{}\n"),
+            "an older release rewritten": lambda:self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{\"rewritten\": true}\n"),
+            "another resource": lambda:self.write(self.root/"config/all/arindb"/VERSION.replace("-","+",1)/"arin.mmdb","data\n"),
+            "an unrelated removal": lambda:os.remove(self.root/"config/source.txt"),
+        }
+        for name,change in cases.items():
+            with self.subTest(name=name):
+                self.git(self.root/"config","reset","-q","--hard")
+                self.git(self.root/"config","clean","-qfd")
+                before=self.snapshot()
+                self.write(self.root/"config/all/crypto"/VERSION.replace("-","+",1)/"manifest.json","{}\n")
+                change()
+                self.commit(self.root/"config")
+                with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+                    state.allowed_transition(self.root,before,self.snapshot(),"crypto-sanctions",VERSION,before)
+                self.git(self.root/"config","reset","-q","--hard",before["config"]["head"])
+
     def test_exact_remote_ref_is_revalidated_and_main_may_advance(self):
         repo=self.root/"config"
         remote=self.root/"remote.git"

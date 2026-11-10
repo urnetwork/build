@@ -661,6 +661,10 @@ def allowed_transition(workspace, before, after, transition, version, origin):
         # processes read only the newest ARIN release directory (server
         # arindbctl/ARINDB.md, "Release directories")
         removable = {"config": ["all/arindb"]}
+    elif transition == "crypto-sanctions":
+        # likewise the newest OFAC crypto address list (server cryptosanctions)
+        allowed = {"config": ["all/crypto/" + release]}
+        removable = {"config": ["all/crypto"]}
     elif transition == "onboarding":
         allowed = {"config": ["main/onboarding.yml"]}
     elif transition in ("fdroid-prepare", "fdroid-restore"):
