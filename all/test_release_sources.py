@@ -266,6 +266,81 @@ class RealSourceProvenance(unittest.TestCase):
         with self.assertRaisesRegex(state.Refusal,"started with tracked edits"):
             state.allowed_transition(self.root,staged,self.snapshot(),"ip-databases",VERSION,dirty)
 
+    def test_ip_transition_removes_older_arin_releases_in_the_same_commit(self):
+        # refresh_ip_databases publishes the new ARIN release and removes the
+        # older ones in one commit (server arindbctl/ARINDB.md, "Release
+        # directories"); older GeoLite2 releases are kept
+        for path in ("arindb/2026.10.14+1/arin.mmdb","arindb/2026.10.14+1/arin-old.mmdb","mmdb/2026.10.14+1/database.mmdb"):
+            self.write(self.root/"config/all"/path,"older release\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        shutil.rmtree(self.root/"config/all/arindb/2026.10.14+1")
+        self.commit(self.root/"config")
+        state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+
+    def test_ip_transition_rejects_removed_geolite_and_changed_older_arin(self):
+        for path in ("arindb/2026.10.14+1/arin.mmdb","mmdb/2026.10.14+1/database.mmdb"):
+            self.write(self.root/"config/all"/path,"older release\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        shutil.rmtree(self.root/"config/all/mmdb/2026.10.14+1")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+        self.write(self.root/"config/all/mmdb/2026.10.14+1/database.mmdb","older release\n")
+        self.write(self.root/"config/all/arindb/2026.10.14+1/arin.mmdb","rewritten older release\n")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unexpected commit/rebase"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+        # one commit that rewrites an older release instead of removing it
+        self.git(self.root/"config","reset","-q","--hard",before["config"]["head"])
+        for path in ("mmdb","arindb"):
+            self.write(self.root/"config/all"/path/VERSION.replace("-","+",1)/"database.mmdb","verified generated data\n")
+        self.write(self.root/"config/all/arindb/2026.10.14+1/arin.mmdb","rewritten older release\n")
+        self.commit(self.root/"config")
+        with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+            state.allowed_transition(self.root,before,self.snapshot(),"ip-databases",VERSION,before)
+
+    def test_crypto_transition_publishes_the_release_and_removes_older_ones(self):
+        self.write(self.root/"config/all/crypto/2026.10.14+1/addresses.json","{}\n")
+        self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{}\n")
+        self.commit(self.root/"config")
+        before=self.snapshot()
+        release=self.root/"config/all/crypto"/VERSION.replace("-","+",1)
+        self.write(release/"addresses.json","{\"btc\": []}\n")
+        self.write(release/"manifest.json","{\"format\": \"urnetwork-crypto-sanctions-1\"}\n")
+        shutil.rmtree(self.root/"config/all/crypto/2026.10.14+1")
+        self.commit(self.root/"config")
+        state.allowed_transition(self.root,before,self.snapshot(),"crypto-sanctions",VERSION,before)
+        # a kept list changes nothing, which is allowed too
+        same=self.snapshot()
+        state.allowed_transition(self.root,same,same,"crypto-sanctions",VERSION,before)
+
+    def test_crypto_transition_rejects_other_paths(self):
+        self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{}\n")
+        self.commit(self.root/"config")
+        cases={
+            "another release": lambda:self.write(self.root/"config/all/crypto/2026.10.16+1/manifest.json","{}\n"),
+            "an older release rewritten": lambda:self.write(self.root/"config/all/crypto/2026.10.14+1/manifest.json","{\"rewritten\": true}\n"),
+            "another resource": lambda:self.write(self.root/"config/all/arindb"/VERSION.replace("-","+",1)/"arin.mmdb","data\n"),
+            "an unrelated removal": lambda:os.remove(self.root/"config/source.txt"),
+        }
+        for name,change in cases.items():
+            with self.subTest(name=name):
+                self.git(self.root/"config","reset","-q","--hard")
+                self.git(self.root/"config","clean","-qfd")
+                before=self.snapshot()
+                self.write(self.root/"config/all/crypto"/VERSION.replace("-","+",1)/"manifest.json","{}\n")
+                change()
+                self.commit(self.root/"config")
+                with self.assertRaisesRegex(state.Refusal,"unrelated path"):
+                    state.allowed_transition(self.root,before,self.snapshot(),"crypto-sanctions",VERSION,before)
+                self.git(self.root/"config","reset","-q","--hard",before["config"]["head"])
+
     def test_exact_remote_ref_is_revalidated_and_main_may_advance(self):
         repo=self.root/"config"
         remote=self.root/"remote.git"

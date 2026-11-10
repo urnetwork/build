@@ -23,6 +23,9 @@ umask 022
 #            subscriber operators). The refresh requires this readable catalog,
 #            pins fresh routing, RPKI, registry, cloud, VPN and label evidence,
 #            and publishes the augmented database.
+# The all-release OFAC crypto-address refresh (refresh_crypto_sanctions) reads
+#            OFAC's public SDN list and needs no credentials. A failed download
+#            keeps the last committed list, and the release message says so.
 # (optional) ARIN_RELAY_GEOFEEDS=1 also pins the Apple Private Relay and
 #            Cloudflare egress geofeeds as reviewed VPN address lists
 # (optional) ARIN_PREVIOUS_DATABASE_FILE names the arin.mmdb the ARIN canary
@@ -3331,6 +3334,84 @@ refresh_ip_databases
 error_trap 'GeoLite2, ARIN and subscriber evidence release update'
 release_transition ip-databases
 release_complete ip-databases "${BUILD_OUT:-$BUILD_HOME/out}/ip-databases/release-$WARP_VERSION"
+fi
+
+# OFAC crypto addresses (mmm/BTCPAY.md §17.5). The selected Server's cryptoctl
+# downloads OFAC's SDN list and writes the table that server cryptosanctions
+# screens crypto payments against. It is published as
+# config/all/crypto/$WARP_VERSION, the release directory processes read (the
+# newest), and the older directories are removed in the same commit. The list
+# never stops a release: when cryptoctl does not build, or OFAC's download or
+# data is refused, nothing is published, the last committed list stays the
+# newest, and the release message says which list that is.
+refresh_crypto_sanctions () {
+    local config_root="$WARP_HOME/config"
+    local crypto_root="$config_root/all/crypto"
+    local crypto_target="$crypto_root/$WARP_VERSION"
+    local crypto_out="${BUILD_OUT:-$BUILD_HOME/out}/crypto-sanctions"
+    local crypto_work='' crypto_checkpoint='' crypto_summary='' crypto_failure=''
+    local crypto_release='' crypto_date='' crypto_kept=''
+    if [ -e "$crypto_target" ] || [ -L "$crypto_target" ]; then
+        print -u2 -- "OFAC crypto address version already exists; existing versions are never replaced"
+        return 1
+    fi
+    mkdir -p -- "$crypto_out" || return $?
+    crypto_out=$(cd "$crypto_out" && pwd -P) || return $?
+    crypto_checkpoint="$crypto_out/release-$WARP_VERSION"
+    crypto_work=$(mktemp -d "$crypto_out/refresh.XXXXXXXX") || return $?
+    if ! (cd "$BUILD_HOME/server${GO_MOD_SUFFIX:-}" &&
+            go build -ldflags "-X main.Version=$WARP_VERSION" -o "$crypto_work/cryptoctl" ./cryptoctl); then
+        crypto_failure='cryptoctl did not build from the selected Server (errors above)'
+    elif ! crypto_summary=$("$crypto_work/cryptoctl" update --output "$crypto_work/table" --timeout 15m 2>"$crypto_work/update-errors.txt"); then
+        cat -- "$crypto_work/update-errors.txt" >&2
+        crypto_failure=$(tail -n 1 -- "$crypto_work/update-errors.txt") || crypto_failure=''
+        crypto_failure="${crypto_failure:-cryptoctl update failed}"
+    fi
+    if [ -n "$crypto_failure" ]; then
+        for crypto_release in "$crypto_root"/*(N/); do
+            crypto_date=''
+            if [ -r "$crypto_release/manifest.json" ]; then
+                crypto_date=$(jq -r '.source.publish_date // empty' "$crypto_release/manifest.json" 2>/dev/null) || crypto_date=''
+            fi
+            crypto_kept+="${crypto_kept:+, }\`${crypto_release:t}\`${crypto_date:+ (OFAC SDN list of ${crypto_date})}"
+        done
+        if [ -n "$crypto_kept" ]; then
+            crypto_kept="the last committed list stays selected: ${crypto_kept}"
+        else
+            crypto_kept='no list is committed, so screened crypto payments are held for review until one is'
+        fi
+        mkdir -- "$crypto_checkpoint" || return $?
+        print -r -- "not refreshed: ${crypto_failure}; ${crypto_kept}" > "$crypto_checkpoint/summary.txt" || return $?
+        builder_message "warning: OFAC crypto addresses not refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${crypto_failure}; ${crypto_kept}"
+        return 0
+    fi
+    if [ -e "$crypto_target" ] || [ -L "$crypto_target" ]; then
+        print -u2 -- "OFAC crypto address version appeared during generation; nothing published"
+        return 1
+    fi
+    mkdir -p -- "$crypto_root" || return $?
+    mv -- "$crypto_work/table" "$crypto_target" || return $?
+    for crypto_release in "$crypto_root"/*(N/); do
+        [[ "${crypto_release:t}" = "$WARP_VERSION" ]] && continue
+        rm -rf -- "$crypto_release" || return $?
+    done
+    (cd "$config_root" &&
+        git add -A -- "all/crypto" &&
+        if ! git diff --cached --quiet -- "all/crypto"; then
+            git commit -m "${EXTERNAL_WARP_VERSION} OFAC crypto addresses" -- "all/crypto" &&
+            git_push_generated_paths "all/crypto"
+        fi) || return $?
+    mkdir -- "$crypto_checkpoint" || return $?
+    cp -R -- "$crypto_target" "$crypto_checkpoint/crypto" || return $?
+    print -r -- "$crypto_summary" > "$crypto_checkpoint/summary.txt" || return $?
+    builder_message "OFAC crypto addresses refreshed for \`${EXTERNAL_WARP_VERSION}\`: ${crypto_summary}"
+}
+
+if release_build crypto-sanctions "${BUILD_OUT:-$BUILD_HOME/out}/crypto-sanctions/release-$WARP_VERSION"; then
+refresh_crypto_sanctions
+error_trap 'OFAC crypto address release update'
+release_transition crypto-sanctions
+release_complete crypto-sanctions "${BUILD_OUT:-$BUILD_HOME/out}/crypto-sanctions/release-$WARP_VERSION"
 fi
 
 # The config-updater image carries this release's config, so on the deploy
