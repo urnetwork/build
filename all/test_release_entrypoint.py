@@ -48,7 +48,7 @@ elif name=="git":
         event("FORBIDDEN-GIT:"+" ".join(args)); sys.exit(91)
     os.execv("REALGIT",["REALGIT",*args])
 elif name=="go":
-    if args==["version"]: print("go version go1.27.3 darwin/arm64")
+    if args==["version"]: print("go version go1.27.4 darwin/arm64")
     # Probe genuine effective Go settings, including the three private-module
     # prefixes. Constant fake values previously hid a real resume-order bug.
     elif args[:2]==["env","-json"]: os.execv("REALGO",["REALGO",*args])
@@ -198,7 +198,7 @@ class CanonicalEntrypoint(unittest.TestCase):
                 subprocess.run([cls.real_git,"-C",str(repo),"tag","v"+version],check=True,capture_output=True)
         for name in ("sdk/build/go.sum","sdk/cgo/go.sum","sdk/js/go.sum"):
             cls.write(cls.build/name,"pinned generated module graph\n")
-        cls.write(cls.build/"sdk/cgo/go.mod", "module fixture.invalid/sdk\n\ngo 1.27.3\n")
+        cls.write(cls.build/"sdk/cgo/go.mod", "module fixture.invalid/sdk\n\ngo 1.27.4\n")
         for name in ("windows-base.qcow2", "windows-key", "uefi-code", "uefi-vars"):
             cls.write(cls.root/name, "synthetic Windows build prerequisite\n")
         fingerprint=subprocess.run(["/bin/bash","-c",'source "$1"; win_init; expected="$(win_sdk_go_version "$2")"; win_provision_contract_fingerprint "$expected"',"fixture-windows",str(cls.build/"all/windows/lib.sh"),str(cls.build/"sdk/cgo/go.mod")],env=cls.env,capture_output=True,text=True,timeout=10)
