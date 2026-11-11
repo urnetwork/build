@@ -207,19 +207,35 @@ staging="${work}/staging-${ARCH}"
 # but that binary is discarded — only the 22.04 daemon image's copy is
 # packaged — so gating the GUI image at the daemon's 2.35 floor would fail on a
 # throwaway. Gate it at the AppImage's own ceiling instead.
+# -Ddistribution: compiled in as UR_DISTRIBUTION, the distribution the
+#   binaries report in their client info (the sdk's ClientDistribution values,
+#   linux app/meson_options.txt). The GUI image's urnetwork-gui ships only in
+#   the AppImage, so it is linux_appimage. The daemon image's one build goes
+#   into the .deb, the tarball, the .rpm and the Arch package, so its package
+#   is not known: linux. Passed only when the checkout declares the option, as
+#   an older checkout's meson refuses an unknown -D.
 if [ "${ROLE}" = gui ]; then
   gui_opt=enabled
   glibc_gate="${UR_GLIBC_CEILING}"
+  distribution=linux_appimage
 else
   gui_opt=disabled
   glibc_gate="${UR_GLIBC_FLOOR}"
+  distribution=linux
 fi
-echo ">>> [${ARCH}/${ROLE}] meson build (gui=${gui_opt}, app_version=${VERSION}, glibc_floor=${glibc_gate})"
+distribution_opts=()
+if grep -q "^option('distribution'" "${app}/meson_options.txt" 2>/dev/null; then
+  distribution_opts=(-Ddistribution="${distribution}")
+else
+  distribution='(the checkout has no distribution option)'
+fi
+echo ">>> [${ARCH}/${ROLE}] meson build (gui=${gui_opt}, app_version=${VERSION}, distribution=${distribution}, glibc_floor=${glibc_gate})"
 meson setup "${builddir}" "${app}" \
   --prefix=/usr --buildtype=release \
   -Dsdk_arch="${ARCH}" \
   -Dgui="${gui_opt}" \
   -Dapp_version="${VERSION}" \
+  ${distribution_opts[@]+"${distribution_opts[@]}"} \
   -Dglibc_floor="${glibc_gate}"
 if [ "${UR_SKIP_TESTS}" = 1 ]; then
   echo ">>> [${ARCH}/${ROLE}] unit tests omitted by explicit UR_SKIP_TESTS=1"
