@@ -1,6 +1,6 @@
 module github.com/urnetwork/build/all/acceptance
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/gagliardetto/solana-go v1.21.0
