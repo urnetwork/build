@@ -10,7 +10,7 @@ import (
 )
 
 // A release cannot silently select an older compiler for Windows or for the
-// controller's nested modules while the host and F-Droid require Go 1.27.3.
+// controller's nested modules while the host and F-Droid require Go 1.27.4.
 func TestReleaseGoPolicyConsistentAcrossPlatforms(t *testing.T) {
 	root := rolloutRoot(t)
 	for _, contract := range []struct {
@@ -29,8 +29,8 @@ func TestReleaseGoPolicyConsistentAcrossPlatforms(t *testing.T) {
 				t.Fatal(err)
 			}
 			matches := regexp.MustCompile(contract.pattern).FindAllSubmatch(data, -1)
-			if len(matches) != 1 || string(matches[0][1]) != "1.27.3" {
-				t.Fatalf("release Go contract = %q, want exactly one Go 1.27.3 pin", matches)
+			if len(matches) != 1 || string(matches[0][1]) != "1.27.4" {
+				t.Fatalf("release Go contract = %q, want exactly one Go 1.27.4 pin", matches)
 			}
 		})
 	}

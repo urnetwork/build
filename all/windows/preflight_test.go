@@ -19,7 +19,7 @@ func TestOfflineImageReadinessFailsBeforeAnyGuestOperation(t *testing.T) {
 				t.Fatal(err)
 			}
 			files := map[string]string{
-				module:                             "module example.invalid/sdk\n\ngo 1.27.3\n",
+				module:                             "module example.invalid/sdk\n\ngo 1.27.4\n",
 				filepath.Join(root, "image.qcow2"): "synthetic base image\n",
 				filepath.Join(root, "key"):         "synthetic key\n",
 				filepath.Join(root, "firmware"):    "synthetic code\n",
@@ -32,7 +32,7 @@ func TestOfflineImageReadinessFailsBeforeAnyGuestOperation(t *testing.T) {
 			}
 			image := filepath.Join(root, "image.qcow2")
 			marker := image + ".provision.sha256"
-			fingerprint := exec.Command("bash", "-c", `source "$1"; WIN_HERE="$2"; win_provision_contract_fingerprint 1.27.3`, "offline-fixture", filepath.Join(windowsBuildRoot(t), "lib.sh"), windowsBuildRoot(t))
+			fingerprint := exec.Command("bash", "-c", `source "$1"; WIN_HERE="$2"; win_provision_contract_fingerprint 1.27.4`, "offline-fixture", filepath.Join(windowsBuildRoot(t), "lib.sh"), windowsBuildRoot(t))
 			data, err := fingerprint.Output()
 			if err != nil {
 				t.Fatal(err)
@@ -56,7 +56,7 @@ func TestOfflineImageReadinessFailsBeforeAnyGuestOperation(t *testing.T) {
 			case "missing vars":
 				err = os.Remove(filepath.Join(root, "vars"))
 			case "SDK newer than pin":
-				err = os.WriteFile(module, []byte("module example.invalid/sdk\n\ngo 1.27.4\n"), 0o600)
+				err = os.WriteFile(module, []byte("module example.invalid/sdk\n\ngo 1.27.5\n"), 0o600)
 			}
 			if err != nil {
 				t.Fatal(err)

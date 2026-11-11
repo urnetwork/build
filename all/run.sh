@@ -207,8 +207,8 @@ if (( ${#missing_build_tools[@]} )); then
     exit 1
 fi
 
-if [[ "$(go version)" != "go version go1.27.3 "* ]]; then
-    echo 'go 1.27.3 required' >&2
+if [[ "$(go version)" != "go version go1.27.4 "* ]]; then
+    echo 'go 1.27.4 required' >&2
     exit 1
 fi
 if [ "$NUGET_API_KEY" ] || [ "$BUILD_TEST" ]; then
