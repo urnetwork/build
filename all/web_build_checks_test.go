@@ -99,6 +99,7 @@ func TestRunSiteChecksFollowLocalizationAndPrecedeReleaseAllocation(t *testing.T
 	for _, step := range []string{
 		"error_trap 'ur.io content dates update'",
 		"error_trap 'localizations codegen'",
+		"error_trap 'linux auth/session and UI preflight'",
 		"error_trap 'build bootstrap warpctl'",
 		"error_trap 'early read-only deployment preflight'",
 		"error_trap 'web build checks'",

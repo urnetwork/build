@@ -941,6 +941,11 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# These dependency-free Linux regressions must fail before allocating a release
+# or publishing expensive SDK/desktop artifacts, even when BUILD_TEST is empty.
+python3 -B "$BUILD_HOME/linux/app/tests/Preflight.py"
+error_trap 'linux auth/session and UI preflight'
+
 # Gradle and deployment guard planning both need the freshly selected Warpctl.
 # Compile this before candidate sites so existing infrastructure blockers fail
 # before the expensive work. No release version is allocated by this check.
