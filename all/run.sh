@@ -2137,6 +2137,13 @@ error_trap 'localizations push branch'
     fi)
 error_trap 'extension edit'
 
+# Both browser builds regenerate tracked public/_locales files. The generator
+# prefers this run's sibling localizations checkout over the pinned npm package.
+# Materialize its output after dependency preparation and before committing and
+# sealing the extension, so later prebuilds reproduce the committed bytes.
+(cd "$BUILD_HOME/extension" && node scripts/build-locales.js)
+error_trap 'extension localizations codegen'
+
 (cd $BUILD_HOME/extension && 
     git_commit &&
     git_tag)
