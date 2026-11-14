@@ -68,6 +68,15 @@ JSON and transport failures stop immediately. This read-only retry does not
 replay draft POSTs or finalization PATCHes, change the account's API allowance,
 or replace the separate upload helper's explicit-rejection policy.
 
+Before generators, candidate builds or version allocation, component Node
+readiness reads exact `NODE_VERSION` pins from tracked Makefiles and version
+files (`.nvmrc`, `.node-version`) in the selected build submodules and standalone
+MMM checkout. It executes `node --version` through nvm for each distinct pin;
+an installed directory alone is insufficient. Missing versions fail with their
+owning recipes and exact `nvm install` commands; the check never installs tools
+or substitutes the host's default Node. Resume repeats this check after source
+validation. The primary Node/npm startup version checks remain required.
+
 Before generators, candidate builds or version allocation, Windows readiness
 checks the existing base image, its smoke-tested provisioning receipt, matching
 Go pin, existing SSH key and QEMU firmware. This is an offline check: it never boots or

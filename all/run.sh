@@ -575,6 +575,8 @@ if [[ -n "${BUILD_RESUME:-}" ]]; then
     export SDK_PACKAGE_VERSION="$EXTERNAL_WARP_VERSION"
     release_state validate
     error_trap 'validate immutable release before resume'
+    python3 -B "$BUILD_HOME/all/check-node-versions.py" "$BUILD_HOME" "$WARP_HOME/mmm"
+    error_trap 'component Node versions before resume'
     windows_stage_state=$(release_state stage-state windows)
     error_trap 'read verified Windows checkpoint state'
     if [[ "$windows_stage_state" != complete ]]; then
@@ -878,6 +880,11 @@ error_trap 'pull extension'
 error_trap 'pull localizations'
 (cd $WARP_HOME/mmm && git_main)
 error_trap 'pull mmm'
+
+# Read pins from the selected component recipes, including the manager service,
+# before generators, candidates, version allocation or any image publication.
+python3 -B "$BUILD_HOME/all/check-node-versions.py" "$BUILD_HOME" "$WARP_HOME/mmm"
+error_trap 'component Node versions before preparation'
 
 # Check the provisioning receipt against the freshly selected SDK/toolchain
 # contract before generators, candidate builds, version allocation or uploads.
