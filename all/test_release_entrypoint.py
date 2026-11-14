@@ -138,7 +138,9 @@ class CanonicalEntrypoint(unittest.TestCase):
                        BUILD_OUT=str(cls.home/"Google Drive/My Drive/URnetwork/Build"), NPM_TOKEN="synthetic-only",
                        SDK_PACKAGE_CHANNEL="nightly", FDROID_VERSION_CODE_OFFSETS="0 2 3", STAGE_SECONDS="60",
                        ANDROID_NDK_HOME=str(cls.root/"android-sdk/ndk/29.0.14206865"))
-        cls.write(cls.home/".zprofile", 'export PATH="'+str(cls.bin)+':$PATH"\n')
+        # This fixture intentionally seals deployment disabled. Apply that
+        # synthetic host policy after the production wrapper's enabled default.
+        cls.write(cls.home/".zprofile", 'export PATH="'+str(cls.bin)+':$PATH"\nexport WARP_SKIP_DEPLOY=1\n')
         for name in (".keychain-pw", ".identity.p12", ".p12-pw"):
             cls.write(cls.home/name, "synthetic-only")
         cls.write(cls.root/"nvm/nvm.sh", "# synthetic nvm\n")
