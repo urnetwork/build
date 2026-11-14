@@ -796,7 +796,7 @@
               },
               "details": "A norm.Iter can enter an infinite loop when handling input containing invalid UTF-8 bytes.",
               "id": "GO-2026-5970",
-              "modified": "2026-11-13T19:12:56.005281104Z",
+              "modified": "2026-11-14T13:12:13.157756222Z",
               "published": "2026-07-14T17:29:56Z",
               "references": [
                 {
@@ -844,15 +844,7 @@
                 "RHSA-2026:52912",
                 "RHSA-2026:54364",
                 "RHSA-2026:54549",
-                "RHSA-2026:68334",
-                "RHSA-2026:68335",
                 "RHSA-2026:69258",
-                "RHSA-2026:70201",
-                "RHSA-2026:90330",
-                "RHSA-2026:92858",
-                "RHSA-2026:92859",
-                "RHSA-2026:92860",
-                "RHSA-2026:99824",
                 "RHSA-2026:99826",
                 "RHSA-2026:99827"
               ],
@@ -919,7 +911,7 @@
               },
               "details": "The Nickname profile can panic with an out-of-bounds slice error when transforming crafted input into a short destination buffer.",
               "id": "GO-2026-6629",
-              "modified": "2026-10-20T10:42:24.514593111Z",
+              "modified": "2026-11-14T13:12:14.100810021Z",
               "published": "2026-10-07T14:09:43Z",
               "references": [
                 {
@@ -932,16 +924,8 @@
                 }
               ],
               "related": [
-                "RHSA-2026:58472",
-                "RHSA-2026:62391",
-                "RHSA-2026:68717",
-                "RHSA-2026:68729",
-                "RHSA-2026:70031",
                 "RHSA-2026:70537",
-                "RHSA-2026:70670",
                 "RHSA-2026:70700",
-                "RHSA-2026:72496",
-                "RHSA-2026:72570",
                 "RHSA-2026:72750",
                 "RHSA-2026:73401",
                 "RHSA-2026:73522",
@@ -1335,7 +1319,7 @@
               },
               "details": "Previously, after a channel has been established, a malicious peer could send crafted messages that would deadlock the entire connection.\n\nNow, we handle all RFC 4254 channel messages; global requests are handled explicitly. Then, treat all other messages as a protocol error and tear the connection down instead of buffering and blocking.",
               "id": "GO-2026-6355",
-              "modified": "2026-11-13T19:12:57.398477131Z",
+              "modified": "2026-11-14T13:12:14.167817306Z",
               "published": "2026-09-02T19:12:04Z",
               "references": [
                 {
@@ -1352,7 +1336,6 @@
                 }
               ],
               "related": [
-                "RHSA-2026:70640",
                 "RHSA-2026:90424"
               ],
               "schema_version": "1.9.0",
@@ -2182,7 +2165,7 @@
               },
               "details": "When \"Trailer\" headers are sent by a client, the HTTP server internally uses the header values to populate the Request.Trailer map passed to the server handler. Because Request.Trailer is a map, each entry incurs memory overhead. For HTTP/2 servers, a malicious client can exploit this by sending a \"Trailer\" header that declares a large number of fields, causing the server to allocate a disproportionate amount of memory while bypassing Server.MaxHeaderValueCount and Server.MaxHeaderBytes limits. This exploit is not applicable for HTTP/1 servers, which do not support multiplexing a large number of requests over one TCP connection, and whose Server.MaxHeaderBytes are calculated differently.",
               "id": "GO-2026-6603",
-              "modified": "2026-11-13T19:12:55.777569173Z",
+              "modified": "2026-11-14T13:12:13.462737073Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -2213,10 +2196,7 @@
                 "RHSA-2026:87040",
                 "RHSA-2026:87041",
                 "RHSA-2026:87042",
-                "RHSA-2026:87043",
-                "RHSA-2026:87245",
-                "RHSA-2026:87246",
-                "RHSA-2026:90994"
+                "RHSA-2026:87043"
               ],
               "schema_version": "1.9.0",
               "summary": "HTTP/2 server memory exhaustion due to Trailer headers in net/http"
@@ -2377,7 +2357,7 @@
               },
               "details": "Historically, we have been rather lax about malformed framing-related headers in our HTTP/2 implementation, as they cannot interfere with HTTP/2 framing. However, this makes it possible for our HTTP/2 implementation to forward responses containing such headers to an HTTP/1 client when acting as a reverse proxy. If the HTTP/1 client also does not behave strictly enough, this can result in response smuggling.",
               "id": "GO-2026-6610",
-              "modified": "2026-11-13T19:12:54.268482437Z",
+              "modified": "2026-11-14T13:12:14.502576208Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -2404,10 +2384,7 @@
                 "RHSA-2026:87040",
                 "RHSA-2026:87041",
                 "RHSA-2026:87042",
-                "RHSA-2026:87043",
-                "RHSA-2026:87245",
-                "RHSA-2026:87246",
-                "RHSA-2026:90994"
+                "RHSA-2026:87043"
               ],
               "schema_version": "1.9.0",
               "summary": "HTTP/2 transport accepts malformed framing-related headers in net/http"
@@ -2937,7 +2914,7 @@
               },
               "details": "A malicious HTTP/2 peer can cause excessive CPU consumption in the client or server by opening a large number of streams and then sending many small SETTINGS frames containing SETTINGS_INITIAL_WINDOW_SIZE values.",
               "id": "GO-2026-6611",
-              "modified": "2026-11-13T19:12:55.302829863Z",
+              "modified": "2026-11-14T13:12:14.349122729Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -2971,8 +2948,6 @@
                 "RHSA-2026:87041",
                 "RHSA-2026:87042",
                 "RHSA-2026:87043",
-                "RHSA-2026:87245",
-                "RHSA-2026:87246",
                 "RHSA-2026:87732",
                 "RHSA-2026:87911",
                 "RHSA-2026:88188",
@@ -2983,11 +2958,7 @@
                 "RHSA-2026:88317",
                 "RHSA-2026:88332",
                 "RHSA-2026:88336",
-                "RHSA-2026:88339",
-                "RHSA-2026:88340",
                 "RHSA-2026:88354",
-                "RHSA-2026:88394",
-                "RHSA-2026:88395",
                 "RHSA-2026:88396",
                 "RHSA-2026:88397",
                 "RHSA-2026:89740",
@@ -3003,43 +2974,22 @@
                 "RHSA-2026:89914",
                 "RHSA-2026:89915",
                 "RHSA-2026:89933",
-                "RHSA-2026:90329",
-                "RHSA-2026:90330",
-                "RHSA-2026:90332",
-                "RHSA-2026:90725",
-                "RHSA-2026:90726",
-                "RHSA-2026:90994",
                 "RHSA-2026:91138",
                 "RHSA-2026:91572",
                 "RHSA-2026:91587",
                 "RHSA-2026:91646",
-                "RHSA-2026:91958",
-                "RHSA-2026:92217",
                 "RHSA-2026:92372",
                 "RHSA-2026:92621",
                 "RHSA-2026:92622",
-                "RHSA-2026:92858",
-                "RHSA-2026:92859",
-                "RHSA-2026:92860",
-                "RHSA-2026:92861",
                 "RHSA-2026:93596",
                 "RHSA-2026:93617",
                 "RHSA-2026:95014",
                 "RHSA-2026:95015",
                 "RHSA-2026:95016",
-                "RHSA-2026:95234",
                 "RHSA-2026:95519",
-                "RHSA-2026:96076",
-                "RHSA-2026:98454",
-                "RHSA-2026:98479",
                 "RHSA-2026:98506",
-                "RHSA-2026:98579",
-                "RHSA-2026:98592",
-                "RHSA-2026:98593",
                 "RHSA-2026:98601",
                 "RHSA-2026:98614",
-                "RHSA-2026:98617",
-                "RHSA-2026:98794",
                 "RHSA-2026:99038",
                 "RHSA-2026:99063",
                 "RHSA-2026:99087",
@@ -3486,7 +3436,7 @@
               },
               "details": "The HTTP/2 server can refund connection-level flow control twice for the same data: Once when a client resets a stream (refunding data for any sent-but-unread portion of the stream), and again when a request handler reads the buffered data. A malicious client can exploit this to bypass the configured connection-level flow control limit (MaxReceiveBufferPerConnection). Total buffered data is still limited by the concurrent stream limit and stream-level flow control.",
               "id": "GO-2026-6612",
-              "modified": "2026-11-13T19:12:55.388066008Z",
+              "modified": "2026-11-14T13:12:14.440833902Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -3517,10 +3467,7 @@
                 "RHSA-2026:87040",
                 "RHSA-2026:87041",
                 "RHSA-2026:87042",
-                "RHSA-2026:87043",
-                "RHSA-2026:87245",
-                "RHSA-2026:87246",
-                "RHSA-2026:90994"
+                "RHSA-2026:87043"
               ],
               "schema_version": "1.9.0",
               "summary": "Double flow control refund on HTTP/2 server streams in net/http"
@@ -3995,7 +3942,7 @@
               },
               "details": "HTTP/2 servers could end up crashing due to inadvertently modifying its HPACK encoder concurrently. This happens because the server modifies the HPACK encoder from two goroutines without synchronization: one uses the encoder to encode a HEADERS frame as part of a response sent to a client and the other modifies the encoder's table size when handling a SETTINGS frame containing SETTINGS_HEADER_TABLE_SIZE that a client sends. A malicious client can repeatedly send a request while changing the header table size to crash the server.",
               "id": "GO-2026-6617",
-              "modified": "2026-11-13T19:12:57.595541018Z",
+              "modified": "2026-11-14T13:12:14.222191133Z",
               "published": "2026-10-08T22:31:09Z",
               "references": [
                 {
@@ -4026,10 +3973,7 @@
                 "RHSA-2026:87040",
                 "RHSA-2026:87041",
                 "RHSA-2026:87042",
-                "RHSA-2026:87043",
-                "RHSA-2026:87245",
-                "RHSA-2026:87246",
-                "RHSA-2026:90994"
+                "RHSA-2026:87043"
               ],
               "schema_version": "1.9.0",
               "summary": "HTTP/2 server crash due to HPACK encoder race in net/http"
@@ -4260,7 +4204,7 @@
               },
               "details": "The Nickname profile can panic with an out-of-bounds slice error when transforming crafted input into a short destination buffer.",
               "id": "GO-2026-6629",
-              "modified": "2026-10-20T10:42:24.514593111Z",
+              "modified": "2026-11-14T13:12:14.100810021Z",
               "published": "2026-10-07T14:09:43Z",
               "references": [
                 {
@@ -4273,16 +4217,8 @@
                 }
               ],
               "related": [
-                "RHSA-2026:58472",
-                "RHSA-2026:62391",
-                "RHSA-2026:68717",
-                "RHSA-2026:68729",
-                "RHSA-2026:70031",
                 "RHSA-2026:70537",
-                "RHSA-2026:70670",
                 "RHSA-2026:70700",
-                "RHSA-2026:72496",
-                "RHSA-2026:72570",
                 "RHSA-2026:72750",
                 "RHSA-2026:73401",
                 "RHSA-2026:73522",
