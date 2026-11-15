@@ -103,6 +103,7 @@ require (
 	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/urnetwork/glog v0.0.0 // indirect
 	github.com/urnetwork/goidenticons v0.0.0 // indirect
+	github.com/urnetwork/operator-core v0.0.0 // indirect
 	github.com/urnetwork/sidecar v0.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
@@ -128,6 +129,8 @@ replace github.com/urnetwork/sdk => ../../../sdk
 replace github.com/urnetwork/connect => ../../../connect
 
 replace github.com/urnetwork/glog => ../../../glog
+
+replace github.com/urnetwork/operator-core => ../../../operator-core
 
 replace github.com/urnetwork/goidenticons => ../../../goidenticons
 
