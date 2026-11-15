@@ -4,6 +4,9 @@
 [submodule "connect"]
 	path = connect
 	url = git@github.com:urnetwork/connect.git
+[submodule "operator-core"]
+	path = operator-core
+	url = git@github.com:urnetwork/operator-core.git
 [submodule "gvisor"]
 	path = gvisor
 	url = git@github.com:urnetwork/gvisor.git
