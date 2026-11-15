@@ -10,8 +10,9 @@
 #                                  commit's commit-msg scan and X9's TestX9ReadyForMain pass
 #   scan                           run the commit-msg scan of main..sidecar in every repo
 #
-# §4.8's order is connect, sidecar, sdk, sn, server, warp/config/vault/xops/mmm, build. minio joins the
-# middle group, and its master plays main (design-records-minio-merge-rules, decided 2026-11-06).
+# §4.8's order is connect, operator-core, sidecar, sdk, sn, server, warp/config/vault/xops/mmm, build.
+# minio joins the middle group, and its master plays main (design-records-minio-merge-rules, decided
+# 2026-11-06).
 #
 # Merge, never rebase: a rebase orphans pinned commits and skips the commit-msg hook, so nothing here
 # rebases or pulls. Nothing here pushes either: each command that commits prints the pushes for the owner.
@@ -34,7 +35,7 @@ SB_ROOT="${SIDECAR_BRANCHES_ROOT:-${SB_SCRIPT:h:h:h}}"
 SB_HOOK="${SB_SCRIPT:h:h}/.githooks/commit-msg"
 SB_LOCK_PATH="local/source-graph/lock.yml"
 # §4.8's order, with minio in the middle group
-SB_ORDER=(connect sidecar sdk sn server warp config vault xops mmm minio build)
+SB_ORDER=(connect operator-core sidecar sdk sn server warp config vault xops mmm minio build)
 
 sb_usage () {
     print -u2 "usage: ${SB_SCRIPT:t} check | repin | merge-in | merge-out <gate> <commit-set> | scan"

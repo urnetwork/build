@@ -508,8 +508,9 @@ func TestRunPointsEachSidecarConsumerAtTheTags(t *testing.T) {
 	}
 }
 
-// §4.7's order: after connect's and glog's tags, which it requires, and before sdk's first edit,
-// which requires its tag, all inside the block a resume never replays.
+// §4.7's order: after connect's and glog's tags, which it requires, and operator-core's, which
+// follows connect's (owner decision 251), and before sdk's first edit, which requires its tag, all
+// inside the block a resume never replays.
 func TestRunReleasesSidecarBetweenConnectAndSdk(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
@@ -517,7 +518,8 @@ func TestRunReleasesSidecarBetweenConnectAndSdk(t *testing.T) {
 	}
 	source := string(data)
 	order := []string{
-		"error_trap 'glog push branch'", "error_trap 'connect push branch'", "error_trap 'sidecar edit'",
+		"error_trap 'glog push branch'", "error_trap 'connect push branch'", "error_trap 'operator-core edit'",
+		"error_trap 'operator-core push branch'", "error_trap 'sidecar edit'",
 		"error_trap 'sidecar push branch'", "error_trap 'sidecar make check'", "error_trap 'sdk build edit'",
 		"error_trap 'sdk edit'", "fi # immutable release preparation is complete",
 	}
@@ -539,8 +541,10 @@ func TestRunReleasesSidecarBetweenConnectAndSdk(t *testing.T) {
 		t.Fatal("the sidecar step sits outside the block a resume skips, and a resume would replay a rewrite")
 	}
 	for _, pair := range [][2]string{
-		{"(cd $BUILD_HOME/connect && git_main)", "(cd $BUILD_HOME/sidecar && git_main)"},
-		{"(cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})", "(cd $BUILD_HOME/sidecar && git checkout -b v${EXTERNAL_WARP_VERSION})"},
+		{"(cd $BUILD_HOME/connect && git_main)", "(cd $BUILD_HOME/operator-core && git_main)"},
+		{"(cd $BUILD_HOME/operator-core && git_main)", "(cd $BUILD_HOME/sidecar && git_main)"},
+		{"(cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})", "(cd $BUILD_HOME/operator-core && git checkout -b v${EXTERNAL_WARP_VERSION})"},
+		{"(cd $BUILD_HOME/operator-core && git checkout -b v${EXTERNAL_WARP_VERSION})", "(cd $BUILD_HOME/sidecar && git checkout -b v${EXTERNAL_WARP_VERSION})"},
 	} {
 		connect := strings.Index(source, pair[0])
 		sidecar := strings.Index(source, pair[1])
@@ -548,7 +552,7 @@ func TestRunReleasesSidecarBetweenConnectAndSdk(t *testing.T) {
 			t.Errorf("sidecar does not follow connect: %q at %d, %q at %d", pair[0], connect, pair[1], sidecar)
 		}
 	}
-	for _, want := range []string{"(cd $BUILD_HOME && rm -rf sidecar)", "for scan_dir in warp sdk server sidecar; do"} {
+	for _, want := range []string{"(cd $BUILD_HOME && rm -rf sidecar)", "(cd $BUILD_HOME && rm -rf operator-core)", "for scan_dir in warp sdk server operator-core sidecar; do"} {
 		if !strings.Contains(source, want) {
 			t.Errorf("run.sh lacks %q", want)
 		}

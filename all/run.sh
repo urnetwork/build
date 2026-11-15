@@ -838,6 +838,7 @@ error_trap 'pull warp release'
 
 if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf connect)
+    (cd $BUILD_HOME && rm -rf operator-core)
     (cd $BUILD_HOME && rm -rf sidecar)
     (cd $BUILD_HOME && rm -rf gvisor)
     (cd $BUILD_HOME && rm -rf sdk)
@@ -893,6 +894,8 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
 
 (cd $BUILD_HOME/connect && git_main)
 error_trap 'pull connect'
+(cd $BUILD_HOME/operator-core && git_main)
+error_trap 'pull operator-core'
 (cd $BUILD_HOME/sidecar && git_main)
 error_trap 'pull sidecar'
 ur_release_preflight
@@ -1152,7 +1155,7 @@ if [ ! "$BUILD_SKIP_VULN_SCAN" ]; then
         error_trap 'install osv-scanner'
         export PATH="$(go env GOPATH)/bin:$PATH"
     fi
-    for scan_dir in warp sdk server sidecar; do
+    for scan_dir in warp sdk server operator-core sidecar; do
         scan_vulnerabilities "$scan_dir"
     done
     builder_message "dependency vulnerability scan passed."
@@ -1385,6 +1388,8 @@ error_trap 'linux localizations push'
 
 (cd $BUILD_HOME/connect && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'connect prepare version branch'
+(cd $BUILD_HOME/operator-core && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'operator-core prepare version branch'
 (cd $BUILD_HOME/sidecar && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'sidecar prepare version branch'
 (cd $BUILD_HOME/sdk && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -1809,6 +1814,10 @@ sidecar_release_edit () {
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    # operator-core's tag (owner decision 251); coretest's paths before the root's, as smtpproof's are
+    go_edit_require_subpackages github.com/urnetwork/operator-core/coretest &&
+    go_mod_edit_require github.com/urnetwork/operator-core &&
+    go_edit_require_subpackages github.com/urnetwork/operator-core &&
     # Binaries carry the version with its +, as sdk's does. sed reports nothing when
     # it misses, and a release must not ship a ur that prints no version.
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sidecar.go &&
@@ -1824,6 +1833,7 @@ smtpproof_release_edit () {
     go_mod_edit_require github.com/urnetwork/sidecar &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/operator-core &&
     go_mod_fork
 }
 
@@ -1847,6 +1857,7 @@ sidecar_cli_release_edit () {
             go_mod_edit_require github.com/urnetwork/sidecar &&
             go_mod_edit_require github.com/urnetwork/connect &&
             go_mod_edit_require github.com/urnetwork/glog &&
+            go_mod_edit_require github.com/urnetwork/operator-core &&
             go mod tidy) || return $?
     done
 }
@@ -1874,6 +1885,25 @@ sidecar_release_publish () {
 sidecar_release_consumer_edit () {
     go_mod_edit_require github.com/urnetwork/sidecar &&
     go_edit_require_subpackages github.com/urnetwork/sidecar
+}
+
+# What each module that requires operator-core adds to its release edit (owner decision 251), every
+# module that requires sidecar among them, since sidecar's root requires operator-core. coretest's
+# paths go before the root's, which skip a line already holding /vN, so a test that imports coretest
+# names coretest's own tag. Only the root's require is rewritten here: a module that requires coretest
+# for its tests rewrites that require itself.
+operator_core_release_consumer_edit () {
+    go_edit_require_subpackages github.com/urnetwork/operator-core/coretest &&
+    go_mod_edit_require github.com/urnetwork/operator-core &&
+    go_edit_require_subpackages github.com/urnetwork/operator-core
+}
+
+# Go reads a nested module's versions from tags under its directory, as for smtpproof, so the module
+# at operator-core's coretest/v2026 is tagged coretest/v<version>.
+coretest_git_tag () {
+    local commit
+    commit=$(git rev-parse HEAD) || return $?
+    release_git_tag "coretest/v${EXTERNAL_WARP_VERSION}" "$commit"
 }
 
 
@@ -2062,6 +2092,40 @@ error_trap 'connect edit'
 error_trap 'connect push branch'
 
 
+# operator-core, the host contract between server and its extensions (owner decision 251; sidecar's
+# DESIGN.md §4.9): after connect's step and before sidecar's, rewritten to .../operator-core/v2026 and
+# tagged as connect is. coretest, its test-only module, goes with it as smtpproof goes with sidecar:
+# its paths rewritten before the root's, then tagged coretest/v<version> once the root's tag is pushed
+# for its tidy to resolve, with the root's tagged tree left as it was.
+(cd $BUILD_HOME/operator-core &&
+    go_edit_require_subpackages github.com/urnetwork/operator-core/coretest &&
+    go_mod_edit_module github.com/urnetwork/operator-core &&
+    go_edit_require_subpackages github.com/urnetwork/operator-core &&
+    go_mod_edit_gvisor &&
+    go_mod_edit_require github.com/urnetwork/connect &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_fork)
+error_trap 'operator-core edit'
+
+(cd $BUILD_HOME/operator-core &&
+    git_commit &&
+    operator_core_tagged_module_tree=`git rev-parse HEAD:v${GO_MOD_VERSION}` &&
+    git_tag &&
+    (cd coretest &&
+        go_mod_edit_module github.com/urnetwork/operator-core/coretest &&
+        go_mod_edit_gvisor &&
+        go_mod_edit_require github.com/urnetwork/operator-core &&
+        go_mod_edit_require github.com/urnetwork/connect &&
+        go_mod_edit_require github.com/urnetwork/glog &&
+        go_mod_fork) &&
+    git_commit &&
+    coretest_git_tag &&
+    test "$operator_core_tagged_module_tree" = `git rev-parse HEAD:v${GO_MOD_VERSION}`)
+error_trap 'operator-core push branch'
+
+
 (cd $BUILD_HOME/userwireguard &&
     go_mod_edit_module github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard)
@@ -2123,6 +2187,7 @@ error_trap 'sidecar make check'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     sidecar_release_consumer_edit &&
+    operator_core_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
@@ -2132,6 +2197,7 @@ error_trap 'sdk build edit'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     sidecar_release_consumer_edit &&
+    operator_core_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk cgo edit'
 
@@ -2140,6 +2206,7 @@ error_trap 'sdk cgo edit'
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     sidecar_release_consumer_edit &&
+    operator_core_release_consumer_edit &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk js edit'
 
@@ -2158,6 +2225,7 @@ error_trap 'sdk js edit'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     sidecar_release_consumer_edit &&
+    operator_core_release_consumer_edit &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
@@ -2211,6 +2279,8 @@ error_trap 'js-sdk publish'
     # tidy below takes the root's tag from the SDK's module.
     go_mod_drop_require github.com/urnetwork/sidecar/smtpproof &&
     go_mod_drop_require github.com/urnetwork/sidecar &&
+    # operator-core comes with sidecar through the SDK's tag; its tidy below takes the tag from there
+    go_mod_drop_require github.com/urnetwork/operator-core &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urfoundation/sn &&
@@ -2247,6 +2317,7 @@ error_trap 'sn push branch'
     go_mod_edit_require github.com/urnetwork/sidecar/smtpproof &&
     go_edit_require_subpackages github.com/urnetwork/sidecar/smtpproof &&
     sidecar_release_consumer_edit &&
+    operator_core_release_consumer_edit &&
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
