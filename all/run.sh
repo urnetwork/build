@@ -721,7 +721,10 @@ git_push_generated_paths () (
     fi
     temporary_index_dir=$(mktemp -d "${TMPDIR:-/tmp}/ip-config-index.XXXXXXXX") || return $?
     trap 'rm -rf -- "$temporary_index_dir"' EXIT
-    GIT_INDEX_FILE="$temporary_index_dir/index" git read-tree -m "$generated_base" "$remote_head" "$generated_head" || return $?
+    # read-tree's default trivial merge leaves one-sided deletions unmerged,
+    # even when the other tree equals the base. Resolve those unchanged-side
+    # deletions; competing generated paths were rejected above.
+    GIT_INDEX_FILE="$temporary_index_dir/index" git read-tree -m --aggressive "$generated_base" "$remote_head" "$generated_head" || return $?
     integration_tree=$(GIT_INDEX_FILE="$temporary_index_dir/index" git write-tree) || return $?
     integration_head=$(git commit-tree "$integration_tree" -p "$remote_head" -p "$generated_head" \
         -m 'Merge generated IP databases with concurrent config updates') || return $?

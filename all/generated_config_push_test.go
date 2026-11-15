@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +20,134 @@ func generatedPushFunction(t *testing.T) string {
 		t.Fatal("missing generated config publisher")
 	}
 	return match
+}
+
+// IP/ARIN generation rotates the entire previous ARIN directory. Exercise
+// publication of those deletions as well as the new version, including a
+// transport failure that leaves origin at the original base.
+func TestGeneratedConfigPublicationRotatesDeletedDirectories(t *testing.T) {
+	for _, scenario := range []string{"remote-unchanged", "disjoint", "lfs-disjoint", "competing-old-path", "second-push-fails"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := t.TempDir()
+			remote, seed := filepath.Join(dir, "remote.git"), filepath.Join(dir, "seed")
+			release, other := filepath.Join(dir, "release"), filepath.Join(dir, "other")
+			runGit(t, dir, "init", "--bare", remote)
+			runGit(t, dir, "init", "-b", "main", seed)
+			if scenario == "lfs-disjoint" {
+				runGit(t, seed, "lfs", "install", "--local")
+				commitTestFile(t, seed, ".gitattributes", "all/arindb/**/*.mmdb filter=lfs diff=lfs merge=lfs -text\n", "LFS policy")
+			}
+			oldDatabase := "all/arindb/old/arin.mmdb"
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(seed, oldDatabase)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			commitTestFile(t, seed, oldDatabase, "previous database\n", "old database")
+			commitTestFile(t, seed, "all/arindb/old/manifest.json", "old manifest\n", "old manifest")
+			base := commitTestFile(t, seed, "unrelated", "base bytes\n", "base")
+			runGit(t, seed, "remote", "add", "origin", remote)
+			runGit(t, seed, "push", "-u", "origin", "main")
+			runGit(t, dir, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main")
+			runGit(t, dir, "clone", remote, release)
+			runGit(t, dir, "clone", remote, other)
+			if scenario == "lfs-disjoint" {
+				runGit(t, release, "lfs", "install", "--local")
+			}
+			runGit(t, release, "rm", "-r", "all/arindb/old")
+			for name, contents := range map[string]string{
+				"all/arindb/new/arin.mmdb":     "new database\n",
+				"all/arindb/new/arin-old.mmdb": "previous database\n",
+				"all/arindb/new/manifest.json": "new manifest\n",
+				"all/mmdb/new/geolite.mmdb":    "new geolite\n",
+			} {
+				path := filepath.Join(release, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runGit(t, release, "add", "-A")
+			runGit(t, release, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "rotate generated databases")
+			generated := runGit(t, release, "rev-parse", "HEAD")
+			concurrent := base
+			if scenario != "remote-unchanged" {
+				name := "unrelated"
+				if scenario == "competing-old-path" {
+					name = oldDatabase
+				}
+				concurrent = commitTestFile(t, other, name, "remote bytes\n", "concurrent")
+				runGit(t, other, "push")
+			}
+			harness := `
+set -u
+eval "$1"
+git() {
+    if [[ "$1" = push ]]; then
+        print push >> "$PUSH_EVENTS"
+        local pushes=$(wc -l < "$PUSH_EVENTS" | tr -d ' ')
+        if [[ "$SCENARIO" = remote-unchanged && $pushes = 1 ]]; then return 42; fi
+        if [[ "$SCENARIO" = second-push-fails && $pushes = 2 ]]; then return 43; fi
+    fi
+    command git "$@"
+}
+git_push_generated_paths all/mmdb/new all/arindb
+`
+			command := exec.Command("zsh", "-f", "-c", harness, "generated-rotation-test", generatedPushFunction(t))
+			command.Dir = release
+			events := filepath.Join(dir, "push-events")
+			command.Env = append(os.Environ(), "PUSH_EVENTS="+events, "RELEASE_STATE_VERSION=sealed", "SCENARIO="+scenario, "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+			output, err := command.CombinedOutput()
+			wantFailure := scenario == "competing-old-path" || scenario == "second-push-fails"
+			if (err != nil) != wantFailure {
+				t.Fatalf("rotation publication err=%v; output=%s", err, output)
+			}
+			if runGit(t, release, "rev-parse", "HEAD") != generated || runGit(t, release, "status", "--porcelain") != "" {
+				t.Fatal("sealed checkout changed")
+			}
+			runGit(t, release, "fetch", "origin", "main")
+			if wantFailure {
+				if runGit(t, release, "rev-parse", "origin/main") != concurrent {
+					t.Fatal("failed publication changed remote")
+				}
+			} else {
+				runGit(t, release, "merge-base", "--is-ancestor", concurrent, "origin/main")
+				runGit(t, release, "merge-base", "--is-ancestor", generated, "origin/main")
+				if runGit(t, release, "ls-tree", "-r", "--name-only", "origin/main", "all/arindb/old") != "" {
+					t.Fatal("published tree retained obsolete ARIN directory")
+				}
+				if runGit(t, release, "diff", generated, "origin/main", "--", "all/arindb", "all/mmdb/new") != "" {
+					t.Fatal("published generated bytes differ from sealed commit")
+				}
+				want := "remote bytes"
+				if scenario == "remote-unchanged" {
+					want = "base bytes"
+				}
+				if runGit(t, release, "show", "origin/main:unrelated") != want {
+					t.Fatal("publication changed unrelated remote bytes")
+				}
+				consumer := filepath.Join(dir, "consumer")
+				runGit(t, dir, "clone", remote, consumer)
+				for name, expected := range map[string]string{"arin.mmdb": "new database\n", "arin-old.mmdb": "previous database\n"} {
+					content, err := os.ReadFile(filepath.Join(consumer, "all/arindb/new", name))
+					if err != nil || string(content) != expected {
+						t.Fatalf("published database bytes missing or changed: %s: %v", name, err)
+					}
+				}
+			}
+			pushEvents, err := os.ReadFile(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantPushes := 2
+			if scenario == "competing-old-path" {
+				wantPushes = 1
+			}
+			if strings.Count(string(pushEvents), "push\n") != wantPushes {
+				t.Fatalf("push attempts = %q", pushEvents)
+			}
+		})
+	}
 }
 
 func TestGeneratedConfigPublicationPreservesSealedCheckout(t *testing.T) {
