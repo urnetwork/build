@@ -60,6 +60,7 @@ var fixtureFunctionNames = []string{
 	"go_mod_edit_require", "go_mod_fork_rebase_local_replaces", "go_mod_fork_prepare", "go_mod_fork_tidy",
 	"go_mod_fork", "go_mod_fork_update", "git_tag", "sidecar_release_edit", "smtpproof_release_edit",
 	"smtpproof_git_tag", "sidecar_cli_release_edit", "sidecar_release_publish", "sidecar_release_consumer_edit",
+	"operator_core_release_consumer_edit", "coretest_git_tag",
 }
 
 // Where sidecar's region ends, and where it ends once it runs on to make check, which run.sh runs
@@ -81,10 +82,12 @@ const (
 )
 
 // run.sh's own blocks, start and end, in the order it runs them. proxy and userwireguard are left
-// out, because nothing here requires them.
+// out, because nothing here requires them. operator-core's follows connect's, since sidecar requires
+// its tag (owner decision 251).
 var fixtureRegions = [][2]string{
 	{"(cd $BUILD_HOME/glog &&\n    go_mod_edit_module", "error_trap 'glog push branch'"},
 	{"(cd $BUILD_HOME/connect &&\n    go_mod_edit_module", "error_trap 'connect push branch'"},
+	{"(cd $BUILD_HOME/operator-core &&\n    go_edit_require_subpackages", "error_trap 'operator-core push branch'"},
 	{"(cd $BUILD_HOME/goidenticons &&\n    go_mod_edit_module", "error_trap 'goidenticons push branch'"},
 	{"(cd $BUILD_HOME/sidecar &&\n    sidecar_release_edit)", fixtureSidecarRegionEnd},
 	{"(cd $BUILD_HOME/sdk/build &&\n    go_mod_edit_gvisor", "error_trap 'sdk push branch'"},
@@ -618,7 +621,7 @@ func (self *releaseFixture) findings() []string {
 // The real repositories at HEAD, through the real release code.
 func TestSidecarReleaseFixture(t *testing.T) {
 	fixture := newReleaseFixture(t)
-	for _, name := range []string{"glog", "connect", "goidenticons", "sidecar", "sdk"} {
+	for _, name := range []string{"glog", "connect", "operator-core", "goidenticons", "sidecar", "sdk"} {
 		fixture.archive(name)
 	}
 	fixture.makeCheck = true
@@ -657,6 +660,12 @@ func newSmallReleaseFixture(t *testing.T) *releaseFixture {
 		"connect.go":           "package connect\n\nimport _ \"github.com/urnetwork/glog\"\n",
 		"protocol/protocol.go": "package protocol\n",
 		"sctp/go.mod":          "module github.com/pion/sctp\n\ngo 1.27.3\n",
+	})
+	fixture.write("operator-core", map[string]string{
+		"go.mod":               "module github.com/urnetwork/operator-core\n\ngo 1.27.3\n\nrequire github.com/urnetwork/connect v0.0.0\n\nreplace github.com/urnetwork/connect => ../connect\n\nreplace github.com/urnetwork/glog => ../glog\n",
+		"operator.go":          "package operator\n\nimport _ \"github.com/urnetwork/connect\"\n",
+		"coretest/go.mod":      "module github.com/urnetwork/operator-core/coretest\n\ngo 1.27.3\n\nrequire github.com/urnetwork/operator-core v0.0.0\n\nreplace github.com/urnetwork/operator-core => ..\n\nreplace github.com/urnetwork/connect => ../../connect\n\nreplace github.com/urnetwork/glog => ../../glog\n",
+		"coretest/coretest.go": "package coretest\n\nimport _ \"github.com/urnetwork/operator-core\"\n",
 	})
 	sidecarFiles := map[string]string{}
 	for name, content := range sidecarReleaseTreeFiles {
