@@ -9,7 +9,7 @@ import (
 
 func TestComponentNodeVersionFailuresStopPreparationAndResume(t *testing.T) {
 	regions := []string{
-		componentRegion(t, "# Read pins from the selected component recipes", "# Check the provisioning receipt"),
+		componentRegion(t, "# Read pins from the selected component recipes", "# Warm the byte-verified package cache"),
 		componentRegion(t, "    error_trap 'validate immutable release before resume'", "    windows_stage_state="),
 	}
 	setup := `

@@ -889,6 +889,11 @@ error_trap 'pull mmm'
 python3 -B "$BUILD_HOME/all/check-node-versions.py" "$BUILD_HOME" "$WARP_HOME/mmm"
 error_trap 'component Node versions before preparation'
 
+# Warm the byte-verified package cache before long artifact builds. Each image
+# stages and rechecks these same locked bytes again before invoking BuildKit.
+python3 -B "$BUILD_HOME/server/cli/prepare-runtime-packages.py" --all
+error_trap 'locked service runtime payloads before preparation'
+
 # Check the provisioning receipt against the freshly selected SDK/toolchain
 # contract before generators, candidate builds, version allocation or uploads.
 bash "$BUILD_HOME/all/windows/preflight.sh"

@@ -77,6 +77,13 @@ owning recipes and exact `nvm install` commands; the check never installs tools
 or substitutes the host's default Node. Resume repeats this check after source
 validation. The primary Node/npm startup version checks remain required.
 
+The selected server's runtime-package helper also warms every locked service
+payload before candidate work. It retries transient HTTP failures within fixed
+bounds and verifies exact sizes/hashes. Each image stages those verified cache
+bytes again before BuildKit, whose offline install independently checks the
+literal payload hashes. A provider outage fails early or uses already verified
+bytes; it never triggers an automatic retry of an uncertain image publication.
+
 After shared localization generation and before candidate builds or version
 allocation, the harness renders every onboarding email template in every
 supported locale without calling Brevo. Both this check and the later Brevo
