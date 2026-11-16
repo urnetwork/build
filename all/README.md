@@ -77,6 +77,12 @@ owning recipes and exact `nvm install` commands; the check never installs tools
 or substitutes the host's default Node. Resume repeats this check after source
 validation. The primary Node/npm startup version checks remain required.
 
+After shared localization generation and before candidate builds or version
+allocation, the harness renders every onboarding email template in every
+supported locale without calling Brevo. Both this check and the later Brevo
+export explicitly use the selected `build/localizations` checkout, so missing
+keys or translations fail before artifact publication and Main mutations.
+
 Before generators, candidate builds or version allocation, Windows readiness
 checks the existing base image, its smoke-tested provisioning receipt, matching
 Go pin, existing SSH key and QEMU firmware. This is an offline check: it never boots or

@@ -951,6 +951,14 @@ builder_message "generating app localizations from the shared store"
     URNETWORK_ROOT="$BUILD_HOME" npm run gen)
 error_trap 'localizations codegen'
 
+# Render every onboarding template/locale against this run's selected store
+# before allocating a version or making production changes. The later Brevo
+# export uses the same root; a stale standalone store must not be selected.
+(cd "$WARP_HOME/mmm/onboarding" &&
+    npm ci --silent &&
+    URNETWORK_ROOT="$BUILD_HOME" node build.mjs check)
+error_trap 'onboarding email templates before release preparation'
+
 # These dependency-free Linux regressions must fail before allocating a release
 # or publishing expensive SDK/desktop artifacts, even when BUILD_TEST is empty.
 python3 -B "$BUILD_HOME/linux/app/tests/Preflight.py"
@@ -3702,8 +3710,8 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     # Brevo account's authorised-IP list.
     (cd $WARP_HOME/mmm/onboarding &&
         npm ci --silent &&
-        ./build.sh upload &&
-        ./build.sh write-config --config "$WARP_HOME/config/main/onboarding.yml")
+        URNETWORK_ROOT="$BUILD_HOME" ./build.sh upload &&
+        URNETWORK_ROOT="$BUILD_HOME" ./build.sh write-config --config "$WARP_HOME/config/main/onboarding.yml")
     error_trap 'onboarding email templates export to Brevo'
     (cd $WARP_HOME/config &&
         git add main/onboarding.yml &&
