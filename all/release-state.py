@@ -651,6 +651,33 @@ def verify_outputs(record):
         raise Refusal("completed output changed or is missing; restore the exact bytes/modes or start a new full release")
 
 
+def brevo_state_path(workspace, program):
+    if program not in ("onboarding", "reengagement"):
+        raise Refusal("unknown Brevo program")
+    directory = Path(workspace).resolve() / "mmm" / program
+    reported = run(["node", str(directory / "build.mjs"), "state-path"]).decode().strip()
+    path = Path(reported)
+    if not path.is_absolute() or not path.resolve().is_relative_to(directory.resolve()) or path.suffix != ".json":
+        raise Refusal(program + " generator reported an invalid upload-state path")
+    return path
+
+
+def brevo_templates(workspace, program):
+    path = brevo_state_path(workspace, program)
+    if path.is_symlink() or not path.is_file():
+        raise Refusal(program + " uploaded template-ID state is missing or is a symlink")
+    templates = json.loads(path.read_text())
+    def valid_map(value, depth):
+        if depth == 0:
+            return type(value) is int and value > 0
+        return (isinstance(value, dict) and bool(value) and
+                all(isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_-]+", key) and
+                    valid_map(item, depth - 1) for key, item in value.items()))
+    if not valid_map(templates, 3):
+        raise Refusal(program + " uploaded template-ID state has an invalid shape")
+    return templates
+
+
 def allowed_transition(workspace, before, after, transition, version, origin):
     # Trees whose existing paths a transition may only delete: the older
     # release directories that the new one replaces in the same commit.
@@ -665,8 +692,8 @@ def allowed_transition(workspace, before, after, transition, version, origin):
         # likewise the newest OFAC crypto address list (server cryptosanctions)
         allowed = {"config": ["all/crypto/" + release]}
         removable = {"config": ["all/crypto"]}
-    elif transition == "onboarding":
-        allowed = {"config": ["main/onboarding.yml"]}
+    elif transition in ("onboarding", "reengagement"):
+        allowed = {"config": ["main/" + transition + ".yml"]}
     elif transition in ("fdroid-prepare", "fdroid-restore"):
         allowed = {"build": ["android"], "build/android": ["app/settings.gradle", "app/app/build.gradle"]}
     else:
@@ -707,23 +734,24 @@ def allowed_transition(workspace, before, after, transition, version, origin):
         pin = git(Path(workspace) / "build", "rev-parse", after["build"]["head"] + ":android").decode().strip()
         if pin != after["build/android"]["head"]:
             raise Refusal("build Android gitlink does not match the observed release transition")
-    if transition == "onboarding":
+    if transition in ("onboarding", "reengagement"):
         repo = Path(workspace) / "config"
-        previous = git(repo, "show", before["config"]["head"] + ":main/onboarding.yml").decode()
-        current = git(repo, "show", after["config"]["head"] + ":main/onboarding.yml")
+        config_path = ":main/" + transition + ".yml"
+        previous = git(repo, "show", before["config"]["head"] + config_path).decode()
+        current = git(repo, "show", after["config"]["head"] + config_path)
         # Use the pinned generator's own pure merge instead of maintaining a
         # second YAML/formatting policy or accepting arbitrary file edits.
         script = '''import fs from "node:fs"; import {pathToFileURL} from "node:url";
 const {mergeTemplates}=await import(pathToFileURL(process.argv[1]));
-const {before,templates}=JSON.parse(fs.readFileSync(0,"utf8"));
-process.stdout.write(mergeTemplates(before,templates));'''
-        templates = json.loads((Path(workspace) / "mmm/onboarding/dist/brevo-templates.json").read_text())
+const {before,templates,root}=JSON.parse(fs.readFileSync(0,"utf8"));
+process.stdout.write(mergeTemplates(before,templates,{root}));'''
+        templates = brevo_templates(workspace, transition)
         result = subprocess.run(["node", "--input-type=module", "-e", script,
                                  str(Path(workspace) / "mmm/onboarding/lib/config.mjs")],
-                                input=encoded({"before": previous, "templates": templates}),
+                                input=encoded({"before": previous, "templates": templates, "root": transition}),
                                 capture_output=True, timeout=30)
         if result.returncode or result.stdout != current:
-            raise Refusal("onboarding config differs from the exact pinned template-ID merge")
+            raise Refusal(transition + " config differs from the exact pinned template-ID merge")
 
 
 def failure_hint(workspace, value):
@@ -751,7 +779,7 @@ def failure_hint(workspace, value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("locked", "recover-lock", "check-lock", "check-inputs", "candidate", "seal", "validate", "restore-prepared", "sdk-outputs", "begin", "complete", "transition", "status", "stage-state", "failure-hint", "effect-begin", "effect-complete"))
+    parser.add_argument("command", choices=("locked", "recover-lock", "check-lock", "check-inputs", "check-brevo-contract", "candidate", "seal", "validate", "restore-prepared", "sdk-outputs", "begin", "complete", "transition", "status", "stage-state", "failure-hint", "effect-begin", "effect-complete"))
     parser.add_argument("workspace")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -776,6 +804,12 @@ def main():
     if args.command == "check-inputs":
         go_environment_snapshot(args.workspace)
         deployment_snapshot(args.workspace)
+        return 0
+    if args.command == "check-brevo-contract":
+        for program in ("onboarding", "reengagement"):
+            if program == "onboarding" or (Path(args.workspace) / "config/main/reengagement.yml").is_file():
+                brevo_state_path(args.workspace, program)
+        print("verified pinned Brevo generator state-path contracts")
         return 0
     if args.command == "candidate":
         name = rest.pop(0)

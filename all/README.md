@@ -89,6 +89,14 @@ allocation, the harness renders every onboarding email template in every
 supported locale without calling Brevo. Both this check and the later Brevo
 export explicitly use the selected `build/localizations` checkout, so missing
 keys or translations fail before artifact publication and Main mutations.
+When configured, reengagement gets the same early check and selected store.
+The early gate also queries both pinned generators' read-only `state-path`
+interface without requiring an upload receipt to exist yet. After each program
+writes and commits its config, an immediate, separate checkpoint transition
+requires a well-formed positive template-ID map at that reported path and the
+exact output of the pinned `mergeTemplates` function for that program's root.
+Missing state, unrelated config changes and combined unobserved commits fail
+closed; a `dist/` copy is never fabricated to satisfy the checkpoint.
 
 Before generators, candidate builds or version allocation, Windows readiness
 checks the existing base image, its smoke-tested provisioning receipt, matching

@@ -963,6 +963,12 @@ error_trap 'localizations codegen'
     npm ci --silent &&
     URNETWORK_ROOT="$BUILD_HOME" node build.mjs check)
 error_trap 'onboarding email templates before release preparation'
+if [ -f "$WARP_HOME/config/main/reengagement.yml" ]; then
+    (cd "$WARP_HOME/mmm/reengagement" && URNETWORK_ROOT="$BUILD_HOME" node build.mjs check)
+    error_trap 're-engagement email templates before release preparation'
+fi
+python3 -B "$BUILD_HOME/all/release-state.py" check-brevo-contract "$WARP_HOME"
+error_trap 'Brevo generator state contracts before release preparation'
 
 # These dependency-free Linux regressions must fail before allocating a release
 # or publishing expensive SDK/desktop artifacts, even when BUILD_TEST is empty.
@@ -3725,6 +3731,7 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
             git_push_with_rebase_retry
         fi)
     error_trap 'onboarding templates config push'
+    release_transition onboarding
 
     # The re-engagement program's templates, the same way
     # (mmm/reengagement/build.sh renders mmm/reengagement/templates with the
@@ -3735,8 +3742,8 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     # reengagement.yml, so this step can merge before the config does.
     if [ -f "$WARP_HOME/config/main/reengagement.yml" ]; then
         (cd $WARP_HOME/mmm/reengagement &&
-            ./build.sh upload &&
-            ./build.sh write-config --config "$WARP_HOME/config/main/reengagement.yml")
+            URNETWORK_ROOT="$BUILD_HOME" ./build.sh upload &&
+            URNETWORK_ROOT="$BUILD_HOME" ./build.sh write-config --config "$WARP_HOME/config/main/reengagement.yml")
         error_trap 're-engagement email templates export to Brevo'
         (cd $WARP_HOME/config &&
             git add main/reengagement.yml &&
@@ -3745,8 +3752,8 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
                 git_push_with_rebase_retry
             fi)
         error_trap 're-engagement templates config push'
+        release_transition reengagement
     fi
-    release_transition onboarding
 
     # the release's config, template ids included (see build_config_updater)
     build_config_updater
