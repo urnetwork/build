@@ -75,6 +75,13 @@ slo_burn_check() {
 }
 SLO_BURN_CHECK=${SLO_BURN_CHECK-slo_burn_check}
 
+# Q-OPS-5's stop rule before the second NS: clean unless DNS_CHECK_CODE says otherwise
+dns_rollout_check() {
+    record_event dns-check "$@"
+    return "${DNS_CHECK_CODE:-0}"
+}
+DNS_ROLLOUT_CHECK=${DNS_ROLLOUT_CHECK-dns_rollout_check}
+
 sleep() {
     record_event sleep "$1"
 }
@@ -200,6 +207,17 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 	)
 }
 
+// §19.11's staged list as each wave deploys it, mmm first, so no lb routes the mmm sites before mmm runs,
+// with the sidecar's services in its order and mxedge's platform listener after the router (QD-243).
+var rolloutStagedServices = []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"}
+
+// The staged sidecar services whose SLO burn each wave reads first (D-OPS-9), in the wave's order.
+var rolloutBurnGatedServices = []string{"dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"}
+
+// The services each release deploys once, at 100%: those whose running versions cannot be sampled, and the
+// dns edges one host at a time, dnsedge-2 after Q-OPS-5's stop rule reads the first clean.
+var rolloutSinglePassServices = []string{"gossip", "alt", "proxy", "dnsedge-1", "dnsedge-2"}
+
 // Assert the complete cumulative rollout order, zero convergence timeout on
 // every deploy, every only-older boundary, and the single pass for services
 // whose running versions cannot be sampled.
@@ -217,12 +235,12 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 		deployEvent("grafana", 100, true),
 		deployMessage("grafana", 100, true),
 	}
-	// mmm leads every wave, so no lb routes the mmm sites before mmm runs.
-	services := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "evs"}
 	for _, percent := range []int{25, 50, 75, 100} {
 		// D-OPS-9: each wave reads the sidecar services' burn before it deploys
-		expected = append(expected, "check-burn\t--service=evs")
-		for _, service := range services {
+		for _, service := range rolloutBurnGatedServices {
+			expected = append(expected, "check-burn\t--service="+service)
+		}
+		for _, service := range rolloutStagedServices {
 			onlyOlder := service != "lb"
 			expected = append(
 				expected,
@@ -231,7 +249,11 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 			)
 		}
 		if percent == 100 {
-			for _, service := range []string{"gossip", "alt", "proxy"} {
+			for _, service := range rolloutSinglePassServices {
+				if service == "dnsedge-2" {
+					// Q-OPS-5: the first NS serves clean before the second deploys
+					expected = append(expected, "dns-check")
+				}
 				expected = append(
 					expected,
 					deployEvent(service, 100, false),
@@ -532,7 +554,7 @@ func TestRolloutDeploysTheDnsEdgesOneHostAtATime(t *testing.T) {
 	if want := []string{deployEvent("dnsedge-1", 100, false), deployMessage("dnsedge-1", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
 		t.Errorf("dnsedge-1 exit = %d, events = %q, want %q; output=%s", result.exitCode, result.events, want, result.output)
 	}
-	for _, stopped := range [][]string{{}, {"DNS_ROLLOUT_CHECK=false"}} {
+	for _, stopped := range [][]string{{"DNS_ROLLOUT_CHECK="}, {"DNS_ROLLOUT_CHECK=false"}} {
 		result := runRollout(t, append([]string{"SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100"}, stopped...)...)
 		if result.exitCode != 65 || len(result.events) != 0 {
 			t.Errorf("dnsedge-2 with %q: exit = %d, events = %q, want 65 and nothing deployed", stopped, result.exitCode, result.events)
@@ -616,9 +638,10 @@ func TestRolloutDeploysOnlyServicesWithImages(t *testing.T) {
 }
 
 // §19.11's staged list, which each sidecar service joins with its image and block (plan-OPS-small-readings
-// #12): the services each wave deploys keep that list's order, whatever has joined so far.
+// #12): the services each wave deploys keep that list's order, and with every block of §19.11's list landed,
+// the waves deploy the list whole, mxedge's platform listener after the router (QD-243).
 func TestRolloutStagesServicesInTheDesignOrder(t *testing.T) {
-	designOrder := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge"}
+	designOrder := []string{"mmm", "lb", "taskworker", "api", "connect", "web", "app", "mcp", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"}
 	result := runRollout(t)
 	if result.exitCode != 0 {
 		t.Fatalf("rollout exit = %d; output=%s", result.exitCode, result.output)
@@ -640,8 +663,27 @@ func TestRolloutStagesServicesInTheDesignOrder(t *testing.T) {
 			}
 			next = index + 1
 		}
-		if !slices.Contains(wave, "evs") {
-			t.Errorf("the %d%% wave leaves evs out: %q", percent, wave)
+		if !slices.Equal(wave, designOrder) {
+			t.Errorf("the %d%% wave deploys %q, want §19.11's whole list %q", percent, wave, designOrder)
+		}
+	}
+}
+
+// A full release deploys the dns edges once, at its end, dnsedge-1 before dnsedge-2, and stops before
+// dnsedge-2 when the stop rule reads the first NS unclean or cannot read it, everything else deployed.
+func TestRolloutDeploysTheDnsEdgesLastAndStopsBeforeTheSecondOnAFailedCheck(t *testing.T) {
+	for _, stopped := range [][]string{{"DNS_CHECK_CODE=1"}, {"DNS_ROLLOUT_CHECK="}} {
+		result := runRollout(t, stopped...)
+		if result.exitCode != 65 {
+			t.Fatalf("with %q: exit = %d, want 65; output=%s", stopped, result.exitCode, result.output)
+		}
+		if !slices.Contains(result.events, deployEvent("dnsedge-1", 100, false)) || !slices.Contains(result.events, deployMessage("proxy", 100, false)) {
+			t.Errorf("with %q: the single pass before dnsedge-2 did not deploy: %q", stopped, result.events)
+		}
+		for _, event := range result.events {
+			if strings.Contains(event, "\tdnsedge-2\t") || strings.HasPrefix(event, "message\tmain[100%] services:") {
+				t.Errorf("with %q: the release went on past the stop: %s", stopped, event)
+			}
 		}
 	}
 }
@@ -649,11 +691,12 @@ func TestRolloutStagesServicesInTheDesignOrder(t *testing.T) {
 // D-OPS-9's stop: a burn read before a wave stops that wave, and only that, before any of it deploys, the
 // waves before it standing.
 func TestRolloutBurnStopsTheNextWaveAndOnlyThat(t *testing.T) {
-	result := runRollout(t, "BURN_AT_CHECK=2")
+	// the burn read of the 50% wave's third gated service, evs
+	result := runRollout(t, fmt.Sprintf("BURN_AT_CHECK=%d", len(rolloutBurnGatedServices)+3))
 	if result.exitCode != 65 {
 		t.Fatalf("rollout exit = %d, want 65; output=%s", result.exitCode, result.output)
 	}
-	if !slices.Contains(result.events, deployEvent("evs", 25, true)) {
+	if !slices.Contains(result.events, deployEvent("mxedge-platform", 25, true)) {
 		t.Errorf("the 25%% wave before the burn did not deploy: %q", result.events)
 	}
 	for _, event := range result.events {
@@ -673,7 +716,7 @@ func TestRolloutBurnStopsTheNextWaveAndOnlyThat(t *testing.T) {
 // the stop and is posted.
 func TestRolloutUnknownBurnStopsAndAnOverridePassesLogged(t *testing.T) {
 	result := runRollout(t, "SLO_BURN_CHECK=")
-	if result.exitCode != 65 || !strings.Contains(result.output, "evs waits: no SLO_BURN_CHECK reads its SLO burn") {
+	if result.exitCode != 65 || !strings.Contains(result.output, "dns waits: no SLO_BURN_CHECK reads its SLO burn") {
 		t.Fatalf("unknown: exit = %d; output=%s", result.exitCode, result.output)
 	}
 	for _, event := range result.events {
@@ -681,18 +724,25 @@ func TestRolloutUnknownBurnStopsAndAnOverridePassesLogged(t *testing.T) {
 			t.Errorf("a wave deployed with its burn unread: %s", event)
 		}
 	}
-	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE=evs")
+	// an override names one service: the others still stop the wave
+	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE=dns")
+	if result.exitCode != 65 || !strings.Contains(result.output, "gkm waits: no SLO_BURN_CHECK reads its SLO burn") {
+		t.Fatalf("one override: exit = %d; output=%s", result.exitCode, result.output)
+	}
+	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE="+strings.Join(rolloutBurnGatedServices, " "))
 	if result.exitCode != 0 {
 		t.Fatalf("override: exit = %d; output=%s", result.exitCode, result.output)
 	}
-	overrides := 0
-	for _, event := range result.events {
-		if event == "message\tmain evs: the SLO burn stop is overridden by name" {
-			overrides++
+	for _, service := range rolloutBurnGatedServices {
+		overrides := 0
+		for _, event := range result.events {
+			if event == "message\tmain "+service+": the SLO burn stop is overridden by name" {
+				overrides++
+			}
 		}
-	}
-	if overrides != 4 || !slices.Contains(result.events, deployEvent("evs", 100, true)) {
-		t.Errorf("override: %d overrides posted, events %q", overrides, result.events)
+		if overrides != 4 || !slices.Contains(result.events, deployEvent(service, 100, true)) {
+			t.Errorf("override: %d overrides posted for %s, events %q", overrides, service, result.events)
+		}
 	}
 }
 
@@ -709,12 +759,12 @@ func TestRolloutGatesOnlyTheSidecarServices(t *testing.T) {
 	for _, event := range gated.events {
 		if strings.HasPrefix(event, "check-burn") {
 			checks++
-			if event != "check-burn\t--service=evs" {
+			if !slices.Contains(rolloutBurnGatedServices, strings.TrimPrefix(event, "check-burn\t--service=")) {
 				t.Errorf("a burn read for %s", event)
 			}
 		}
 	}
-	if checks != 4 {
-		t.Errorf("%d burn reads, want one a wave", checks)
+	if want := 4 * len(rolloutBurnGatedServices); checks != want {
+		t.Errorf("%d burn reads, want %d, each gated service once a wave", checks, want)
 	}
 }

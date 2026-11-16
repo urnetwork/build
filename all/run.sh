@@ -3740,7 +3740,7 @@ builder_message "service mcp \`${EXTERNAL_WARP_VERSION}\` available"
 
 # The sidecar's evs engine (EVS1-M2-21, OPS-M2-03): server/cli/evs, a block of its own with no Postgres
 # (DESIGN §19.4), which joins the rollout's staged waves with its fragment in
-# warp/services/sidecar-blocks/evs.yml. gkm joins the same way once server/cli/gkm exists (KEYS-M2-17).
+# warp/services/sidecar-blocks/evs.yml. gkm joins the same way, its image below (KEYS-M2-17).
 if release_build image-evs "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-evs.json"; then
 release_image_publication_begin evs
 error_trap 'verify unpublished evs image'
@@ -3754,14 +3754,29 @@ release_image_receipt evs
 error_trap 'verify retained evs image digest'
 builder_message "service evs \`${EXTERNAL_WARP_VERSION}\` available"
 
+# The sidecar's gkm engine (KEYS-M2-17, D-OPS-2): server/cli/gkm, its own service from v0, with no
+# Postgres, its fragment warp/services/sidecar-blocks/gkm.yml.
+if release_build image-gkm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gkm.json"; then
+release_image_publication_begin gkm
+error_trap 'verify unpublished gkm image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/gkm/Makefile)
+error_trap 'warpctl build gkm'
+release_image_publication_complete gkm
+error_trap 'record gkm image digest'
+release_complete image-gkm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gkm.json"
+fi
+release_image_receipt gkm
+error_trap 'verify retained gkm image digest'
+builder_message "service gkm \`${EXTERNAL_WARP_VERSION}\` available"
+
 # The sidecar's dns engine (DNS-M5-18): one binary, the API role's image from
 # server/cli/dns and the edge role's from server/cli/dnsedge. The edge runs as two
 # services, dnsedge-1 and dnsedge-2, one NS host each, so a release never takes
 # both NS at once (warp-w5w6-dnsedge-one-host); warpctl names an image after its
 # Makefile's directory, so the one verified dnsedge image is published under
-# each service name, as manager's is under app. These are images only: each
-# service joins the rollout's waves with its blocks (warp-w5w6-w6-ownership), and
-# deploy-rollout.zsh already classes all three.
+# each service name, as manager's is under app. Each service joined the rollout's
+# waves with its block (warp-w5w6-w6-ownership; OPS-M5-03): dns staged, the two
+# dns edges each in one pass, dnsedge-1 first.
 if release_build image-dns "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-dns.json"; then
 release_image_publication_begin dns
 error_trap 'verify unpublished dns image'
@@ -3813,6 +3828,62 @@ fi
 release_image_receipt dnsedge-2
 error_trap 'verify retained dnsedge-2 image digest'
 builder_message "service dnsedge-2 \`${EXTERNAL_WARP_VERSION}\` available"
+
+# The sidecar's M5 and M7 edges (OPS-M5-03, OPS-M7-01; DESIGN §19.4): sockets (SOCK-M5-08), tlsedge
+# (TLS-M5-11), mxedge's router (MAIL-M7-19) from server/cli/mxedge and its platform listener (MAIL-M5-04)
+# from server/cli/mxedge-platform, the same main with its own role, each a service with its fragment in
+# warp/services/sidecar-blocks/.
+if release_build image-sockets "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-sockets.json"; then
+release_image_publication_begin sockets
+error_trap 'verify unpublished sockets image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/sockets/Makefile)
+error_trap 'warpctl build sockets'
+release_image_publication_complete sockets
+error_trap 'record sockets image digest'
+release_complete image-sockets "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-sockets.json"
+fi
+release_image_receipt sockets
+error_trap 'verify retained sockets image digest'
+builder_message "service sockets \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-tlsedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-tlsedge.json"; then
+release_image_publication_begin tlsedge
+error_trap 'verify unpublished tlsedge image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/tlsedge/Makefile)
+error_trap 'warpctl build tlsedge'
+release_image_publication_complete tlsedge
+error_trap 'record tlsedge image digest'
+release_complete image-tlsedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-tlsedge.json"
+fi
+release_image_receipt tlsedge
+error_trap 'verify retained tlsedge image digest'
+builder_message "service tlsedge \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-mxedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mxedge.json"; then
+release_image_publication_begin mxedge
+error_trap 'verify unpublished mxedge image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/mxedge/Makefile)
+error_trap 'warpctl build mxedge'
+release_image_publication_complete mxedge
+error_trap 'record mxedge image digest'
+release_complete image-mxedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mxedge.json"
+fi
+release_image_receipt mxedge
+error_trap 'verify retained mxedge image digest'
+builder_message "service mxedge \`${EXTERNAL_WARP_VERSION}\` available"
+
+if release_build image-mxedge-platform "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mxedge-platform.json"; then
+release_image_publication_begin mxedge-platform
+error_trap 'verify unpublished mxedge-platform image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/mxedge-platform/Makefile)
+error_trap 'warpctl build mxedge-platform'
+release_image_publication_complete mxedge-platform
+error_trap 'record mxedge-platform image digest'
+release_complete image-mxedge-platform "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mxedge-platform.json"
+fi
+release_image_receipt mxedge-platform
+error_trap 'verify retained mxedge-platform image digest'
+builder_message "service mxedge-platform \`${EXTERNAL_WARP_VERSION}\` available"
 
 if release_build image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"; then
 release_image_publication_begin gossip

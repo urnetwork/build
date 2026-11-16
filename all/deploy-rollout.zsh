@@ -149,13 +149,17 @@ warp_rollout() {
     # its block, a fragment in warp/services/sidecar-blocks/ that the owner applies
     # to the vault before these branches merge to main, since warpctl deploy stops
     # on a service with no blocks. The sidecar's take §19.11's order, mmm lb
-    # taskworker api connect web app mcp dns gkm evs sockets tlsedge mxedge, as each
-    # joins: evs now, gkm with server/cli/gkm's image (plan-OPS-small-readings #12).
-    staged_services=(mmm lb taskworker api connect web app mcp evs)
+    # taskworker api connect web app mcp dns gkm evs sockets tlsedge mxedge, each
+    # joining in the milestone its block lands (plan-OPS-small-readings #12), with
+    # mxedge's platform listener staged after the router (QD-243).
+    staged_services=(mmm lb taskworker api connect web app mcp dns gkm evs sockets tlsedge mxedge mxedge-platform)
     # Gossip has no status route, while Alt and Proxy intentionally bypass the
     # load balancer. Without --only-older, a cumulative rollout would retag and
-    # restart already selected unobservable blocks in every later wave.
-    single_pass_services=(gossip alt proxy)
+    # restart already selected unobservable blocks in every later wave. The dns
+    # edges are host-pinned with no lb status route: each deploys its one host in
+    # one pass, dnsedge-1 first, and dnsedge-2 only once dnsedge-1 serves clean
+    # (Q-OPS-5, dns_rollout_stop_check).
+    single_pass_services=(gossip alt proxy dnsedge-1 dnsedge-2)
 
     warp_rollout_sample 0 || return $?
 
