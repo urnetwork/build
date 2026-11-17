@@ -1656,6 +1656,29 @@ go_edit_require_subpackages () {
     find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "/\/v[0-9]\+/! s|\"$1\([^\"]*\)\"|\"$1${GO_MOD_SUFFIX}\1\"|g" {} \;
 }
 
+# Run from a repository's top after the root's go_edit_require_subpackages, given the root's module
+# path and go_mod_fork's arguments. go_mod_fork leaves each named tree beside the versioned module, and
+# one holding a go.mod is a module of its own that is never tagged, so its packages keep their
+# unversioned paths. The root's pass rewrote every quoted path under the root, these modules' own
+# included, and the root's tag holds none of them: sdk/cgo's tests import .../sdk/cgo/abitest, and
+# cgo's tidy would stop the release after sdk's tag is pushed (QD-1004). So each one's paths go back
+# to its own, by whole path elements, in every Go file and Makefile of the tree. A sed that fails
+# fails the step, before the root's tag.
+go_edit_restore_nested_modules () {
+    local root="$1"
+    shift
+    local tree
+    local -a expressions
+    for tree in "$@"; do
+        if [ -f "$tree/go.mod" ]; then
+            expressions+=(-e "s|\"${root//./\\.}${GO_MOD_SUFFIX}/${tree//./\\.}\([/\"]\)|\"$root/$tree\1|g")
+        fi
+    done
+    if [ -n "$GO_MOD_SUFFIX" ] && (( ${#expressions} > 0 )); then
+        find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "${expressions[@]}" {} +
+    fi
+}
+
 go_mod_fork_rebase_local_replaces () {
     local module_dir="v${GO_MOD_VERSION}"
     local go_mod_json
@@ -2240,7 +2263,12 @@ error_trap 'sdk js edit'
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
-    go_mod_fork 'build' 'cgo' 'js' 'packaging' 'python' 'ruby' 'rust' 'csharp' 'java' 'kotlin' 'swift')
+    # The trees that stay beside the versioned module, named once. build, cgo, js and packaging are
+    # modules of their own, never tagged, so their paths go back to their own after the root's
+    # rewrite above (QD-1004).
+    sdk_kept_trees=('build' 'cgo' 'js' 'packaging' 'python' 'ruby' 'rust' 'csharp' 'java' 'kotlin' 'swift') &&
+    go_edit_restore_nested_modules github.com/urnetwork/sdk "${sdk_kept_trees[@]}" &&
+    go_mod_fork "${sdk_kept_trees[@]}")
 error_trap 'sdk edit'
 
 (cd $BUILD_HOME/sdk &&
