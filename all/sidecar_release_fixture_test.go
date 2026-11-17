@@ -203,7 +203,9 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 }
 
 // Commits directory as the repository's start, on the version branch, keeping what its own
-// .gitignore would hide: the copy must equal the tracked tree it came from.
+// .gitignore would hide: the copy must equal the tracked tree it came from. The start is named main
+// too, as the release host's clone has main below the version branch run.sh cuts, so sidecar's make
+// check reads connect's release edit against the commit it started from, as X9 does (QD-1045).
 func (self *releaseFixture) commitCopy(directory string) {
 	self.t.Helper()
 	runGit(self.t, directory, "init", "-q", "-b", "v"+fixtureExternalVersion)
@@ -212,6 +214,23 @@ func (self *releaseFixture) commitCopy(directory string) {
 	runGit(self.t, directory, "config", "core.excludesFile", "/dev/null")
 	runGit(self.t, directory, "add", "-f", ".")
 	runGit(self.t, directory, "commit", "-q", "-m", "main")
+	runGit(self.t, directory, "branch", "main")
+}
+
+// Each copy names its start main beside the version branch it is on, as the release host's clone does,
+// so check/'s X9, which fails a connect with no main (REPO-M0-04), compares connect's release edit
+// against where it began rather than failing the real run's make check (QD-1045).
+func TestFixtureCopiesNameTheirStartMain(t *testing.T) {
+	fixture := newReleaseFixture(t)
+	fixture.write("glog", map[string]string{"go.mod": "module github.com/urnetwork/glog\n\ngo 1.27.3\n", "glog.go": "package glog\n"})
+	directory := filepath.Join(fixture.buildHome, "glog")
+	if branch := runGit(t, directory, "branch", "--show-current"); branch != "v"+fixtureExternalVersion {
+		t.Errorf("the copy is on %q, not the version branch", branch)
+	}
+	mainCommit := runGit(t, directory, "rev-parse", "--verify", "refs/heads/main^{commit}")
+	if headCommit := runGit(t, directory, "rev-parse", "HEAD"); mainCommit != headCommit {
+		t.Errorf("main is %s, and the copy's start is %s", mainCommit, headCommit)
+	}
 }
 
 // Where a repository's checkout is: a populated submodule of this repository on the release host,
