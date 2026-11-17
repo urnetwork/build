@@ -55,6 +55,8 @@ const (
 	fixtureSmtpproof       = "github.com/urnetwork/sidecar/smtpproof/v2026"
 	fixtureConnectRoot     = "github.com/urnetwork/connect/v2026"
 	fixtureSdkRoot         = "github.com/urnetwork/sdk/v2026"
+	// a package of sdk's untagged cgo module, which cgo's tests import by cgo's own path
+	fixtureSdkCgoAbitest = "github.com/urnetwork/sdk/cgo/abitest"
 	// how a shell step calls back into this binary to publish a tag
 	fixturePublishTagName        = "SIDECAR_FIXTURE_PUBLISH_TAG"
 	fixturePublishRepositoryName = "SIDECAR_FIXTURE_PUBLISH_REPOSITORY"
@@ -80,7 +82,7 @@ var fixtureReleaseModules = []struct {
 // run.sh's functions the regions call. go_mod_edit_gvisor, git_commit and release_git_tag are the
 // harness's stand-ins, and npm_fork_update has nothing to do here.
 var fixtureFunctionNames = []string{
-	"go_edit_require", "go_edit_require_subpackages", "go_mod_drop_require", "go_mod_edit_module",
+	"go_edit_require", "go_edit_require_subpackages", "go_edit_restore_nested_modules", "go_mod_drop_require", "go_mod_edit_module",
 	"go_mod_edit_require", "go_mod_fork_rebase_local_replaces", "go_mod_fork_prepare", "go_mod_fork_tidy",
 	"go_mod_fork", "go_mod_fork_update", "git_tag", "sidecar_release_edit", "smtpproof_release_edit",
 	"smtpproof_git_tag", "sidecar_cli_release_edit", "sidecar_release_publish", "sidecar_release_consumer_edit",
@@ -872,15 +874,22 @@ func main() {
 	sdkNested := func(name string) string {
 		return "module github.com/urnetwork/sdk/" + name + "\n\ngo 1.27.3\n\nrequire github.com/urnetwork/sdk v0.0.0\n\n" + sdkRequires + "\nreplace github.com/urnetwork/sdk => ..\n" + sdkReplaces("../../")
 	}
+	// cgo's tests import a package of cgo's own, as the real cgo's import abitest (QD-844), and js's main
+	// one of js's own, as the real sidecarwasm imports sidecarworker. Neither module is tagged, so both
+	// paths stay unversioned through the root's rewrite, or cgo's tidy stops the release after sdk's tag
+	// (QD-1004).
 	fixture.write("sdk", map[string]string{
-		"go.mod":        "module github.com/urnetwork/sdk\n\ngo 1.27.3\n\n" + sdkRequires + sdkReplaces("../"),
-		"sdk.go":        sdkImports,
-		"build/go.mod":  sdkNested("build"),
-		"build/main.go": "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
-		"cgo/go.mod":    sdkNested("cgo"),
-		"cgo/main.go":   "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
-		"js/go.mod":     sdkNested("js"),
-		"js/main.go":    "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
+		"go.mod":              "module github.com/urnetwork/sdk\n\ngo 1.27.3\n\n" + sdkRequires + sdkReplaces("../"),
+		"sdk.go":              sdkImports,
+		"build/go.mod":        sdkNested("build"),
+		"build/main.go":       "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
+		"cgo/go.mod":          sdkNested("cgo"),
+		"cgo/main.go":         "package main\n\nimport _ \"github.com/urnetwork/sdk\"\n\nfunc main() {}\n",
+		"cgo/abitest/doc.go":  "package abitest\n",
+		"cgo/main_test.go":    "package main\n\nimport _ \"" + fixtureSdkCgoAbitest + "\"\n",
+		"js/go.mod":           sdkNested("js"),
+		"js/main.go":          "package main\n\nimport (\n\t_ \"github.com/urnetwork/sdk\"\n\t_ \"github.com/urnetwork/sdk/js/worker\"\n)\n\nfunc main() {}\n",
+		"js/worker/worker.go": "package worker\n",
 	})
 	return fixture
 }
@@ -987,6 +996,33 @@ func TestFixtureFailsWhenThirdPartyMovesIntoTheModule(t *testing.T) {
 	}
 	if findings := fixture.forkFindings(); !slices.Equal(findings, want) {
 		t.Fatalf("the moved tree's findings are\n%s\nwant\n%s", strings.Join(findings, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The step as it stood before QD-1004: sdk's root rewrite turned cgo's own path in cgo's tests into
+// .../sdk/v2026/cgo/abitest, which sdk's tag does not hold, so cgo's tidy stopped the release after
+// sdk's tag was pushed.
+func TestFixtureFailsWhenSdkNestedModulePathsAreVersioned(t *testing.T) {
+	restore := "go_edit_restore_nested_modules () {\n"
+	fixture := newSmallReleaseFixture(t)
+	output, err := fixture.release(func(source string) string {
+		if strings.Count(source, restore) != 1 {
+			t.Fatal("the restore's definition moved, so this plants nothing")
+		}
+		return strings.Replace(source, restore, restore+"    return 0\n", 1)
+	})
+	if err == nil {
+		t.Fatalf("the release succeeded with sdk's nested module paths versioned:\n%s", output)
+	}
+	broken := strings.Replace(fixtureSdkCgoAbitest, "github.com/urnetwork/sdk/", fixtureSdkRoot+"/", 1)
+	for _, want := range []string{"does not contain package " + broken, "fixture step failed (1): sdk push branch"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("the failure is not cgo's tidy missing its own package, for want of %q:\n%s", want, output)
+		}
+	}
+	// sdk's tag was pushed before the tidy, which is what makes this failure cost a version
+	if tags := runGit(t, filepath.Join(fixture.buildHome, "sdk"), "tag"); tags != "v"+fixtureExternalVersion {
+		t.Fatalf("sdk's tags after the failed tidy are %q, want its root's alone", tags)
 	}
 }
 
