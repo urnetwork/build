@@ -15,6 +15,12 @@
 // A consumer here has no replaces, so it links upstream gVisor and pion/sctp, which compile. This
 // proves module paths and nothing about the forks: `ur` as the release builds it keeps both.
 //
+// The sidecar tree's third_party/ forks, QD-193's go-smtp and mox in the real tree and one small
+// module in the small tree, stay at its top beside v2026/ (QD-920, owner decision 278), so the
+// release's own tidies, cli's and mlsinterop's among them, show each module of the repository still
+// reaching them through its replace. A consumer with no replace links the fork's upstream release,
+// which the proxy serves: the real cache's go-smtp, or the small module's upstream.
+//
 // The real module cache is read through the proxy and never written. This stays out of plain go
 // test, as make size does, because it builds connect twice. run.sh runs it before a version exists,
 // so a broken rewrite stops a release before any tag does.
@@ -28,8 +34,10 @@ package allbuild
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -51,7 +59,23 @@ const (
 	fixturePublishTagName        = "SIDECAR_FIXTURE_PUBLISH_TAG"
 	fixturePublishRepositoryName = "SIDECAR_FIXTURE_PUBLISH_REPOSITORY"
 	fixturePublishProxyName      = "SIDECAR_FIXTURE_PUBLISH_PROXY"
+	// the small tree's stand-in for QD-193's forks, in third_party/fork, and the upstream release of
+	// it that the proxy serves
+	fixtureForkModule  = "fixture.example/fork"
+	fixtureForkVersion = "v0.1.0"
 )
+
+// A module of the repository on the version branch, from the sidecar tree's top, and the climb from
+// its directory back to that top, where third_party/ stays.
+var fixtureReleaseModules = []struct {
+	name   string
+	climbs string
+}{
+	{name: "v2026", climbs: "../"},
+	{name: "smtpproof/v2026", climbs: "../../"},
+	{name: "cli", climbs: "../"},
+	{name: "mlsinterop", climbs: "../"},
+}
 
 // run.sh's functions the regions call. go_mod_edit_gvisor, git_commit and release_git_tag are the
 // harness's stand-ins, and npm_fork_update has nothing to do here.
@@ -610,10 +634,107 @@ func (self *releaseFixture) sdkFindings() []string {
 	return findings
 }
 
-// Everything §4.9's fixture line shows.
+// QD-920: third_party/ stays at the sidecar tree's top beside v2026/, and every module of the
+// repository replaces each fork there, the root's from v2026/ and cli's and mlsinterop's as
+// ../third_party/X, smtpproof's from smtpproof/v2026/ as ../../third_party/X, each reaching a go.mod
+// of the fork's path. A tree with no fork in third_party/ would pass this in silence, so it is one.
+func (self *releaseFixture) forkFindings() []string {
+	self.t.Helper()
+	top := filepath.Join(self.buildHome, "sidecar")
+	type goModJson struct {
+		Module struct {
+			Path string
+		}
+		Replace []struct {
+			Old struct {
+				Path string
+			}
+			New struct {
+				Path    string
+				Version string
+			}
+		}
+	}
+	read := func(directory string) (*goModJson, error) {
+		output, err := self.goCommand(directory, nil, "mod", "edit", "-json")
+		if err != nil {
+			return nil, err
+		}
+		file := &goModJson{}
+		if err := json.Unmarshal([]byte(output), file); err != nil {
+			return nil, err
+		}
+		return file, nil
+	}
+	// the forks where the release should leave them, and where the step before QD-920 moved them
+	forkGoMods := []string{}
+	for _, pattern := range []string{"third_party/*/go.mod", "v2026/third_party/*/go.mod"} {
+		matches, err := filepath.Glob(filepath.Join(top, filepath.FromSlash(pattern)))
+		if err != nil {
+			self.t.Fatal(err)
+		}
+		forkGoMods = append(forkGoMods, matches...)
+	}
+	if len(forkGoMods) == 0 {
+		return []string{"the sidecar tree holds no module in third_party/, so nothing shows the release keeps one"}
+	}
+	// each fork's directory in third_party/, by its module path
+	forkDirectories := map[string]string{}
+	for _, forkGoMod := range forkGoMods {
+		file, err := read(filepath.Dir(forkGoMod))
+		if err != nil {
+			return []string{fmt.Sprintf("third_party/%s: %v", filepath.Base(filepath.Dir(forkGoMod)), err)}
+		}
+		forkDirectories[file.Module.Path] = filepath.Base(filepath.Dir(forkGoMod))
+	}
+	findings := []string{}
+	for _, module := range fixtureReleaseModules {
+		directory := filepath.Join(top, filepath.FromSlash(module.name))
+		file, err := read(directory)
+		if err != nil {
+			findings = append(findings, fmt.Sprintf("%s: %v", module.name, err))
+			continue
+		}
+		targets := map[string]string{}
+		for _, replace := range file.Replace {
+			targets[replace.Old.Path] = strings.TrimSpace(replace.New.Path + " " + replace.New.Version)
+		}
+		for _, forkPath := range slices.Sorted(maps.Keys(forkDirectories)) {
+			want := module.climbs + "third_party/" + forkDirectories[forkPath]
+			target, found := targets[forkPath]
+			if !found {
+				findings = append(findings, fmt.Sprintf("%s: no replace of %s", module.name, forkPath))
+				continue
+			}
+			if target != want {
+				findings = append(findings, fmt.Sprintf("%s: replace %s => %s, and the release's is %s", module.name, forkPath, target, want))
+			}
+			forkDirectory := filepath.Join(directory, filepath.FromSlash(target))
+			if _, err := os.Stat(filepath.Join(forkDirectory, "go.mod")); err != nil {
+				findings = append(findings, fmt.Sprintf("%s: replace %s => %s reaches no go.mod", module.name, forkPath, target))
+				continue
+			}
+			if forkFile, err := read(forkDirectory); err != nil {
+				findings = append(findings, fmt.Sprintf("%s: replace %s => %s: %v", module.name, forkPath, target, err))
+			} else if forkFile.Module.Path != forkPath {
+				findings = append(findings, fmt.Sprintf("%s: replace %s => %s reaches the module %s", module.name, forkPath, target, forkFile.Module.Path))
+			}
+		}
+	}
+	switch _, err := os.Stat(filepath.Join(top, "v2026", "third_party")); {
+	case err == nil:
+		findings = append(findings, "v2026/third_party: the forks moved into the root module's tree")
+	case !errors.Is(err, fs.ErrNotExist):
+		findings = append(findings, fmt.Sprintf("v2026/third_party: %v", err))
+	}
+	return findings
+}
+
+// Everything §4.9's fixture line shows, and where the release left third_party/.
 func (self *releaseFixture) findings() []string {
 	self.t.Helper()
-	findings := self.scratchFindings()
+	findings := self.forkFindings()
+	findings = append(findings, self.scratchFindings()...)
 	findings = append(findings, self.urFindings()...)
 	return append(findings, self.sdkFindings()...)
 }
@@ -667,14 +788,48 @@ func newSmallReleaseFixture(t *testing.T) *releaseFixture {
 		"coretest/go.mod":      "module github.com/urnetwork/operator-core/coretest\n\ngo 1.27.3\n\nrequire github.com/urnetwork/operator-core v0.0.0\n\nreplace github.com/urnetwork/operator-core => ..\n\nreplace github.com/urnetwork/connect => ../../connect\n\nreplace github.com/urnetwork/glog => ../../glog\n",
 		"coretest/coretest.go": "package coretest\n\nimport _ \"github.com/urnetwork/operator-core\"\n",
 	})
+	// The fork: the root requires its upstream release and every module of the repository replaces
+	// it with third_party/fork, the root from ./, the nested modules from ../ and sdk's from beside
+	// sidecar, as the real tree does go-smtp. The proxy serves the upstream release, which a consumer
+	// with no replace links, as the real cache serves upstream go-smtp.
+	forkFiles := map[string]string{
+		"go.mod":  "module " + fixtureForkModule + "\n\ngo 1.27.3\n",
+		"fork.go": "package fork\n",
+	}
+	upstream := filepath.Join(fixture.root, "upstream")
+	if err := os.MkdirAll(upstream, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range forkFiles {
+		if err := os.WriteFile(filepath.Join(upstream, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.commitCopy(upstream)
+	if _, err := fixture.proxy.publish(upstream, "HEAD", "", fixtureForkVersion); err != nil {
+		t.Fatal(err)
+	}
+	forkReplace := func(climb string) string {
+		return "\nreplace " + fixtureForkModule + " => " + climb + "third_party/fork\n"
+	}
 	sidecarFiles := map[string]string{}
 	for name, content := range sidecarReleaseTreeFiles {
 		sidecarFiles[name] = content
 	}
+	for name, content := range forkFiles {
+		sidecarFiles["third_party/fork/"+name] = content
+	}
 	sidecarFiles["protocol/protocol.go"] = "package protocol\n\nimport _ \"google.golang.org/protobuf/proto\"\n"
 	sidecarFiles["protocol/bridge/bridge.go"] = "package bridge\n"
 	sidecarFiles["dnsservice/doc.go"] = "package dnsservice\n"
-	sidecarFiles["go.mod"] = strings.Replace(sidecarFiles["go.mod"], "\tgithub.com/urnetwork/glog v0.0.0\n", "\tgithub.com/urnetwork/glog v0.0.0\n\tgoogle.golang.org/protobuf v1.36.11\n", 1)
+	sidecarFiles["fork.go"] = "package sidecar\n\nimport _ \"" + fixtureForkModule + "\"\n"
+	sidecarFiles["go.mod"] = strings.Replace(sidecarFiles["go.mod"], "\tgithub.com/urnetwork/glog v0.0.0\n", "\tgithub.com/urnetwork/glog v0.0.0\n\t"+fixtureForkModule+" "+fixtureForkVersion+"\n\tgoogle.golang.org/protobuf v1.36.11\n", 1) + forkReplace("./")
+	for _, nested := range []string{"smtpproof", "cli", "mlsinterop"} {
+		sidecarFiles[nested+"/go.mod"] += forkReplace("../")
+	}
+	// mlsinterop's tests reach the root, as the real peers' do, so its tidy needs the fork too
+	sidecarFiles["mlsinterop/go.mod"] += "\nrequire github.com/urnetwork/sidecar v0.0.0\n"
+	sidecarFiles["mlsinterop/peer_test.go"] = "package mlsinterop\n\nimport _ \"github.com/urnetwork/sidecar\"\n"
 	sidecarFiles["cli/main.go"] = `package main
 
 import (
@@ -691,7 +846,8 @@ func main() {
 	fixture.write("sidecar", sidecarFiles)
 	sdkRequires := "require (\n\tgithub.com/urnetwork/connect v0.0.0\n\tgithub.com/urnetwork/glog v0.0.0\n\tgithub.com/urnetwork/goidenticons v0.0.0\n\tgithub.com/urnetwork/sidecar v0.0.0\n)\n"
 	sdkReplaces := func(climb string) string {
-		return fmt.Sprintf("\nreplace github.com/urnetwork/connect => %[1]sconnect\n\nreplace github.com/urnetwork/glog => %[1]sglog\n\nreplace github.com/urnetwork/goidenticons => %[1]sgoidenticons\n\nreplace github.com/urnetwork/sidecar => %[1]ssidecar\n", climb)
+		return fmt.Sprintf("\nreplace github.com/urnetwork/connect => %[1]sconnect\n\nreplace github.com/urnetwork/glog => %[1]sglog\n\nreplace github.com/urnetwork/goidenticons => %[1]sgoidenticons\n\nreplace github.com/urnetwork/sidecar => %[1]ssidecar\n", climb) +
+			forkReplace(climb+"sidecar/")
 	}
 	sdkImports := "package sdk\n\nimport (\n\t_ \"github.com/urnetwork/connect\"\n\t_ \"github.com/urnetwork/glog\"\n\t_ \"github.com/urnetwork/goidenticons\"\n\t_ \"github.com/urnetwork/sidecar\"\n)\n\nconst Version string = \"\"\n"
 	sdkNested := func(name string) string {
@@ -779,6 +935,39 @@ func TestFixtureFailsWhenTheRootRewriteRunsFirst(t *testing.T) {
 	}
 	if !strings.Contains(output, fixtureSidecarRoot+"/smtpproof") {
 		t.Fatalf("the failure does not name the broken path:\n%s", output)
+	}
+}
+
+// The step as it stood before QD-920 moved third_party/ into v2026/ with the rest of the tree: the
+// root's replace still reached its fork, which moved with it, and smtpproof's walked to
+// v2026/third_party/, but cli's ../third_party/fork reached nothing, so its tidy stopped the release
+// after both tags were cut.
+func TestFixtureFailsWhenThirdPartyMovesIntoTheModule(t *testing.T) {
+	kept := " 'third_party'"
+	fixture := newSmallReleaseFixture(t)
+	output, err := fixture.release(func(source string) string {
+		if strings.Count(source, kept) != 1 {
+			t.Fatal("sidecar_release_edit's go_mod_fork arguments changed, so this plants nothing")
+		}
+		return strings.Replace(source, kept, "", 1)
+	})
+	if err == nil {
+		t.Fatalf("the release succeeded with third_party/ moved into v2026/:\n%s", output)
+	}
+	for _, want := range []string{sidecarRootModule + "/cli imports", fixtureForkModule + "@" + fixtureForkVersion, "../third_party/fork", "fixture step failed (1): sidecar push branch"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("the failure is not cli's tidy missing the fork, for want of %q:\n%s", want, output)
+		}
+	}
+	want := []string{
+		"v2026: replace " + fixtureForkModule + " => ./third_party/fork, and the release's is ../third_party/fork",
+		"smtpproof/v2026: replace " + fixtureForkModule + " => ../../v2026/third_party/fork, and the release's is ../../third_party/fork",
+		"cli: replace " + fixtureForkModule + " => ../third_party/fork reaches no go.mod",
+		"mlsinterop: replace " + fixtureForkModule + " => ../third_party/fork reaches no go.mod",
+		"v2026/third_party: the forks moved into the root module's tree",
+	}
+	if findings := fixture.forkFindings(); !slices.Equal(findings, want) {
+		t.Fatalf("the moved tree's findings are\n%s\nwant\n%s", strings.Join(findings, "\n"), strings.Join(want, "\n"))
 	}
 }
 
