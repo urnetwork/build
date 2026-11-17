@@ -1804,6 +1804,15 @@ go_mod_fork_update () {
 #
 # Run in sidecar/. The design documents stay beside the module, as server's
 # sim-latency baseline does, so they stay out of every consumer's module cache.
+#
+# third_party/ stays there too (QD-920, owner decision 278). It holds QD-193's
+# go-smtp fork and mox subset, each a module of its own, so neither rides in the
+# root's zip either way, and at the top every development replace of them keeps
+# resolving: go_mod_fork rebases the root's ./third_party/X to ../third_party/X
+# and smtpproof's ../third_party/X to ../../third_party/X, cli's and mlsinterop's
+# ../third_party/X stand for sidecar_cli_release_edit's tidy, and server's, sn's
+# and sdk's ../sidecar/third_party/X stand. Moved into v2026/, cli's and
+# mlsinterop's would point at nothing and their tidy would stop the release.
 sidecar_release_edit () {
     [ -n "$WARP_VERSION" ] &&
     go_edit_require_subpackages github.com/urnetwork/sidecar/smtpproof &&
@@ -1822,7 +1831,7 @@ sidecar_release_edit () {
     # it misses, and a release must not ship a ur that prints no version.
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sidecar.go &&
     grep -Fq "Version string = \"${WARP_VERSION}\"" sidecar.go &&
-    go_mod_fork 'design' 'research_notes' 'DESIGN.*' 'HANDOFF\.md' 'FEEDBACK-SYSTEM\.md'
+    go_mod_fork 'design' 'research_notes' 'third_party' 'DESIGN.*' 'HANDOFF\.md' 'FEEDBACK-SYSTEM\.md'
 }
 
 # Run in sidecar/smtpproof, once the root's tag is pushed for this tidy to resolve.
