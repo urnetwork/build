@@ -3769,6 +3769,12 @@ if [ "$WARP_SKIP_DEPLOY" = "" ]; then
     error_trap 'load warp service rollout'
     warp_rollout
     error_trap 'warp service rollout'
+
+    # Purge Cloudflare's 5-minute HTML edge cache for ur.io and ur.xyz once the
+    # new blocks have had time to converge. Never fails the release.
+    source "$BUILD_HOME/all/cache-purge.zsh"
+    error_trap 'load cache purge'
+    cf_cache_purge
 fi
 
 builder_message "Build all \`${EXTERNAL_WARP_VERSION}\` ... done! Enjoy :) - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
