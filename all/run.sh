@@ -3938,6 +3938,12 @@ release_image_publication_begin smtpedge
 error_trap 'verify unpublished smtpedge image'
 (cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/smtpedge/Makefile)
 error_trap 'warpctl build smtpedge'
+# The block runs as uid 65532 and dials with SO_MARK, so its binary carries cap_net_admin=ep as a file capability
+# (QD-1066, owner decision 597; DESIGN §19.4). Read it back out of each published platform, as a host's docker
+# unpacks the image, and refuse the image without it, which would otherwise fail only at the first marked dial.
+(cd "$BUILD_HOME/server${GO_MOD_SUFFIX}/cli/smtpedge" &&
+    GOWORK=off GOFLAGS= go run ./filecap/cmd check-image "bringyour/${BUILD_ENV}-smtpedge:${EXTERNAL_WARP_VERSION}")
+error_trap 'smtpedge image file capability'
 release_image_publication_complete smtpedge
 error_trap 'record smtpedge image digest'
 release_complete image-smtpedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-smtpedge.json"
