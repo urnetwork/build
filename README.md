@@ -107,16 +107,23 @@ root's, because the root's pass skips only a line already holding `/vN`.
 from a file proxy, on through the `make check` that follows the tags, then builds
 consumers at those tags with no replaces. A failure only the moved module shows
 would otherwise come after both tags exist and burn the version. The whole of
-`make check` runs, so the fixture takes as long as it does. It needs this
-checkout's real path, so run it without `-trimpath`:
+`make check` runs, so this real run takes about an hour on the build host, and
+longer as the tree grows. The `TestFixture` tests plant each failure in a small
+tree of the same names, and take minutes. Both need this checkout's real path,
+so run them without `-trimpath`:
 
 ```sh
-cd all && go test -tags sidecar_release_fixture -timeout 60m -run Fixture .
+cd all && go test -tags sidecar_release_fixture -timeout 60m -run '^TestFixture' .
+cd all && go test -tags sidecar_release_fixture -timeout 3h -run '^TestSidecarReleaseFixture$' .
 ```
 
-`run.sh` runs it, and sidecar's `make size`, in the `BUILD_TEST` candidate gate,
-before a version is allocated. Sidecar's `make check` holds its own idea of this
-transformation to these same functions (`check/release_step_test.go`).
+`run.sh`'s `BUILD_TEST` candidate gate runs both, as two `go test`s that each
+name their tests, so none runs twice: the planted runs first, with a 60-minute
+limit as a tight hang guard, then the real run in a `go test` of its own, with
+a 3-hour limit that leaves its `make check` room without letting a hang hold
+the release long. Sidecar's `make size` follows, all before a version is
+allocated. Sidecar's `make check` holds its own idea of this transformation to
+these same functions (`check/release_step_test.go`).
 
 ## The sidecar branches
 

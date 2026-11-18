@@ -1233,9 +1233,17 @@ if [ "$BUILD_TEST" ]; then
 
     # The sidecar release on copies, then its size gates, while no version exists:
     # a broken rewrite stops here, before any tag does. The fixture needs this
-    # checkout's real path, and make size needs Xcode, which this host has.
+    # checkout's real path, and make size needs Xcode, which this host has. Each
+    # of the fixture's go tests names its own tests, so none runs twice (QD-1056):
+    # the small planted runs take minutes and keep a tight hang guard, and the
+    # real run, whose make check takes about an hour here and grows with the
+    # tree, has room for that without letting a hang hold the release long.
     (cd "$BUILD_HOME/all" &&
-        go test -count=1 -timeout 60m -tags sidecar_release_fixture -run 'Fixture' .)
+        go test -count=1 -timeout 60m -tags sidecar_release_fixture -run '^TestFixture' .)
+    error_trap 'sidecar release fixture planted runs'
+    builder_message "sidecar release fixture planted runs passed."
+    (cd "$BUILD_HOME/all" &&
+        go test -count=1 -timeout 3h -tags sidecar_release_fixture -run '^TestSidecarReleaseFixture$' .)
     error_trap 'sidecar release fixture'
     builder_message "sidecar release fixture passed."
     (cd "$BUILD_HOME/sidecar" && make size)

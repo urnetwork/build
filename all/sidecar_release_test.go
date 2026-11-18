@@ -673,13 +673,16 @@ sidecar_release_consumer_edit`)
 }
 
 // A broken rewrite must stop a release before any tag exists, so the fixture and §4.9's size gates
-// run in the candidate gate, and a version is allocated only after them.
+// run in the candidate gate, and a version is allocated only after them. The fixture's planted runs
+// go first, so a broken harness or a stale test name stops the gate in minutes, before the real
+// run's hour (QD-1056).
 func TestRunGatesTheSidecarFixtureBeforeAVersionExists(t *testing.T) {
 	region := componentRegion(t, "    builder_message \"Build all test candidate\"\n", "warpctl stage version next release")
-	fixture := strings.Index(region, "-tags sidecar_release_fixture -run 'Fixture' .)\n    error_trap 'sidecar release fixture'")
+	planted := strings.Index(region, "-tags sidecar_release_fixture -run '^TestFixture' .)\n    error_trap 'sidecar release fixture planted runs'")
+	fixture := strings.Index(region, "-tags sidecar_release_fixture -run '^TestSidecarReleaseFixture$' .)\n    error_trap 'sidecar release fixture'")
 	size := strings.Index(region, "(cd \"$BUILD_HOME/sidecar\" && make size)\n    error_trap 'sidecar make size'")
 	passed := strings.Index(region, "A version number can now be assigned.")
-	if fixture < 0 || size < 0 || passed < 0 || !(fixture < size && size < passed) {
-		t.Fatalf("candidate gate order is fixture=%d size=%d passed=%d", fixture, size, passed)
+	if planted < 0 || fixture < 0 || size < 0 || passed < 0 || !(planted < fixture && fixture < size && size < passed) {
+		t.Fatalf("candidate gate order is planted=%d fixture=%d size=%d passed=%d", planted, fixture, size, passed)
 	}
 }

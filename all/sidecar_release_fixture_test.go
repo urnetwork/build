@@ -23,11 +23,17 @@
 //
 // The real module cache is read through the proxy and never written. This stays out of plain go
 // test, as make size does, because it builds connect twice. run.sh runs it before a version exists,
-// so a broken rewrite stops a release before any tag does.
+// so a broken rewrite stops a release before any tag does. It runs it in two go tests, each naming
+// its own tests so that none runs twice (QD-1056): first the small planted runs, every TestFixture
+// test, under a tight hang guard, then the real run alone, since its make check takes about an hour
+// and grows with the tree.
 //
-//	go test -tags sidecar_release_fixture -timeout 60m -run 'Fixture' .
+//	go test -tags sidecar_release_fixture -timeout 60m -run '^TestFixture' .
+//	go test -tags sidecar_release_fixture -timeout 3h -run '^TestSidecarReleaseFixture$' .
 //
-// run from this directory without -trimpath, because rolloutRoot reads this file's path.
+// run from this directory without -trimpath, because rolloutRoot reads this file's path. A test
+// added here is named TestFixture..., or neither go test runs it
+// (sidecar_release_fixture_runs_test.go holds run.sh to these names).
 
 package allbuild
 
