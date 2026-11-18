@@ -214,9 +214,13 @@ var rolloutStagedServices = []string{"mmm", "lb", "taskworker", "api", "connect"
 // The staged sidecar services whose SLO burn each wave reads first (D-OPS-9), in the wave's order.
 var rolloutBurnGatedServices = []string{"dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"}
 
-// The services each release deploys once, at 100%: those whose running versions cannot be sampled, and the
-// dns edges one host at a time, dnsedge-2 after Q-OPS-5's stop rule reads the first clean.
-var rolloutSinglePassServices = []string{"gossip", "alt", "proxy", "dnsedge-1", "dnsedge-2"}
+// The services each release deploys once, at 100%: those whose running versions cannot be sampled, smtpedge
+// on its two sending hosts (D-OPS-11), and the dns edges one host at a time, dnsedge-2 after Q-OPS-5's stop
+// rule reads the first clean.
+var rolloutSinglePassServices = []string{"gossip", "alt", "proxy", "smtpedge", "dnsedge-1", "dnsedge-2"}
+
+// The single pass's sidecar services whose SLO burn the last wave reads with the staged ones (D-OPS-9).
+var rolloutSinglePassBurnGatedServices = []string{"smtpedge"}
 
 // Assert the complete cumulative rollout order, zero convergence timeout on
 // every deploy, every only-older boundary, and the single pass for services
@@ -239,6 +243,12 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 		// D-OPS-9: each wave reads the sidecar services' burn before it deploys
 		for _, service := range rolloutBurnGatedServices {
 			expected = append(expected, "check-burn\t--service="+service)
+		}
+		if percent == 100 {
+			// the last wave deploys the single pass too, so it reads that pass's sidecar services
+			for _, service := range rolloutSinglePassBurnGatedServices {
+				expected = append(expected, "check-burn\t--service="+service)
+			}
 		}
 		for _, service := range rolloutStagedServices {
 			onlyOlder := service != "lb"
@@ -729,7 +739,7 @@ func TestRolloutUnknownBurnStopsAndAnOverridePassesLogged(t *testing.T) {
 	if result.exitCode != 65 || !strings.Contains(result.output, "gkm waits: no SLO_BURN_CHECK reads its SLO burn") {
 		t.Fatalf("one override: exit = %d; output=%s", result.exitCode, result.output)
 	}
-	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE="+strings.Join(rolloutBurnGatedServices, " "))
+	result = runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE="+strings.Join(append(slices.Clone(rolloutBurnGatedServices), rolloutSinglePassBurnGatedServices...), " "))
 	if result.exitCode != 0 {
 		t.Fatalf("override: exit = %d; output=%s", result.exitCode, result.output)
 	}
@@ -759,12 +769,96 @@ func TestRolloutGatesOnlyTheSidecarServices(t *testing.T) {
 	for _, event := range gated.events {
 		if strings.HasPrefix(event, "check-burn") {
 			checks++
-			if !slices.Contains(rolloutBurnGatedServices, strings.TrimPrefix(event, "check-burn\t--service=")) {
+			service := strings.TrimPrefix(event, "check-burn\t--service=")
+			if !slices.Contains(rolloutBurnGatedServices, service) && !slices.Contains(rolloutSinglePassBurnGatedServices, service) {
 				t.Errorf("a burn read for %s", event)
 			}
 		}
 	}
-	if want := 4 * len(rolloutBurnGatedServices); checks != want {
-		t.Errorf("%d burn reads, want %d, each gated service once a wave", checks, want)
+	if want := 4*len(rolloutBurnGatedServices) + len(rolloutSinglePassBurnGatedServices); checks != want {
+		t.Errorf("%d burn reads, want %d, each gated service once a wave it is in", checks, want)
+	}
+}
+
+// smtpedge deploys once, in the last wave's single pass, ahead of the dns edges, and never in a staged wave
+// or with --only-older (D-OPS-11). Its burn is read before the last wave, with the staged services', so a
+// burning or unreadable smtpedge stops that wave before any of it deploys, the earlier waves standing
+// (D-OPS-9), and an override by name passes it.
+func TestRolloutDeploysSmtpEdgeOnceBehindItsBurn(t *testing.T) {
+	result := runRollout(t)
+	if result.exitCode != 0 {
+		t.Fatalf("rollout exit = %d; output=%s", result.exitCode, result.output)
+	}
+	deploys := []int{}
+	burnReads := []int{}
+	firstLastWaveDeploy := -1
+	dnsEdgeAt := -1
+	for index, event := range result.events {
+		if event == deployEvent("smtpedge", 100, false) {
+			deploys = append(deploys, index)
+		} else if strings.HasPrefix(event, "warpctl\tdeploy\tmain\tsmtpedge\t") {
+			t.Errorf("smtpedge deployed outside its one pass: %s", event)
+		}
+		if event == "check-burn\t--service=smtpedge" {
+			burnReads = append(burnReads, index)
+		}
+		if firstLastWaveDeploy < 0 && event == deployEvent("mmm", 100, true) {
+			firstLastWaveDeploy = index
+		}
+		if dnsEdgeAt < 0 && event == deployEvent("dnsedge-1", 100, false) {
+			dnsEdgeAt = index
+		}
+	}
+	if len(deploys) != 1 || len(burnReads) != 1 {
+		t.Fatalf("smtpedge deploys at %v, its burn is read at %v, want once each", deploys, burnReads)
+	}
+	if !(burnReads[0] < firstLastWaveDeploy && firstLastWaveDeploy < deploys[0] && deploys[0] < dnsEdgeAt) {
+		t.Errorf("burn read at %d, the last wave starts at %d, smtpedge deploys at %d, dnsedge-1 at %d", burnReads[0], firstLastWaveDeploy, deploys[0], dnsEdgeAt)
+	}
+
+	// its burn is the last read of the last wave
+	burning := runRollout(t, fmt.Sprintf("BURN_AT_CHECK=%d", 4*len(rolloutBurnGatedServices)+1))
+	if burning.exitCode != 65 || !strings.Contains(burning.output, "the 100% wave stops: smtpedge") {
+		t.Fatalf("burning: exit = %d; output=%s", burning.exitCode, burning.output)
+	}
+	if !slices.Contains(burning.events, deployEvent("mxedge-platform", 75, true)) {
+		t.Errorf("the 75%% wave before the burn did not deploy: %q", burning.events)
+	}
+	for _, event := range burning.events {
+		if strings.Contains(event, "--percent=100") && !strings.Contains(event, "\tconfig-updater\t") && !strings.Contains(event, "\tgrafana\t") {
+			t.Errorf("the stopped wave deployed: %s", event)
+		}
+	}
+
+	// an override of every staged service still leaves smtpedge's unread burn to stop the last wave
+	unread := runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE="+strings.Join(rolloutBurnGatedServices, " "))
+	if unread.exitCode != 65 || !strings.Contains(unread.output, "smtpedge waits: no SLO_BURN_CHECK reads its SLO burn") {
+		t.Fatalf("unread: exit = %d; output=%s", unread.exitCode, unread.output)
+	}
+	if slices.Contains(unread.events, deployEvent("smtpedge", 100, false)) || slices.Contains(unread.events, deployEvent("mmm", 100, true)) {
+		t.Errorf("the last wave deployed with smtpedge's burn unread: %q", unread.events)
+	}
+	overridden := runRollout(t, "SLO_BURN_CHECK=", "ROLLOUT_STOP_OVERRIDE="+strings.Join(append(slices.Clone(rolloutBurnGatedServices), rolloutSinglePassBurnGatedServices...), " "))
+	if overridden.exitCode != 0 || !slices.Contains(overridden.events, deployEvent("smtpedge", 100, false)) ||
+		!slices.Contains(overridden.events, "message\tmain smtpedge: the SLO burn stop is overridden by name") {
+		t.Errorf("overridden: exit = %d, events %q; output=%s", overridden.exitCode, overridden.events, overridden.output)
+	}
+}
+
+// run.sh builds smtpedge's image from server/cli/smtpedge before the rollout starts, so the single pass never
+// promotes a tag nothing published.
+func TestRunBuildsTheSmtpEdgeImageBeforeRollout(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSource := string(runData)
+	rolloutAt := strings.Index(runSource, `source "$BUILD_HOME/all/deploy-rollout.zsh"`)
+	buildAt := strings.Index(runSource, "(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/smtpedge/Makefile)\nerror_trap 'warpctl build smtpedge'")
+	if rolloutAt < 0 || buildAt < 0 || rolloutAt < buildAt {
+		t.Fatalf("run.sh does not build the smtpedge image before the rollout: build at %d, rollout at %d", buildAt, rolloutAt)
+	}
+	if !slices.Contains(rolloutImageServices(t), "smtpedge") {
+		t.Error("the images run.sh publishes leave out smtpedge")
 	}
 }

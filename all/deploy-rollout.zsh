@@ -4,8 +4,9 @@
 # Warpctl's status before reporting success.
 # Config-updater, lb, transparent proxy, statusless Gossip, and unexposed Alt
 # blocks cannot observe their live versions through per-block LB status routes,
-# so Warpctl deliberately rejects --only-older for those services. smtpedge is
-# classed with them, to deploy in one pass.
+# so Warpctl deliberately rejects --only-older for those services. smtpedge,
+# unexposed on its two sending hosts, is classed with them, to deploy in one
+# pass (§19.11, D-OPS-11).
 #
 # Sidecar's services are classed here ahead of their images, as §19.11 of its
 # design has them, with mxedge-platform, mxedge's platform listener, staged beside
@@ -158,8 +159,9 @@ warp_rollout() {
     # restart already selected unobservable blocks in every later wave. The dns
     # edges are host-pinned with no lb status route: each deploys its one host in
     # one pass, dnsedge-1 first, and dnsedge-2 only once dnsedge-1 serves clean
-    # (Q-OPS-5, dns_rollout_stop_check).
-    single_pass_services=(gossip alt proxy dnsedge-1 dnsedge-2)
+    # (Q-OPS-5, dns_rollout_stop_check). smtpedge, host-pinned and unexposed, goes
+    # ahead of them (D-OPS-11), so a stop before the second NS leaves it deployed.
+    single_pass_services=(gossip alt proxy smtpedge dnsedge-1 dnsedge-2)
 
     warp_rollout_sample 0 || return $?
 
@@ -174,8 +176,14 @@ warp_rollout() {
     for percent in 25 50 75 100; do
         # D-OPS-9: a sidecar service burning its budget, or whose burn cannot
         # be read, stops this wave before any of it deploys; the waves before
-        # it stand
-        for service in "${staged_services[@]}"; do
+        # it stand. The last wave also deploys the single pass, so it reads
+        # that pass's sidecar services with the staged ones.
+        local -a wave_services
+        wave_services=("${staged_services[@]}")
+        if (( percent == 100 )); then
+            wave_services+=("${single_pass_services[@]}")
+        fi
+        for service in "${wave_services[@]}"; do
             if (( ${sidecar_burn_gated_services[(Ie)$service]} )); then
                 if ! warp_rollout_gate "$service"; then
                     printf 'the %s%% wave stops: %s\n' "$percent" "$service" >&2

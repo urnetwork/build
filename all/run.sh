@@ -3930,6 +3930,22 @@ release_image_receipt mxedge-platform
 error_trap 'verify retained mxedge-platform image digest'
 builder_message "service mxedge-platform \`${EXTERNAL_WARP_VERSION}\` available"
 
+# The sidecar's outbound mail edge (SMTP-M9-20, OPS-M9-01; DESIGN §19.4, D-OPS-11): server/cli/smtpedge, one
+# unexposed block on each sending host, its fragment warp/services/sidecar-blocks/smtpedge.yml. It deploys in
+# one pass, with the services no lb status route reads.
+if release_build image-smtpedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-smtpedge.json"; then
+release_image_publication_begin smtpedge
+error_trap 'verify unpublished smtpedge image'
+(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/smtpedge/Makefile)
+error_trap 'warpctl build smtpedge'
+release_image_publication_complete smtpedge
+error_trap 'record smtpedge image digest'
+release_complete image-smtpedge "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-smtpedge.json"
+fi
+release_image_receipt smtpedge
+error_trap 'verify retained smtpedge image digest'
+builder_message "service smtpedge \`${EXTERNAL_WARP_VERSION}\` available"
+
 if release_build image-gossip "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-gossip.json"; then
 release_image_publication_begin gossip
 error_trap 'verify unpublished gossip image'

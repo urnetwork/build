@@ -19,7 +19,8 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 SERVICES = ("config-updater", "grafana", "mmm", "lb", "taskworker", "api", "connect",
             "web", "app", "mcp", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge",
-            "mxedge-platform", "gossip", "alt", "proxy", "dnsedge-1", "dnsedge-2")
+            "mxedge-platform", "gossip", "alt", "proxy", "smtpedge", "dnsedge-1",
+            "dnsedge-2")
 
 FAKE_PROVIDER = r'''
 import fcntl, json, os, pathlib, signal, subprocess, sys, time
