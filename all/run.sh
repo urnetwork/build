@@ -44,8 +44,10 @@ umask 022
 #            gated and the release message says so.
 # (optional) SLACK_WEBHOOK
 # (optional) WARP_SKIP_DEPLOY set to skip deployment
-# (optional) BUILD_URIO_CHANGELOG=0 skips the local-Git release-body
-#            and store notes; unset or 1 generates them
+# (optional) BUILD_URIO_CHANGELOG=0 turns off the changelog generated from
+#            local Git: the release body and store notes are then the static
+#            changelog (the localizations release note) alone. Unset or 1
+#            generates it, below the static changelog
 # The ur.io changelog and desktop release metadata are committed inputs.
 # Refresh them separately from this build; no GitHub metadata API walk runs here.
 # (optional) SDK registry credentials: NPM_TOKEN (or existing npm login),
@@ -1404,14 +1406,22 @@ error_trap 'android edit settings'
 # truncates. The generator packs whole bullets inside that budget; nothing here
 # can produce a half-sentence.
 #
-# pending.txt keeps its job. If somebody wrote a headline for this release it goes
-# above the generated bullets (--lede); if it still holds the shipped placeholder
-# text the generator ignores it and says so on stderr.
+# THE STATIC CHANGELOG ALWAYS COMES FIRST. It is the release note every app
+# bundles (localizations release-notes/latest.yaml, the text tapping the version
+# in Account opens), rendered as plain text by `node gen/release-notes.mjs
+# --text`: its intro, then its sections' headings over "- " bullets. It prefaces
+# every note this block writes -- each storefront's note, the short view and the
+# full changelog -- and the changelog generated from the commits follows it,
+# inside whatever budget the static changelog leaves. With the generated
+# changelog turned off (BUILD_URIO_CHANGELOG=0) the static changelog is the whole
+# of every note: changelog.py --static-only writes the same files, in the same
+# formats and limits, without reading any Git history. Only when it is off AND
+# the release note has no text is nothing written. (pending.txt, the old
+# human-written headline, is retired: one note, written once, in one place.)
 #
-# When enabled, the attempted generator and its requested release inputs are
-# required. Failed generation must not silently substitute pending.txt or earlier
-# generated notes. BUILD_URIO_CHANGELOG=0 skips this generator only; the ur.io
-# website consumes separately maintained metadata. This generator uses local Git
+# Every attempted render and its requested release inputs are required. Failed
+# generation must not silently substitute earlier generated notes. The ur.io
+# website consumes separately maintained metadata. The generator uses local Git
 # and has a hard zero-request API budget, independent of the exported token.
 #
 # THE ABI-SPLIT FILENAMES are the other half of this, and they are why F-Droid
@@ -1431,6 +1441,7 @@ error_trap 'android edit settings'
 # note instead of a blank one.
 FDROID_VERSION_CODE_OFFSETS="${FDROID_VERSION_CODE_OFFSETS:-0 2 3}"
 BUILD_CHANGELOG_STORE="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.txt"
+BUILD_CHANGELOG_STATIC="${TMPDIR:-/tmp}/urnetwork-changelog-static-${EXTERNAL_WARP_VERSION}.txt"
 # exported: github_finalize_release() below reads it, long after this block
 export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP_VERSION}.md"
 # IN THE REPO, not in TMPDIR, unlike the two above. The android note has a home
@@ -1446,12 +1457,18 @@ export BUILD_CHANGELOG_FULL="${TMPDIR:-/tmp}/urnetwork-changelog-${EXTERNAL_WARP
 # github_finalize_release() links the _Full.md and inlines the _Simple.txt.
 export BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
 export BUILD_NOTES_PREFIX="$WARP_VERSION_CODE"
-rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"
+rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL" "$BUILD_CHANGELOG_STATIC"
 error_trap 'clear generated changelog outputs'
 for note_output in Full.md Simple.txt Android.txt Apple.txt Windows.txt Linux.xml; do
     rm -f "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_$note_output"
     error_trap 'clear generated release note'
 done
+# The localizations checkout is on the main this release pins, and its codegen
+# above already validated the note, so a failure here is a real one.
+builder_message "rendering the static changelog from the localizations release note"
+(cd "$BUILD_HOME/localizations" && node gen/release-notes.mjs --text) > "$BUILD_CHANGELOG_STATIC"
+error_trap 'render the static changelog'
+changelog_mode=
 if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
     builder_message "generating the changelog for \`${EXTERNAL_WARP_VERSION}\`"
     python3 "$BUILD_HOME/all/changelog.py" \
@@ -1459,12 +1476,29 @@ if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
         --api-limit 0 \
         --to worktree \
         --to-label "v${EXTERNAL_WARP_VERSION}" \
-        --lede "$BUILD_HOME/metadata/en-US/changelogs/pending.txt" \
+        --static "$BUILD_CHANGELOG_STATIC" \
         --store-out "$BUILD_CHANGELOG_STORE" \
         --notes-dir "$BUILD_NOTES_DIR" \
         --notes-prefix "$BUILD_NOTES_PREFIX" \
         --full-out "$BUILD_CHANGELOG_FULL"
     error_trap 'generate changelog'
+    changelog_mode=generated
+elif [ -s "$BUILD_CHANGELOG_STATIC" ]; then
+    builder_message "the generated changelog is off (BUILD_URIO_CHANGELOG disabled): the release notes are the static changelog alone"
+    python3 "$BUILD_HOME/all/changelog.py" \
+        --static-only \
+        --to-label "v${EXTERNAL_WARP_VERSION}" \
+        --static "$BUILD_CHANGELOG_STATIC" \
+        --store-out "$BUILD_CHANGELOG_STORE" \
+        --notes-dir "$BUILD_NOTES_DIR" \
+        --notes-prefix "$BUILD_NOTES_PREFIX" \
+        --full-out "$BUILD_CHANGELOG_FULL"
+    error_trap 'write the static changelog notes'
+    changelog_mode=static
+else
+    builder_message "skipping release-body/store changelog generation (BUILD_URIO_CHANGELOG disabled, and the release note has no text)"
+fi
+if [ "$changelog_mode" ]; then
     require_build_artifacts "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL" \
         "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Full.md" \
         "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Simple.txt" \
@@ -1473,10 +1507,8 @@ if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ]; then
         "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Windows.txt" \
         "$BUILD_NOTES_DIR/${BUILD_NOTES_PREFIX}_Linux.xml"
     error_trap 'generated changelog artifacts'
-else
-    builder_message "skipping release-body/store changelog generation (BUILD_URIO_CHANGELOG disabled)"
 fi
-if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ -s "$BUILD_CHANGELOG_STORE" ]; then
+if [ "$changelog_mode" ] && [ -s "$BUILD_CHANGELOG_STORE" ]; then
     # ${=...} so zsh word-splits the offset list; zsh does not split on
     # whitespace by default the way bash does.
     for changelog_offset in ${=FDROID_VERSION_CODE_OFFSETS}; do
@@ -1525,7 +1557,7 @@ fi
 #
 # The required generated notes were verified above. Stage each opted-in copy
 # with a checked status rather than reporting a failed copy as success.
-if [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ -d "$BUILD_NOTES_DIR" ]; then
+if [ "$changelog_mode" ] && [ -d "$BUILD_NOTES_DIR" ]; then
     for store_note in \
         "Android.txt:Play Console -> release notes (pasted by hand), 500 chars. The unattended F-Droid copy is under metadata/en-US/changelogs/" \
         "Apple.txt:App Store Connect -> What's New in This Version (iOS and macOS), 4000 chars" \
@@ -2429,11 +2461,16 @@ $a"
     # this re-checks against what the header and the VirusTotal table actually
     # took, and drops the section with a warning rather than risking the release.
     #
-    # BUILD_URIO_CHANGELOG=0 disables the release-body/store notes (the ur.io
-    # website consumes separately maintained metadata). With
-    # generation enabled, BUILD_RELEASE_BODY_CHANGELOG= remains the narrower
-    # switch that omits only this release-body section (see README).
-    if [ ! "$1" ] && [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ "${BUILD_RELEASE_BODY_CHANGELOG:-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
+    # The static changelog (the localizations release note) is the first thing
+    # in the full changelog and in the short view, so it leads this section.
+    # BUILD_URIO_CHANGELOG=0 turns the generated changelog off, and then the full
+    # changelog file holds the static changelog alone: the elif below puts it in
+    # the body as it is, with nothing to link to or fold. The ur.io website
+    # consumes separately maintained metadata. BUILD_RELEASE_BODY_CHANGELOG=
+    # remains the narrower switch that omits this release-body section either
+    # way (see README). `-1`, not `:-1`: the switch is "set it empty", and `:-`
+    # would treat empty as unset and turn the section back on.
+    if [ ! "$1" ] && [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ "${BUILD_RELEASE_BODY_CHANGELOG-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
         RELEASE_CHANGELOG=`cat "$BUILD_CHANGELOG_FULL"`
         # THE LINK FIRST, and it resolves because of ordering, not luck: the
         # `git add . && git commit && git_tag` on $BUILD_HOME above ran before
@@ -2477,6 +2514,18 @@ $RELEASE_CHANGELOG
 </details>"
         else
             builder_message "note: the full changelog (${#RELEASE_CHANGELOG} chars) does not fit the release body next to the artifact table, so the body links to it instead of embedding it. Build will continue."
+        fi
+    elif [ ! "$1" ] && [ "${BUILD_RELEASE_BODY_CHANGELOG-1}" ] && [ -s "$BUILD_CHANGELOG_FULL" ]; then
+        RELEASE_CHANGELOG=`cat "$BUILD_CHANGELOG_FULL"`
+        # The same release-losing 125000 limit as above, checked the same way.
+        if [ $((${#RELEASE_BODY} + ${#RELEASE_CHANGELOG} + 16)) -le 124000 ]; then
+            RELEASE_BODY="$RELEASE_BODY
+
+---
+
+$RELEASE_CHANGELOG"
+        else
+            builder_message "note: the static changelog (${#RELEASE_CHANGELOG} chars) does not fit the release body next to the artifact table; it is in changelogs/${BUILD_NOTES_PREFIX}_Full.md. Build will continue."
         fi
     fi
 

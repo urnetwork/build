@@ -31,9 +31,15 @@ audiences with very different limits:
   body limit.
 
 `all/run.sh` generates both during a release. Generation is required when it is
-enabled; a failed generator or missing output fails the release. The file
-`metadata/en-US/changelogs/pending.txt` remains the place for a human-written
-headline for the next release -- it is placed above the generated bullets.
+enabled; a failed generator or missing output fails the release.
+
+**The static changelog always comes first.** It is the release note every app
+bundles -- `localizations/release-notes/latest.yaml`, the text tapping the
+version in Account opens -- rendered as plain text (its intro and sections, by
+`node gen/release-notes.mjs --text` in the localizations checkout). Every note
+above starts with it: each store note, the short view and the full changelog,
+with the generated changelog after it in whatever budget it leaves. Write the
+release's note there; `metadata/en-US/changelogs/pending.txt` is retired.
 
 The same text is written under the base version code and under each offset in
 `FDROID_VERSION_CODE_OFFSETS` (default `0 2 3`), plus `default.txt`. That is not
@@ -41,7 +47,9 @@ redundancy: fdroiddata's recipe declares `VercodeOperation: ['%c + 2', '%c + 3']
 for the ABI-split APKs and fdroidserver matches changelog files by exact
 filename, so a base-code-only file means F-Droid shows no changelog at all.
 
-Set `BUILD_URIO_CHANGELOG=0` to skip this release-body/store-note generator.
+Set `BUILD_URIO_CHANGELOG=0` to turn the generated changelog off: the store
+notes and the release body are then the static changelog alone, in the same
+files and formats (nothing is written only when the release note has no text).
 The ur.io website uses its committed changelog and desktop release metadata;
 the build does not refresh either through the GitHub API. Refresh them with
 the standalone `mmm/ur.io/react/scripts/generate-changelog.mjs` and
@@ -50,7 +58,8 @@ The local `check-changelog-fresh` gate still requires the committed changelog
 to cover the desktop downloads the site advertises. Content and page dates
 are still generated locally and committed during the release. When generation
 remains enabled, set `BUILD_RELEASE_BODY_CHANGELOG=` to omit only the full
-changelog from the GitHub release body while retaining the generated store notes.
+changelog from the GitHub release body while retaining the generated store notes
+(it omits the static changelog from the body as well).
 
 Release-body and store-note generation reads commit ranges and changed files
 from local Git, with **zero GitHub API requests**. Missing component history is

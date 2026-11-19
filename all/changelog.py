@@ -453,10 +453,12 @@ TRAILER = re.compile(
     r"^(?:Co-authored-by|Signed-off-by|Change-Id|Claude-Session|Reviewed-by|"
     r"Acked-by|Tested-by|Reported-by|Suggested-by|Cc)\s*:", re.I)
 
-# The pending.txt texts that are placeholders rather than somebody's actual note.
-# pending.txt keeps its job -- a human-written headline for the next release -- but
-# the shipped default is not a headline, and echoing it above real notes would
-# reproduce exactly the problem this script exists to fix.
+# The texts that are placeholders rather than somebody's actual note. The static
+# changelog (--static) is human-written text for the release -- all/run.sh renders
+# it from the localizations release note (release-notes/latest.yaml), and before
+# that it was metadata/en-US/changelogs/pending.txt -- but the old shipped default
+# is not a note, and echoing it above real notes would reproduce exactly the
+# problem this script exists to fix.
 PLACEHOLDER_LEDES = {
     "- bug and performance fixes.",
     "- bug and performance fixes",
@@ -860,8 +862,14 @@ def first_paragraph(body, limit):
 
 
 def render_full(meta, sections, filtered_counts, unwalkable, body_mode, body_limit,
-                per_component_cap=None):
+                per_component_cap=None, static=None):
     out = []
+    # THE STATIC CHANGELOG FIRST, verbatim: it is markdown-safe by construction
+    # (an intro, headings with a blank line above them, "- " bullets), it is what
+    # a person wrote for this release, and the commits below are its detail.
+    if static and static.strip():
+        out.append(static.strip())
+        out.append("")
     out.append("## Changes in %s" % meta["to_label"])
     out.append("")
     total = sum(len(s["commits"]) for s in sections)
@@ -1235,8 +1243,13 @@ def render_appstream(lines, limit, lede, fallback, shared_from=None, boundary=No
         if i < n_app:
             kept_app += 1
         kept.append(t)
+    # The static changelog line by line, so its "- " bullets stay bullets: each
+    # line is cleaned on its own (collapsing the whole text into one line would
+    # run the bullets together into a single paragraph).
+    if lede:
+        lede = "\n".join(appstream_text(l) for l in lede.splitlines())
     lede_out, app, shared, _ = pack_bullets(
-        kept, limit, appstream_text(lede) if lede else None,
+        kept, limit, lede or None,
         None if shared_from is None else kept_app,
         # The XML boundary is charged nothing: AppStream has no length limit at
         # all, so `limit` here is an editorial budget on the bullets a store page
@@ -1245,8 +1258,22 @@ def render_appstream(lines, limit, lede, fallback, shared_from=None, boundary=No
 
     pad = " " * indent
     out = []
-    for l in lede_out:
-        out.append("%s<p>%s</p>" % (pad, l))
+    # The static changelog: its "- " lines become one <ul> per run of bullets,
+    # every other line a <p>. A "- " that is all there is to a line has no text
+    # left to show and is dropped (an empty <li> is tag-empty, fatal here).
+    static_items = []
+    for l in lede_out + [None]:
+        if l is not None and l.startswith("- "):
+            if l[2:].strip():
+                static_items.append(l[2:].strip())
+            continue
+        if static_items:
+            out.append("%s<ul>" % pad)
+            out.extend("%s  <li>%s</li>" % (pad, t) for t in static_items)
+            out.append("%s</ul>" % pad)
+            static_items = []
+        if l is not None:
+            out.append("%s<p>%s</p>" % (pad, l))
     if app:
         out.append("%s<ul>" % pad)
         out.extend("%s  <li>%s</li>" % (pad, t) for t in app)
@@ -1427,6 +1454,23 @@ def build(args, token):
     return full, notes, sections, filtered_counts, unwalkable, meta
 
 
+def build_static(args):
+    """--static-only: every output is the static changelog alone.
+
+    all/run.sh asks for this when the generated changelog is turned off
+    (BUILD_URIO_CHANGELOG=0): the release still gets its human-written note, in
+    the same files, formats and limits as when the commits follow it, and no Git
+    history is read at all -- turning the generator off means exactly that."""
+    meta = {"from_label": None, "to_label": args.to_label or args.to}
+    full = args.static_text.strip() + "\n"
+    wanted = [args.audience]
+    if args.notes_dir:
+        wanted += [n for n in sorted(AUDIENCES)
+                   if AUDIENCES[n]["out"] and n not in wanted]
+    notes = {name: render_note(name, [], args, None) for name in wanted}
+    return full, notes, [], {}, [], meta
+
+
 def render_note(name, sections, args, token):
     """One storefront's note -> {"text", "limit", "held_back", ...}.
 
@@ -1445,7 +1489,7 @@ def render_note(name, sections, args, token):
         min_subject=args.store_min_subject)
     boundary = a["boundary"] if args.store_boundary else None
     render = render_appstream if a["format"] == "appstream" else render_store
-    text = render(lines, limit, args.lede_text, args.store_fallback,
+    text = render(lines, limit, args.static_text, args.store_fallback,
                   shared_from, boundary, app_limit=app_limit)
     if a["format"] == "appstream":
         # WARN, never raise. A fragment that would not validate is still better
@@ -1470,15 +1514,17 @@ def fit_full(meta, sections, filtered_counts, unwalkable, args):
     ladder below always terminates: bodies -> no bodies -> fewer commits per
     component -> a hard line-boundary trim."""
     limit = args.full_limit
+    static = getattr(args, "static_text", None)
     for mode in (args.body, "none"):
-        text = render_full(meta, sections, filtered_counts, unwalkable, mode, args.body_limit)
+        text = render_full(meta, sections, filtered_counts, unwalkable, mode, args.body_limit,
+                           static=static)
         if len(text) <= limit:
             return text
         if mode == args.body:
             warn("full changelog over %d chars with bodies; dropping bodies" % limit)
     for cap in (100, 50, 25, 10, 5, 3, 1):
         text = render_full(meta, sections, filtered_counts, unwalkable, "none",
-                           args.body_limit, per_component_cap=cap)
+                           args.body_limit, per_component_cap=cap, static=static)
         if len(text) <= limit:
             warn("full changelog capped at %d commits per component" % cap)
             return text
@@ -1776,6 +1822,43 @@ def self_test():
     _QUIET = False
     check("full changelog fits its limit", len(fitted) <= 400)
 
+    # -----------------------------------------------------------------------
+    # THE STATIC CHANGELOG prefaces every output, and is the whole of every
+    # output when the generated changelog is turned off (--static-only).
+    # -----------------------------------------------------------------------
+    static = "This release is named Test. It includes:\n- Faster & smaller\n- Fixes\n\nMore\n- One more\n"
+    full_static = render_full(meta, sections, {}, [], "none", 500, static=static)
+    check("static changelog prefaces the full changelog",
+          full_static.startswith(static.strip() + "\n\n## Changes in vB"))
+    check("no static changelog leaves the full changelog as it was",
+          render_full(meta, sections, {}, [], "none", 500) ==
+          render_full(meta, sections, {}, [], "none", 500, static=None))
+    store_static = render_store(["Fix a thing"], 500, static, "- f")
+    check("static changelog prefaces the store note",
+          store_static == "This release is named Test. It includes:\n- Faster & smaller\n"
+                          "- Fixes\nMore\n- One more\n- Fix a thing\n")
+    linux_static = render_appstream(["Fix a thing"], 1800, static, "- f")
+    check("static changelog in AppStream: <p> for lines, <ul> for its bullets",
+          "<p>This release is named Test. It includes:</p>" in linux_static
+          and "<li>Faster &amp; smaller</li>" in linux_static
+          and "<p>More</p>" in linux_static
+          and linux_static.index("<li>One more</li>") < linux_static.index("<li>Fix a thing</li>"))
+    check("static changelog in AppStream validates", appstream_problems(linux_static) == [])
+    static_args = argparse.Namespace(
+        static_text=static, to_label="vB", to="worktree", audience="android",
+        notes_dir="notes", store_limit=None, store_path_check=True, store_candidates=40,
+        store_min_subject=STORE_MIN_SUBJECT, store_boundary=True,
+        store_fallback="- Bug and performance fixes.")
+    s_full, s_notes, s_sections, _, _, _ = build_static(static_args)
+    check("static-only: the full changelog is the static changelog", s_full == static.strip() + "\n")
+    check("static-only: every storefront note is written",
+          set(s_notes) == {n for n in AUDIENCES if AUDIENCES[n]["out"]} and not s_sections)
+    check("static-only: every text note is the static changelog",
+          all(n["text"].startswith("This release is named Test.")
+              for n in s_notes.values() if n["format"] == "text"))
+    check("static-only: the AppStream note validates",
+          appstream_problems(s_notes["linux"]["text"]) == [])
+
     print("self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -1833,10 +1916,16 @@ def main(argv=None):
                                                    "in the full changelog (default: %(default)s)")
     p.add_argument("--body-limit", type=int, default=500,
                    help="characters of body per commit (default: %(default)s)")
-    p.add_argument("--lede", metavar="PATH",
-                   help="a human-written headline to put above the generated store "
-                        "bullets (metadata/en-US/changelogs/pending.txt); ignored when "
-                        "it still holds the shipped placeholder text")
+    p.add_argument("--static", "--lede", dest="static", metavar="PATH",
+                   help="the static changelog: human-written text for this release "
+                        "(all/run.sh renders the localizations release note into it). "
+                        "It prefaces every output -- each store note, the short view "
+                        "and the full changelog -- above the generated changelog. "
+                        "Ignored when it holds only an old placeholder text")
+    p.add_argument("--static-only", action="store_true",
+                   help="write every output from the static changelog alone, without "
+                        "reading any Git history: the generated changelog is turned "
+                        "off (all/run.sh BUILD_URIO_CHANGELOG=0)")
     p.add_argument("--no-store-path-check", dest="store_path_check",
                    action="store_false", default=True,
                    help="do not hold CI/test/docs/build-only commits out of the "
@@ -1872,19 +1961,24 @@ def main(argv=None):
         p.error("--api-limit must be nonnegative")
     configure_api(args.api_limit)
 
-    args.lede_text = None
-    if args.lede and os.path.exists(args.lede):
-        raw = open(args.lede, encoding="utf-8").read()
+    args.static_text = None
+    if args.static and os.path.exists(args.static):
+        raw = open(args.static, encoding="utf-8").read()
         if " ".join(raw.split()).lower().strip() in PLACEHOLDER_LEDES:
-            warn("%s still holds the shipped placeholder; ignoring it" % args.lede)
+            warn("%s still holds the shipped placeholder; ignoring it" % args.static)
         elif raw.strip():
-            args.lede_text = raw
+            args.static_text = raw
+    if args.static_only and not args.static_text:
+        p.error("--static-only needs a static changelog (--static PATH) with text in it")
 
     token = api_token()
     if args.api_limit and not token:
         warn("API fallback enabled without a token; the shared request cap still applies")
 
-    full, notes, sections, filtered, unwalkable, meta = build(args, token)
+    if args.static_only:
+        full, notes, sections, filtered, unwalkable, meta = build_static(args)
+    else:
+        full, notes, sections, filtered, unwalkable, meta = build(args, token)
     selected = notes[args.audience]
 
     # EVERY artifact is fully rendered before ANY file is opened, so a failure

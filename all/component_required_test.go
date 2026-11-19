@@ -293,7 +293,8 @@ BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
 BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
 BUILD_NOTES_PREFIX=123
 FDROID_VERSION_CODE_OFFSETS='0 2 3'
-printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt"
+BUILD_CHANGELOG_STATIC="$BUILD_HOME/static.txt"
+printf 'static stand-in\n' > "$BUILD_CHANGELOG_STATIC"
 `
 		result := runComponent(t, source, setup, "FAIL_STEP=generate")
 		if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
@@ -349,7 +350,8 @@ BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
 BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
 BUILD_NOTES_PREFIX=123
 FDROID_VERSION_CODE_OFFSETS='0 2 3'
-printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt"
+BUILD_CHANGELOG_STATIC="$BUILD_HOME/static.txt"
+printf 'static stand-in\n' > "$BUILD_CHANGELOG_STATIC"
 `
 	result := runComponent(t, source, setup)
 	if result.exitCode == 0 || strings.Contains(result.events, "release-continued") {
@@ -360,11 +362,14 @@ printf 'pending stand-in\n' > "$BUILD_HOME/metadata/en-US/changelogs/pending.txt
 const completeChangelogSetup = `
 BUILD_CHANGELOG_STORE="$BUILD_HOME/store.txt"
 BUILD_CHANGELOG_FULL="$BUILD_HOME/full.md"
+BUILD_CHANGELOG_STATIC="$BUILD_HOME/static.txt"
 BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
 BUILD_NOTES_PREFIX=123
 FDROID_VERSION_CODE_OFFSETS='0 2 3'
+mkdir -p "$BUILD_HOME/localizations"
 python3() {
     record_component_step generate || return $?
+    print -r -- "changelog.py $*" >> "$BUILD_HOME/python3-args"
     mkdir -p "$BUILD_NOTES_DIR"
     local output
     for output in \
@@ -419,6 +424,124 @@ func TestRunChangelogRequiredInputsSucceed(t *testing.T) {
 	if result.exitCode != 0 || !strings.Contains(result.events, "release-continued") {
 		t.Fatalf("complete release metadata was rejected: %+v", result)
 	}
+}
+
+// The static changelog (the localizations release note) is rendered first, and
+// a failed render stops the release like any other required release input.
+func TestRunStaticChangelogRenderFailureIsFatal(t *testing.T) {
+	source := componentRegion(t, `rm -f "$BUILD_CHANGELOG_STORE" "$BUILD_CHANGELOG_FULL"`, "fi # full-run source preparation")
+	result := runComponent(t, source, completeChangelogSetup, "MISSING_NOTE=", "FAIL_STEP=generate")
+	if result.exitCode != 37 || strings.Contains(result.events, "release-continued") {
+		t.Fatalf("failed static changelog render was treated as optional: %+v", result)
+	}
+}
+
+// The release notes per generator mode: the generator always receives the static
+// changelog; with generation off the static changelog alone is written and
+// staged; with generation off and no static text nothing is written.
+func TestRunChangelogStaticChangelogModes(t *testing.T) {
+	source := componentRegion(t, releaseNotesStart, "fi # full-run source preparation")
+	report := `
+print -r -- "ARGS<<$(cat "$BUILD_HOME/python3-args" 2>/dev/null)>>ARGS"
+print -r -- "STAGED<<$(ls "$BUILD_HOME/metadata/en-US/changelogs")>>STAGED"
+`
+	for _, testCase := range []struct {
+		name      string
+		static    string
+		overrides []string
+		args      []string
+		noArgs    []string
+		staged    bool
+	}{
+		{name: "generated below the static changelog", static: "static note", args: []string{"--static " + "STATIC", "--to worktree"}, noArgs: []string{"--static-only"}, staged: true},
+		{name: "generation off: the static changelog alone", static: "static note", overrides: []string{"BUILD_URIO_CHANGELOG=0"}, args: []string{"--static-only", "--static " + "STATIC"}, noArgs: []string{"--to worktree", "--repo"}, staged: true},
+		{name: "generation off and no static text", static: "", overrides: []string{"BUILD_URIO_CHANGELOG=0"}, staged: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			setup := completeChangelogSetup + "printf '%s' '" + testCase.static + "' > \"$BUILD_CHANGELOG_STATIC\"\n"
+			result := runComponent(t, source+report, setup, append([]string{"MISSING_NOTE="}, testCase.overrides...)...)
+			if result.exitCode != 0 || !strings.Contains(result.events, "release-continued") {
+				t.Fatalf("release notes rejected: %+v", result)
+			}
+			args := between(result.output, "ARGS<<", ">>ARGS")
+			args = strings.ReplaceAll(args, filepath.Join("static.txt"), "STATIC")
+			for _, want := range testCase.args {
+				if !strings.Contains(strings.ReplaceAll(args, "/static.txt", "/STATIC"), strings.ReplaceAll(want, "STATIC", "")) {
+					t.Fatalf("changelog.py args %q lack %q", args, want)
+				}
+			}
+			for _, unwanted := range testCase.noArgs {
+				if strings.Contains(args, unwanted) {
+					t.Fatalf("changelog.py args %q carry %q", args, unwanted)
+				}
+			}
+			if testCase.args == nil && args != "" {
+				t.Fatalf("changelog.py ran with nothing to write: %q", args)
+			}
+			staged := strings.Contains(between(result.output, "STAGED<<", ">>STAGED"), "default.txt")
+			if staged != testCase.staged {
+				t.Fatalf("store changelog staged = %v, want %v: %+v", staged, testCase.staged, result)
+			}
+		})
+	}
+}
+
+// The release body: the full changelog (static changelog first) linked, shown
+// short and folded when the changelog is generated; the static changelog alone,
+// inline, when generation is off; nothing when the body section is switched off.
+func TestRunReleaseBodyCarriesTheStaticChangelog(t *testing.T) {
+	start := `    if [ ! "$1" ] && [ "${BUILD_URIO_CHANGELOG:-1}" = 1 ] && [ "${BUILD_RELEASE_BODY_CHANGELOG-1}" ]`
+	region := componentRegion(t, start, "    GITHUB_RELEASE=`$BUILD_CURL")
+	source := "finalize_body() {\nRELEASE_BODY=header\n" + region + "}\nfinalize_body\nprint -r -- \"BODY<<$RELEASE_BODY>>BODY\"\n"
+	setup := `BUILD_NOTES_DIR="$BUILD_HOME/changelogs"
+BUILD_NOTES_PREFIX=123
+BUILD_CHANGELOG_FULL="$BUILD_NOTES_DIR/123_Full.md"
+mkdir -p "$BUILD_NOTES_DIR"
+printf 'STATIC NOTE\n- one\n' > "$BUILD_CHANGELOG_FULL"
+printf 'STATIC NOTE\n- one\n- a commit\n' > "$BUILD_NOTES_DIR/123_Simple.txt"
+`
+	for _, testCase := range []struct {
+		name      string
+		overrides []string
+		want      []string
+		unwanted  []string
+	}{
+		{name: "generated", want: []string{"Full changelog: [changelogs/123_Full.md]", "STATIC NOTE\n- one\n- a commit", "<details><summary>Full changelog</summary>"}},
+		{name: "generation off", overrides: []string{"BUILD_URIO_CHANGELOG=0"}, want: []string{"header\n\n---\n\nSTATIC NOTE\n- one"}, unwanted: []string{"Full changelog", "<details>", "a commit"}},
+		{name: "body section off", overrides: []string{"BUILD_RELEASE_BODY_CHANGELOG="}, unwanted: []string{"STATIC NOTE"}},
+		{name: "generation and body section off", overrides: []string{"BUILD_URIO_CHANGELOG=0", "BUILD_RELEASE_BODY_CHANGELOG="}, unwanted: []string{"STATIC NOTE"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := runComponent(t, source, setup, testCase.overrides...)
+			body := between(result.output, "BODY<<", ">>BODY")
+			if result.exitCode != 0 || !strings.HasPrefix(body, "header") {
+				t.Fatalf("release body region failed: %+v", result)
+			}
+			for _, want := range testCase.want {
+				if !strings.Contains(body, want) {
+					t.Fatalf("release body %q lacks %q", body, want)
+				}
+			}
+			for _, unwanted := range testCase.unwanted {
+				if strings.Contains(body, unwanted) {
+					t.Fatalf("release body %q carries %q", body, unwanted)
+				}
+			}
+		})
+	}
+}
+
+func between(text, open, close string) string {
+	start := strings.Index(text, open)
+	if start < 0 {
+		return ""
+	}
+	rest := text[start+len(open):]
+	end := strings.Index(rest, close)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
 }
 
 // Nullglob loops must not make absent Windows/Linux output sets look successful.
