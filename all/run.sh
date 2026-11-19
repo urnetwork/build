@@ -1288,8 +1288,8 @@ fi
         ur.io/react/src/data/pricing.js \
         ur.io/react/src/i18n/app \
         ur.io/react/src/styles/fonts.generated.css \
-        ur.io/{react,astro}/public/{docs-assets,docs-md,blog-md,fonts/subsets} \
-        ur.io/{react,astro}/public/{about,agents,changelog,install,products}.md \
+        ur.io/{react,astro}/public/{docs-assets,docs-md,blog-md,fonts/subsets,outages-md} \
+        ur.io/{react,astro}/public/{about,agents,buy-data,changelog,index,install,outages,products}.md \
         ur.io/{react,astro}/public/{llms.txt,llms-full.txt,openapi.yml} \
         ur.io/{react,astro}/public/{blog,ar/blog,de/blog,es/blog,ru/blog,zh/blog}/rss.xml \
         ur.io/{react,astro}/public/images/home-hero-{768,1024,1440,2048}.webp &&
