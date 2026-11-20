@@ -16,6 +16,10 @@ func TestRunWebAndMmmChecksFailBeforeReleaseWork(t *testing.T) {
 	setup := `
 mkdir -p "$BUILD_HOME/web/web" "$WARP_HOME/mmm/mmm"
 python3() { return 0; } # Gate evidence storage is covered by real entrypoint fixtures.
+git() {
+    [[ "$*" == "-C $WARP_HOME/mmm rev-parse HEAD" ]] || return 54
+    print -r -- checked-mmm-commit
+}
 make() {
     [[ "$*" == check && "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
     case "$PWD" in

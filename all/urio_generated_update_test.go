@@ -37,7 +37,8 @@ func urioGeneratedFiles() []string {
 		for _, name := range []string{
 			"docs-assets/diagram.svg", "docs-md/api.md", "docs-md/guide.md",
 			"blog-md/article.md", "fonts/subsets/Geist-Regular.base.woff2",
-			"about.md", "agents.md", "changelog.md", "install.md", "products.md",
+			"outages-md/example.md", "about.md", "agents.md", "buy-data.md",
+			"changelog.md", "index.md", "install.md", "outages.md", "products.md",
 			"llms.txt", "llms-full.txt", "openapi.yml",
 			"blog/rss.xml", "ar/blog/rss.xml", "de/blog/rss.xml",
 			"es/blog/rss.xml", "ru/blog/rss.xml", "zh/blog/rss.xml",
@@ -104,9 +105,10 @@ builder_message() { print -r -- "$1"; }
 eval "$1" || exit $?
 eval "$2" || exit $?
 print -r -- push-region-continued
-`, "urio-push-test", componentFunctions(t, "error_trap")+pushRetryFunction(t), region)
+`, "urio-push-test", componentFunctions(t, "error_trap"), region)
 	command.Env = environmentWith(
 		"WARP_HOME="+buildHome,
+		"MMM_CANDIDATE_HEAD="+runGit(t, filepath.Join(buildHome, "mmm"), "rev-parse", "HEAD"),
 		"EXTERNAL_WARP_VERSION=2026.10.13-1071358670",
 		"GIT_AUTHOR_NAME=Build Harness Test",
 		"GIT_AUTHOR_EMAIL=build-harness-test@example.invalid",
@@ -163,8 +165,8 @@ func TestRunUrioGeneratedPushPreservesUnrelatedChanges(t *testing.T) {
 					if diff := runGit(t, repository, "diff", "--binary"); diff != beforeWorktree {
 						t.Fatal("preexisting staged edit changed worktree staging")
 					}
-				} else if !strings.Contains(string(output), "[rejected]") || !strings.Contains(string(output), "unstaged changes") {
-					t.Fatalf("dirty rebase did not remain fatal: %s", output)
+				} else if !strings.Contains(string(output), "[rejected]") || !strings.Contains(string(output), "Start a fresh release") {
+					t.Fatalf("concurrent push did not stop preparation: %s", output)
 				}
 			}
 			if index := runGit(t, repository, "diff", "--cached", "--binary"); index != beforeIndex {
@@ -216,22 +218,34 @@ func TestRunUrioGeneratedPushHandlesNoopAndMirrorAdditionsAndRemovals(t *testing
 	}
 }
 
-func TestRunUrioGeneratedPushStopsOnRebaseConflict(t *testing.T) {
-	buildHome, repository, remote := urioPushFixture(t)
-	generated := "ur.io/react/src/data/content-dates.js"
-	writeUrioTestFile(t, repository, generated, "local generated dates\n")
-	concurrent := filepath.Join(t.TempDir(), "concurrent")
-	runGit(t, buildHome, "clone", "-b", "main", remote, concurrent)
-	remoteCommit := commitTestFile(t, concurrent, generated, "remote generated dates\n", "overlapping update")
-	runGit(t, concurrent, "push")
-	output, err := runUrioPush(t, buildHome)
-	if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "CONFLICT") {
-		t.Fatalf("overlapping generated changes did not stop the release: %v\n%s", err, output)
-	}
-	if head := runGit(t, remote, "rev-parse", "main"); head != remoteCommit {
-		t.Fatal("conflicted push overwrote remote main")
-	}
-	if unmerged := runGit(t, repository, "diff", "--name-only", "--diff-filter=U"); unmerged != generated {
-		t.Fatalf("expected preserved conflict in %s, got %q", generated, unmerged)
+func TestRunUrioGeneratedPushKeepsCandidateSourceOnConcurrentMainAdvance(t *testing.T) {
+	const generated = "ur.io/react/src/data/content-dates.js"
+	for _, remotePath := range []string{"ur.io/react/src/components/Footer.jsx", generated} {
+		t.Run(remotePath, func(t *testing.T) {
+			buildHome, repository, remote := urioPushFixture(t)
+			candidateHead := runGit(t, repository, "rev-parse", "HEAD")
+			writeUrioTestFile(t, repository, generated, "local generated dates\n")
+			concurrent := filepath.Join(t.TempDir(), "concurrent")
+			runGit(t, buildHome, "clone", "-b", "main", remote, concurrent)
+			remoteCommit := commitTestFile(t, concurrent, remotePath, "concurrent change\n", "concurrent MMM update")
+			runGit(t, concurrent, "push")
+			output, err := runUrioPush(t, buildHome)
+			if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "Start a fresh release") {
+				t.Fatalf("concurrent MMM update did not stop preparation: %v\n%s", err, output)
+			}
+			if head := runGit(t, remote, "rev-parse", "main"); head != remoteCommit {
+				t.Fatal("failed push changed remote main")
+			}
+			if head := runGit(t, repository, "rev-parse", "HEAD"); head != candidateHead {
+				t.Fatalf("checked source changed from %s to %s", candidateHead, head)
+			}
+			if status := runGit(t, repository, "status", "--porcelain"); status != "M "+generated {
+				t.Fatalf("generated output was not kept as an unstaged edit: %s", status)
+			}
+			contents, err := os.ReadFile(filepath.Join(repository, generated))
+			if err != nil || string(contents) != "local generated dates\n" {
+				t.Fatalf("generated dates changed: %v, %q", err, contents)
+			}
+		})
 	}
 }

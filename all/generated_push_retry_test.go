@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Exercise each production commit/push region against a local bare origin.
+// Exercise the production commit/push regions that rebase against a local bare origin.
 // A second clone advances main after checkout but before the generated commit,
 // reproducing the window between generation/tests and release version staging.
 func TestRunGeneratedPushIntegratesConcurrentMainCommit(t *testing.T) {
@@ -25,12 +25,6 @@ func TestRunGeneratedPushIntegratesConcurrentMainCommit(t *testing.T) {
 			start:      connectIpUpdatePushStart,
 			end:        connectIpUpdatePushEnd,
 			paths:      connectGeneratedTables,
-		},
-		{
-			repository: "mmm",
-			start:      "# Push the content and page dates",
-			end:        "# push the regenerated localizations",
-			paths:      urioGeneratedFiles(),
 		},
 		{
 			repository: "android",

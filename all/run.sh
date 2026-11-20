@@ -1010,6 +1010,8 @@ error_trap 'web build checks'
 WEB_CANDIDATE_RECEIPT=$(python3 "$BUILD_HOME/all/release-state.py" candidate "$WARP_HOME" web "$BUILD_HOME/web/web/build/preview.ur.xyz")
 error_trap 'retain web candidate gate evidence'
 builder_message "checking mmm builds after localization updates"
+MMM_CANDIDATE_HEAD=$(git -C "$WARP_HOME/mmm" rev-parse HEAD)
+error_trap 'select mmm candidate source'
 (cd "$WARP_HOME/mmm/mmm" && URNETWORK_ROOT="$BUILD_HOME" make check)
 error_trap 'mmm build checks'
 MMM_CANDIDATE_RECEIPT=$(python3 "$BUILD_HOME/all/release-state.py" candidate "$WARP_HOME" mmm "$WARP_HOME/mmm/mmm/build/preview.ur.io" "$WARP_HOME/mmm/mmm/build/lag.dev")
@@ -1263,12 +1265,17 @@ fi
 
 # Push the content and page dates together with the site outputs regenerated
 # by ur.io/astro's preflight: docs/API and their public mirrors, examples, stats,
-# legal/pricing, app locales, agent/feed files and image/font derivatives. Leaving
-# any of these dirty prevents the bounded rebase retry after a concurrent push.
+# legal/pricing, app locales, agent/feed files and image/font derivatives.
 # Keep this scope explicit: source files (including the separately maintained
 # changelog and desktop release metadata) and original media are not outputs.
 # A preexisting staged edit belongs to its author, not this generated commit.
-(cd $WARP_HOME/mmm &&
+# The image rebuild uses the candidate's checked source. A rebase here could
+# silently adopt unchecked sources or invalidate the generated outputs.
+(cd "$WARP_HOME/mmm" &&
+    if [[ "$(git rev-parse HEAD)" != "$MMM_CANDIDATE_HEAD" ]]; then
+        builder_message 'mmm changed after the candidate build. Start a fresh release to check the latest mmm sources.'
+        exit 1
+    fi &&
     if ! git diff --cached --quiet; then
         builder_message 'error: mmm has preexisting staged changes; preserve them before the generated site commit'
         exit 1
@@ -1296,8 +1303,15 @@ fi
         ur.io/{react,astro}/public/{blog,ar/blog,de/blog,es/blog,ru/blog,zh/blog}/rss.xml \
         ur.io/{react,astro}/public/images/home-hero-{768,1024,1440,2048}.webp &&
     if ! git diff --cached --quiet; then
-        git commit -m "${EXTERNAL_WARP_VERSION} ur.io content and page dates update" &&
-        git_push_with_rebase_retry
+        git commit -m "${EXTERNAL_WARP_VERSION} ur.io content and page dates update" || exit $?
+        git push origin HEAD:refs/heads/main || {
+            push_result=$?
+            # Restore the candidate's branch and index while keeping the generated
+            # files so the wrapper can stash them and pull on the next full run.
+            git reset --mixed --quiet "$MMM_CANDIDATE_HEAD" || exit $?
+            builder_message 'mmm generated-site push failed. Start a fresh release to check the latest mmm sources.'
+            exit "$push_result"
+        }
     fi)
 error_trap 'ur.io content and page dates update push'
 
