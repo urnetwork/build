@@ -1,0 +1,10 @@
+        <p>This release is named Champion. It includes 2 months of improvements to:</p>
+        <ul>
+          <li>Packet flow performance, including optimizations for diverse network conditions</li>
+          <li>Extenders and VLESS support, to make the network more accessible</li>
+          <li>Memory and CPU optimizations</li>
+          <li>Expanded DNS options</li>
+          <li>SN25/ur.xyz earnings integration</li>
+          <li>Improved session management</li>
+          <li>Bug fixes</li>
+        </ul>
