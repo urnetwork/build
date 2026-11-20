@@ -18,7 +18,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 SERVICES = ("config-updater", "grafana", "mmm", "lb", "taskworker", "api", "connect",
-            "web", "app", "mcp", "gossip", "alt", "proxy")
+            "web", "app", "mcp", "gossip", "proxy")
 
 FAKE_PROVIDER = r'''
 import fcntl, json, os, pathlib, signal, subprocess, sys, time

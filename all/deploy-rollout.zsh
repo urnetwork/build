@@ -2,9 +2,9 @@
 
 # Promote one rollout step without waiting for version convergence, and preserve
 # Warpctl's status before reporting success.
-# Config-updater, lb, transparent proxy, statusless Gossip, and unexposed Alt
-# blocks cannot observe their live versions through per-block LB status routes,
-# so Warpctl deliberately rejects --only-older for those services.
+# Config-updater, lb, transparent proxy, and statusless Gossip blocks cannot
+# observe their live versions through per-block LB status routes, so Warpctl
+# deliberately rejects --only-older for those services.
 warp_rollout_deploy() {
     local service="$1"
     local percent="$2"
@@ -21,7 +21,7 @@ warp_rollout_deploy() {
         --timeout 0
     )
     case "$service" in
-        config-updater|lb|proxy|gossip|alt)
+        config-updater|lb|proxy|gossip)
             ;;
         mmm)
             # New MMM blocks have no selector or old-LB status route. The
@@ -85,10 +85,10 @@ warp_rollout() {
     # hostnames to mmm (vault services.yml v26), so each wave starts mmm's
     # blocks before it brings any lb onto that routing (mmm/mmm/PLAN.md).
     staged_services=(mmm lb taskworker api connect web app mcp)
-    # Gossip has no status route, while Alt and Proxy intentionally bypass the
-    # load balancer. Without --only-older, a cumulative rollout would retag and
+    # Gossip has no status route, while Proxy intentionally bypasses the load
+    # balancer. Without --only-older, a cumulative rollout would retag and
     # restart already selected unobservable blocks in every later wave.
-    single_pass_services=(gossip alt proxy)
+    single_pass_services=(gossip proxy)
 
     warp_rollout_sample 0 || return $?
 

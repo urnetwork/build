@@ -3642,19 +3642,6 @@ release_image_receipt gossip
 error_trap 'verify retained gossip image digest'
 builder_message "service gossip \`${EXTERNAL_WARP_VERSION}\` available"
 
-if release_build image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"; then
-release_image_publication_begin alt
-error_trap 'verify unpublished alt image'
-(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/alt/Makefile)
-error_trap 'warpctl build alt'
-release_image_publication_complete alt
-error_trap 'record alt image digest'
-release_complete image-alt "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-alt.json"
-fi
-release_image_receipt alt
-error_trap 'verify retained alt image digest'
-builder_message "service alt \`${EXTERNAL_WARP_VERSION}\` available"
-
 if release_build image-proxy "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-proxy.json"; then
 release_image_publication_begin proxy
 error_trap 'verify unpublished proxy image'

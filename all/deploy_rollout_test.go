@@ -212,7 +212,7 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 			)
 		}
 		if percent == 100 {
-			for _, service := range []string{"gossip", "alt", "proxy"} {
+			for _, service := range []string{"gossip", "proxy"} {
 				expected = append(
 					expected,
 					deployEvent(service, 100, false),
@@ -253,7 +253,6 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 		{service: "lb", percent: 50, exitCode: 38},
 		{service: "proxy", percent: 100, exitCode: 39},
 		{service: "gossip", percent: 100, exitCode: 40},
-		{service: "alt", percent: 100, exitCode: 42},
 	}
 	for _, test := range tests {
 		result := runRollout(
@@ -291,10 +290,10 @@ func TestRolloutDeployFailureStopsImmediately(t *testing.T) {
 	}
 }
 
-// Pin both new service images to the versioned Server Makefiles before the
-// canonical rollout is entered. The Server repository separately tests that
-// those Makefiles produce the binary copied by each Dockerfile.
-func TestRunBuildsAltAndGossipContainersBeforeRollout(t *testing.T) {
+// Pin the gossip image to its versioned Server Makefile before the canonical
+// rollout is entered. The Server repository separately tests that the Makefile
+// produces the binary copied by its Dockerfile.
+func TestRunBuildsGossipContainerBeforeRollout(t *testing.T) {
 	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -305,20 +304,13 @@ func TestRunBuildsAltAndGossipContainersBeforeRollout(t *testing.T) {
 		t.Fatal("run.sh does not enter the canonical rollout")
 	}
 
-	for _, service := range []string{"gossip", "alt"} {
-		buildBlock := fmt.Sprintf(
-			"(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/%s/Makefile)\nerror_trap 'warpctl build %s'",
-			service,
-			service,
-		)
-		buildAt := strings.Index(runSource, buildBlock)
-		if buildAt < 0 {
-			t.Errorf("run.sh is missing the checked %s image build", service)
-			continue
-		}
-		if buildAt > rolloutAt {
-			t.Errorf("run.sh builds %s after deployment starts", service)
-		}
+	buildBlock := "(cd $BUILD_HOME && warpctl build $BUILD_ENV server${GO_MOD_SUFFIX}/cli/gossip/Makefile)\nerror_trap 'warpctl build gossip'"
+	buildAt := strings.Index(runSource, buildBlock)
+	if buildAt < 0 {
+		t.Fatal("run.sh is missing the checked gossip image build")
+	}
+	if buildAt > rolloutAt {
+		t.Fatal("run.sh builds gossip after deployment starts")
 	}
 }
 
@@ -364,6 +356,31 @@ func TestRolloutRejectsUnknownServiceBeforeWarpctl(t *testing.T) {
 	}
 	if !strings.Contains(result.output, "Unknown rollout service classification: unknown-service") {
 		t.Fatalf("unknown service diagnostic missing: %q", result.output)
+	}
+}
+
+// Alt was retired on 2026-11-20: server/LBALT.md D14 made the alt.* names DNS
+// aliases of the lb, and production services.yml has no alt blocks, so any
+// Warpctl deploy or preflight of alt fails with "No matching blocks." Keep it
+// out of the release: the rollout rejects it as unclassified before Warpctl,
+// and run.sh builds no image for it.
+func TestReleaseOmitsRetiredAltService(t *testing.T) {
+	result := runRollout(t, "SINGLE_SERVICE=alt", "SINGLE_PERCENT=100")
+	if result.exitCode != 64 {
+		t.Fatalf("alt rollout exit = %d, want 64; output=%s", result.exitCode, result.output)
+	}
+	if len(result.events) != 0 {
+		t.Fatalf("alt rollout reached an external boundary: %v", result.events)
+	}
+
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"/cli/alt/", "image-alt", "release_image_receipt alt"} {
+		if strings.Contains(string(runData), retired) {
+			t.Errorf("run.sh still builds the retired alt image: %q", retired)
+		}
 	}
 }
 

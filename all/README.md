@@ -129,7 +129,7 @@ never the potentially mutating `db version` helper. Production probes have a
 to 300 seconds). The native database/Grafana/Brevo gate runs first, then at
 most two services are checked concurrently. Each service retains Warp's exact
 guards, 20 sequential fresh-connection samples per observed block and clean-pass
-retry rules; all 13 services must pass. A failure or deadline cancels and reaps
+retry rules; all 12 services must pass. A failure or deadline cancels and reaps
 the owned probe groups, including registry/status child processes. Probes do
 not announce, promote, initialize selectors, or send messages. Health is
 checked again later, not assumed to persist.
