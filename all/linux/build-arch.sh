@@ -258,7 +258,14 @@ else
   # references no glibc symbol above the floor the .deb declares. A failure here
   # is real: the package would install on an older release and then fail to exec.
   echo ">>> [${ARCH}/${ROLE}] meson test"
-  if ! meson test -C "${builddir}" --print-errorlogs; then
+  if ! meson test -C "${builddir}"; then
+    # Meson's console excerpt can omit the assertion. The container's log
+    # disappears on exit, so copy its complete contents to the release log.
+    test_log="${builddir}/meson-logs/testlog.txt"
+    if [ -s "${test_log}" ]; then
+      echo ">>> [${ARCH}/${ROLE}] full Meson test log" >&2
+      cat "${test_log}" >&2
+    fi
     {
       echo "ERROR: meson test failed for ${ARCH}/${ROLE} — see the log above."
       echo "       If it is the glibc-floor gate on ROLE=daemon: this image's glibc is newer"

@@ -21,12 +21,24 @@ import (
 	"testing"
 )
 
-// Stands in for meson: setup, compile and test succeed, and install stages
-// the files build-arch.sh looks for in the install tree.
+// Stands in for meson. Setup, compile and test succeed by default, and install
+// stages the files build-arch.sh looks for in the install tree.
 const fakeBuildArchMeson = `#!/bin/sh
 set -eu
 if [ -n "${MESON_LOG:-}" ]; then printf '%s\n' "$*" >>"$MESON_LOG"; fi
 if [ "$1" = setup ]; then mkdir -p "$2"; fi
+if [ "$1" = test ] && [ "${FAKE_MESON_TEST_FAIL:-0}" = 1 ]; then
+  mkdir -p "$3/meson-logs"
+  {
+    printf '%s\n' 'FAIL  early assertion' '        expected true, got false'
+    i=0
+    while [ "$i" -lt 120 ]; do
+      printf 'ok    later case %s\n' "$i"
+      i=$((i + 1))
+    done
+  } >"$3/meson-logs/testlog.txt"
+  exit 1
+fi
 if [ "$1" = introspect ]; then
   printf '%s\n' '[{"name":"urnetworkd","installed":true},{"name":"urnetwork-catalog","installed":true},{"name":"urnetwork-tests","installed":false}]'
 fi
@@ -186,6 +198,21 @@ func runBuildArchFixture(t *testing.T, rpmMode string, archMode string, override
 		t.Fatalf("run build-arch.sh: %v", err)
 	}
 	return run
+}
+
+func TestBuildArchPrintsFullMesonLogOnFailure(t *testing.T) {
+	run := runBuildArchFixture(t, "ok", "ok", "FAKE_MESON_TEST_FAIL=1")
+	if run.exitCode != 1 {
+		t.Fatalf("test failure exit = %d, want 1\n%s", run.exitCode, run.output)
+	}
+	for _, record := range []string{"full Meson test log", "FAIL  early assertion", "expected true, got false", "ok    later case 119"} {
+		if !strings.Contains(run.output, record) {
+			t.Errorf("missing %q in test failure output:\n%s", record, run.output)
+		}
+	}
+	if files := run.uploads(t, "*"); len(files) != 0 {
+		t.Fatalf("failed tests left packaging outputs: %v", files)
+	}
 }
 
 // Returns what an upload glob over /out would pick up for pattern.
