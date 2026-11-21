@@ -26,6 +26,9 @@
 [submodule "glog"]
 	path = glog
 	url = git@github.com:urnetwork/glog.git
+[submodule "quic-go"]
+	path = quic-go
+	url = git@github.com:urnetwork/quic-go.git
 [submodule "proxy"]
 	path = proxy
 	url = git@github.com:urnetwork/proxy.git

@@ -143,7 +143,7 @@ branches earlier in the run) and also run standalone — see
 ### Building local (uncommitted) changes
 
 By default the scripts build whatever is already staged under `BUILD_HOME`
-(`build/{sdk,connect,glog,linux,windows}` — the release copies run.sh set up).
+(`build/{sdk,connect,glog,quic-go,linux,windows}` — the release copies run.sh set up).
 To instead compile a **local working tree** (e.g. to verify uncommitted SDK/app
 changes before committing), point the scripts at the local repos and they
 rsync them into `BUILD_HOME` first (source tree only — `.git` and build
@@ -153,7 +153,7 @@ artifacts are skipped). Set either:
 - `SRC_<REPO>=<path>` per repo (e.g. `SRC_SDK=/path/to/sdk`), which overrides `SRC_HOME`.
 
 Each script stages the repos its cgo build's `go.mod` replaces — **`sdk`,
-`connect`, and `glog`** (all three, or the module graph mismatches) — plus its
+`connect`, `glog`, and `quic-go`** (all of them, or the module graph mismatches) — plus its
 own app repo (`linux` / `windows`). A locally-staged repo usually isn't on a
 `v<version>` branch, so pass `EXTERNAL_WARP_VERSION` explicitly. Example:
 

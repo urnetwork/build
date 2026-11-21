@@ -173,9 +173,9 @@ class CanonicalEntrypoint(unittest.TestCase):
         # that exact function here; the unchanged resume entrypoint must derive
         # identical settings BEFORE its first validation, with no adoption.
         cls.env = cls.private_go_environment(cls.env)
-        modules=("glog","connect","userwireguard","goidenticons","proxy","sdk","sn","server","android","apple","windows","linux","web","warp","localizations","extension")
+        modules=("glog","quic-go","connect","userwireguard","goidenticons","proxy","sdk","sn","server","android","apple","windows","linux","web","warp","localizations","extension")
         cls.write(cls.build/".gitmodules", "".join(f'[submodule "{name}"]\n\tpath = {name}\n' for name in modules))
-        standalone=("config","vault","release","localizations","gvisor","sdk","mmm","goidenticons","connect","glog","userwireguard","examples","xops")
+        standalone=("config","vault","release","localizations","gvisor","sdk","mmm","goidenticons","connect","glog","quic-go","userwireguard","examples","xops")
         for name in (*standalone, *("build/"+n for n in modules)):
             repo=cls.root/name
             repo.mkdir(parents=True,exist_ok=True)

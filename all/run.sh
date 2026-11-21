@@ -791,6 +791,7 @@ if [ "$BUILD_RESET" ]; then
     (cd $BUILD_HOME && rm -rf web)
     (cd $BUILD_HOME && rm -rf warp)
     (cd $BUILD_HOME && rm -rf glog)
+    (cd $BUILD_HOME && rm -rf quic-go)
     (cd $BUILD_HOME && rm -rf proxy)
     (cd $BUILD_HOME && rm -rf userwireguard)
     (cd $BUILD_HOME && rm -rf goidenticons)
@@ -873,6 +874,8 @@ error_trap 'pull web'
 error_trap 'pull warp'
 (cd $BUILD_HOME/glog && git_main master)
 error_trap 'pull glog'
+(cd $BUILD_HOME/quic-go && git_main)
+error_trap 'pull quic-go'
 (cd $BUILD_HOME/proxy && git_main)
 error_trap 'pull proxy'
 (cd $BUILD_HOME/userwireguard && git_main master)
@@ -1374,6 +1377,8 @@ error_trap 'web prepare branch'
 error_trap 'warp prepare branch'
 (cd $BUILD_HOME/glog && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'glog prepare branch'
+(cd $BUILD_HOME/quic-go && git checkout -b v${EXTERNAL_WARP_VERSION})
+error_trap 'quic-go prepare branch'
 (cd $BUILD_HOME/proxy && git checkout -b v${EXTERNAL_WARP_VERSION})
 error_trap 'proxy prepare branch'
 (cd $BUILD_HOME/userwireguard && git checkout -b v${EXTERNAL_WARP_VERSION})
@@ -1946,12 +1951,29 @@ error_trap 'glog edit'
 error_trap 'glog push branch'
 
 
+# URnetwork's quic-go is a module of its own, like glog: renamed in place to
+# github.com/urnetwork/quic-go/v2026 and tagged before connect, whose fork tidy
+# resolves it at this version.
+(cd $BUILD_HOME/quic-go &&
+    go_mod_edit_module github.com/urnetwork/quic-go &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go)
+error_trap 'quic-go edit'
+
+
+(cd $BUILD_HOME/quic-go && 
+    git_commit &&
+    git_tag)
+error_trap 'quic-go push branch'
+
+
 (cd $BUILD_HOME/connect &&
     go_mod_edit_module github.com/urnetwork/connect &&
     go_mod_edit_gvisor &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
     go_mod_fork 'api')
 error_trap 'connect edit'
@@ -1992,6 +2014,8 @@ error_trap 'goidenticons push branch'
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&
     go_mod_fork)
@@ -2007,6 +2031,7 @@ error_trap 'proxy push branch'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
@@ -2015,6 +2040,7 @@ error_trap 'sdk build edit'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk cgo edit'
@@ -2023,6 +2049,7 @@ error_trap 'sdk cgo edit'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk js edit'
 
@@ -2039,10 +2066,12 @@ error_trap 'sdk js edit'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
     go_mod_fork 'build' 'cgo' 'js' 'packaging' 'python' 'ruby' 'rust' 'csharp' 'java' 'kotlin' 'swift')
@@ -2083,6 +2112,7 @@ error_trap 'js-sdk publish'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/sdk &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     # Drop the local-development server requirement. Integration tools that
@@ -2094,6 +2124,7 @@ error_trap 'js-sdk publish'
     go_edit_require_subpackages github.com/urfoundation/sn &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     go_edit_require_subpackages github.com/urnetwork/server &&
@@ -2117,6 +2148,7 @@ error_trap 'sn push branch'
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
@@ -2125,6 +2157,7 @@ error_trap 'sn push branch'
     go_edit_require_subpackages github.com/urnetwork/server &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
     go_edit_require_subpackages github.com/urnetwork/proxy &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard &&

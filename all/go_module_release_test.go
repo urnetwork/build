@@ -595,3 +595,207 @@ git_tag
 		t.Fatalf("published tag moved:\nbefore: %s\nafter:  %s", before, after)
 	}
 }
+
+// URnetwork's quic-go is a module of its own (github.com/urnetwork/quic-go)
+// that connect and the server import, so a release publishes it the way it
+// publishes glog: pulled, branched, renamed to its versioned path and tagged
+// before connect's edit resolves it, and required at that version, with no
+// replace, by every published module that requires glog. The build repository
+// carries it as a submodule beside glog.
+func TestRunReleasesQuicGoLikeGlog(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(runData)
+	for _, want := range []string{
+		"(cd $BUILD_HOME && rm -rf quic-go)",
+		"(cd $BUILD_HOME/quic-go && git_main)",
+		"(cd $BUILD_HOME/quic-go && git checkout -b v${EXTERNAL_WARP_VERSION})",
+	} {
+		if strings.Count(source, want) != 1 {
+			t.Errorf("run.sh must run %q once", want)
+		}
+	}
+	edit := strings.Index(source, "(cd $BUILD_HOME/quic-go &&\n    go_mod_edit_module github.com/urnetwork/quic-go &&\n    go_edit_require_subpackages github.com/urnetwork/quic-go)\nerror_trap 'quic-go edit'")
+	tag := strings.Index(source, "(cd $BUILD_HOME/quic-go && \n    git_commit &&\n    git_tag)\nerror_trap 'quic-go push branch'")
+	glogTag := strings.Index(source, "error_trap 'glog push branch'")
+	connectEdit := strings.Index(source, "error_trap 'connect edit'")
+	if edit < 0 || tag < 0 || glogTag < 0 || connectEdit < 0 || !(glogTag < edit && edit < tag && tag < connectEdit) {
+		t.Fatalf("quic-go must be edited and tagged after glog and before connect's edit: glog-tag=%d edit=%d tag=%d connect-edit=%d", glogTag, edit, tag, connectEdit)
+	}
+
+	blocks := regexp.MustCompile(`(?ms)^\(cd \$BUILD_HOME/([a-z/-]+) &&\n(.*?)\nerror_trap '`).FindAllStringSubmatch(source, -1)
+	published := []string{}
+	for _, block := range blocks {
+		if !strings.Contains(block[2], "go_mod_edit_require github.com/urnetwork/glog &&") {
+			continue
+		}
+		published = append(published, block[1])
+		if !strings.Contains(block[2], "go_mod_edit_require github.com/urnetwork/quic-go &&") {
+			t.Errorf("%s requires the released glog but not the released quic-go", block[1])
+		}
+	}
+	wantPublished := []string{"connect", "proxy", "sdk/build", "sdk/cgo", "sdk/js", "sdk", "sn", "server"}
+	if strings.Join(published, " ") != strings.Join(wantPublished, " ") {
+		t.Errorf("published module edits = %v, want %v", published, wantPublished)
+	}
+
+	gitmodules, err := os.ReadFile(filepath.Join(rolloutRoot(t), "..", ".gitmodules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gitmodules), "[submodule \"quic-go\"]\n\tpath = quic-go\n\turl = git@github.com:urnetwork/quic-go.git\n") {
+		t.Errorf("the build repository does not carry quic-go as a submodule:\n%s", gitmodules)
+	}
+}
+
+// buildSed is the GNU sed run.sh exports as BUILD_SED (gsed on macOS).
+func buildSed(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{"gsed", "sed"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		output, err := exec.Command(path, "--version").CombinedOutput()
+		if err == nil && strings.Contains(string(output), "GNU") {
+			return path
+		}
+	}
+	t.Skip("GNU sed (gsed) is not installed")
+	return ""
+}
+
+// Exercise the production quic-go edit on a toy of its layout: the release
+// renames the module in place to its versioned path and rewrites the root
+// and subpackage imports, and the tagged tree builds under that path.
+func TestQuicGoReleaseEditRenamesTheModuleInPlace(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"go.mod":                        "module github.com/urnetwork/quic-go\n\ngo 1.26.7\n",
+		"quic.go":                       "package quic\n\nimport \"github.com/urnetwork/quic-go/internal/protocol\"\n\nconst Value = protocol.Value\n\n// Path is the module path debug.BuildInfo reports.\nconst Path = \"github.com/urnetwork/quic-go\"\n",
+		"internal/protocol/protocol.go": "package protocol\n\nconst Value = 1\n",
+		"http3/http3.go":                "package http3\n\nimport (\n\tquic \"github.com/urnetwork/quic-go\"\n\t\"github.com/urnetwork/quic-go/internal/protocol\"\n)\n\nconst Value = quic.Value + protocol.Value\n",
+	}
+	for name, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quicEdit := componentRegion(t, "(cd $BUILD_HOME/quic-go &&\n    go_mod_edit_module", "error_trap 'quic-go edit'")
+	editCommand := regexp.MustCompile(`(?s)\(cd \$BUILD_HOME/quic-go &&\n(.*)\)\n$`).FindStringSubmatch(quicEdit)
+	if len(editCommand) != 2 {
+		t.Fatalf("quic-go release edit is missing:\n%s", quicEdit)
+	}
+	harness := `
+set -eu
+GO_MOD_SUFFIX=/v2026
+BUILD_SED="$1"
+eval "$2"
+eval "$3"
+eval "$4"
+eval "$5"
+eval "$6"
+`
+	command := exec.Command(
+		"zsh", "-c", harness, "quic-go-release-edit-test",
+		buildSed(t),
+		runFunction(t, "go_edit_require"),
+		runFunction(t, "go_edit_require_subpackages"),
+		runFunction(t, "go_mod_edit_module"),
+		"true",
+		editCommand[1],
+	)
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOFLAGS=")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("quic-go release edit failed: %v\n%s", err, output)
+	}
+	for name, want := range map[string]string{
+		"go.mod":         "module github.com/urnetwork/quic-go/v2026\n",
+		"quic.go":        "import \"github.com/urnetwork/quic-go/v2026/internal/protocol\"",
+		"http3/http3.go": "quic \"github.com/urnetwork/quic-go/v2026\"\n\t\"github.com/urnetwork/quic-go/v2026/internal/protocol\"",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s lacks %q after the release edit:\n%s", name, want, data)
+		}
+	}
+	quic, err := os.ReadFile(filepath.Join(root, "quic.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(quic), "const Path = \"github.com/urnetwork/quic-go/v2026\"") {
+		t.Errorf("the module path string was not versioned:\n%s", quic)
+	}
+	build := exec.Command("go", "vet", "./...")
+	build.Dir = root
+	build.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOFLAGS=")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("the released quic-go tree does not build: %v\n%s", err, output)
+	}
+}
+
+// A published module that builds connect requires the released quic-go and
+// keeps no replace for it, so its consumers resolve the fork from the tag with
+// no replace of their own. Exercise the production require edit on a toy
+// connect that imports the fork and one of its subpackages.
+func TestReleaseRequireEditLeavesNoQuicGoReplace(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"go.mod":     "module github.com/urnetwork/connect\n\ngo 1.26.7\n\nrequire github.com/urnetwork/quic-go v0.0.0\n\nreplace github.com/urnetwork/quic-go => ../quic-go\n",
+		"connect.go": "package connect\n\nimport (\n\tquic \"github.com/urnetwork/quic-go\"\n\t\"github.com/urnetwork/quic-go/http3\"\n)\n\nvar _ = quic.Value + http3.Value\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	harness := `
+set -eu
+GO_MOD_SUFFIX=/v2026
+EXTERNAL_WARP_VERSION=2026.11.21-1104000000
+BUILD_SED="$1"
+eval "$2"
+eval "$3"
+eval "$4"
+eval "$5"
+go_mod_edit_require github.com/urnetwork/quic-go
+go_edit_require_subpackages github.com/urnetwork/quic-go
+`
+	command := exec.Command(
+		"zsh", "-c", harness, "quic-go-require-edit-test",
+		buildSed(t),
+		runFunction(t, "go_edit_require"),
+		runFunction(t, "go_edit_require_subpackages"),
+		runFunction(t, "go_mod_drop_require"),
+		runFunction(t, "go_mod_edit_require"),
+	)
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOFLAGS=")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("release require edit failed: %v\n%s", err, output)
+	}
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(goMod), "replace") || strings.Contains(string(goMod), "github.com/urnetwork/quic-go v0.0.0") ||
+		!strings.Contains(string(goMod), "require github.com/urnetwork/quic-go/v2026 v2026.11.21-1104000000") {
+		t.Fatalf("released go.mod must require the tagged quic-go with no replace:\n%s", goMod)
+	}
+	connect, err := os.ReadFile(filepath.Join(root, "connect.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(connect), "quic \"github.com/urnetwork/quic-go/v2026\"\n\t\"github.com/urnetwork/quic-go/v2026/http3\"") {
+		t.Fatalf("released connect still imports the unversioned quic-go:\n%s", connect)
+	}
+}

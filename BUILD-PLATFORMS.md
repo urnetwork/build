@@ -21,7 +21,7 @@ can verify a build on each platform before committing.
 For the iOS/macOS xcframework and the Play-store Android aar (the gomobile
 bindings, not covered by a `build-*.sh`), see `sdk/build/` — `make build_apple`
 and `make build_android` build them from the working tree directly (their
-`sdk/build/go.mod` already `replace`s sdk/connect/glog with the local repos).
+`sdk/build/go.mod` already `replace`s sdk/connect/glog/quic-go with the local repos).
 
 For the pipeline internals (VM/container plumbing, store submission), see
 `build/all/DESKTOP_BUILD.md`.
@@ -92,7 +92,7 @@ For the pipeline internals (VM/container plumbing, store submission), see
 > exception to this rule — that path is a build input, git-ignored and excluded
 > from the staging rsync, not source.)
 
-Each `build-*.sh` builds from `$BUILD_HOME/{sdk,connect,glog,<app>}`. To build
+Each `build-*.sh` builds from `$BUILD_HOME/{sdk,connect,glog,quic-go,<app>}`. To build
 your local working tree instead, point the script at your repos and it rsyncs
 them into `BUILD_HOME` first (via `build/all/stage-local-repos.sh`). Set either:
 
@@ -102,7 +102,7 @@ them into `BUILD_HOME` first (via `build/all/stage-local-repos.sh`). Set either:
   `SRC_HOME` for that repo.
 
 Each script stages the repos its cgo/aar build's `go.mod` replaces — **`sdk`,
-`connect`, `glog`, and `goidenticons` (all of them, or the module graph mismatches)** — plus its
+`connect`, `glog`, `quic-go`, and `goidenticons` (all of them, or the module graph mismatches)** — plus its
 app repo (`linux` / `windows` / `android`). Only the source tree is copied;
 `.git`, `build/`, `out/`, `node_modules/`, and test binaries are skipped, and the
 destination's own build outputs and `.git` are preserved.
@@ -205,7 +205,7 @@ SRC_HOME=/Users/you/urnetwork \
 
 ## Caveats
 
-- Staging overwrites `BUILD_HOME/{sdk,connect,glog,<app>}`; re-stage via `run.sh`
+- Staging overwrites `BUILD_HOME/{sdk,connect,glog,quic-go,<app>}`; re-stage via `run.sh`
   before a release.
 - These are full app builds (deb+AppImage/MSI/APK), not just compiles — they take
   minutes (Windows the longest). A failure at the app-compile step means your

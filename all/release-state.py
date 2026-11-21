@@ -52,7 +52,7 @@ TOOLS = (("go", "version"), ("java", "-version"), ("node", "--version"),
          ("docker", "--version"), ("zig", "version"), ("python3", "--version"))
 # This is the exact set tagged by immutable preparation in run.sh. gvisor and
 # standalone candidate inputs are source-pinned but are not release-tagged.
-TAGGED_COMPONENTS = ("glog", "connect", "userwireguard", "goidenticons", "proxy", "sdk",
+TAGGED_COMPONENTS = ("glog", "quic-go", "connect", "userwireguard", "goidenticons", "proxy", "sdk",
                      "sn", "server", "android", "apple", "windows", "linux", "web",
                      "warp", "localizations", "extension")
 
@@ -440,7 +440,7 @@ def repositories(workspace):
     build = workspace / "build"
     repos = {"build": build}
     for name in ("config", "vault", "release", "localizations", "gvisor", "sdk", "mmm",
-                 "goidenticons", "connect", "glog", "userwireguard", "examples", "xops"):
+                 "goidenticons", "connect", "glog", "quic-go", "userwireguard", "examples", "xops"):
         repos[name] = workspace / name
     lines = git(build, "config", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$")
     for line in lines.decode().splitlines():
