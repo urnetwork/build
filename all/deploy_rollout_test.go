@@ -184,7 +184,7 @@ func deployEvent(service string, percent int, onlyOlder bool) string {
 	if onlyOlder {
 		event += "\t--only-older"
 	}
-	if service == "mmm" {
+	if rolloutInitializesUnset(service) {
 		event += "\t--initialize-unset"
 	}
 	return event
@@ -196,8 +196,12 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 	if onlyOlder {
 		suffix = " (only older)"
 	}
-	if service == "mmm" {
-		suffix = " (only older; initialize unset)"
+	if rolloutInitializesUnset(service) {
+		if onlyOlder {
+			suffix = " (only older; initialize unset)"
+		} else {
+			suffix = " (initialize unset)"
+		}
 	}
 	return fmt.Sprintf(
 		"message\tmain[%d%%] %s `2026.9.3-1036806790` deployed%s",
@@ -205,6 +209,15 @@ func deployMessage(service string, percent int, onlyOlder bool) string {
 		service,
 		suffix,
 	)
+}
+
+func rolloutInitializesUnset(service string) bool {
+	switch service {
+	case "mmm", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform", "smtpedge", "dnsedge-1", "dnsedge-2":
+		return true
+	default:
+		return false
+	}
 }
 
 // §19.11's staged list as each wave deploys it, mmm first, so no lb routes the mmm sites before mmm runs,
