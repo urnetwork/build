@@ -200,6 +200,38 @@ warpctl() {
                 self.assertNotEqual(state.environment_snapshot(), first)
                 self.assertNotIn("replacement canary input", json.dumps(state.environment_snapshot()))
 
+    def test_browser_candidate_restores_without_staging_a_second_build(self):
+        self.checkpoint_boundary()
+        source = (HERE / "run.sh").read_text()
+        stage = re.search(r'(?ms)^UR_BROWSER_RELEASES=.*?^fi\n', source)
+        self.assertIsNotNone(stage)
+        (self.workspace / "mmm/mmm").mkdir(parents=True)
+        body = r'''
+source "$BUILD_HOME/all/release-checkpoints.zsh"
+python3() { "$FIXTURE_PYTHON" -B "$WARP_HOME/checkpoint-boundary.py" "$@"; }
+error_trap() { local result=$?; if (( result != 0 )); then exit "$result"; fi; }
+make() {
+    [[ "$1" == stage-sidecar-candidate ]] || return 65
+    print built >> "$WARP_HOME/browser-events"
+    mkdir -p "$UR_BROWSER_OUT/v1" &&
+        print verified > "$UR_BROWSER_OUT/v1/sidecar.wasm"
+}
+'''
+        environment = dict(os.environ, WARP_HOME=str(self.workspace), BUILD_HOME=str(HERE.parent),
+                           EXTERNAL_WARP_VERSION=VERSION, GO_MOD_SUFFIX="/v2026", FIXTURE_PYTHON=sys.executable)
+        def run():
+            return subprocess.run(["/bin/zsh", "-c", body + stage[0]], env=environment,
+                                  pass_fds=(self.fd,), capture_output=True, text=True, timeout=60)
+        first = run()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        candidate = self.workspace / ".release-checkpoints" / VERSION / "ur-browser"
+        shutil.rmtree(candidate)
+        resumed = run()
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        self.assertIn("reuse ur-browser: verified", resumed.stderr)
+        self.assertEqual((candidate / "v1/sidecar.wasm").read_text(), "verified\n")
+        self.assertEqual((self.workspace / "browser-events").read_text().splitlines(), ["built"])
+
     def test_paused_arin_canonical_stage_completes_and_resumes_geolite_alone(self):
         self.checkpoint_boundary()
         source = (HERE / "run.sh").read_text()

@@ -131,6 +131,15 @@ reused. Changed effective Go inputs, adjacent source changes and corrupt
 retained outputs still refuse reuse. It does not claim an end-to-end real
 release or deployment.
 
+Each release builds the browser candidate once and publishes its `index.html`,
+`loader.js`, `worker.js` and `sidecar.wasm` alongside the native ur artifacts.
+`SHA256SUMS` covers all four. The offline signing and `ur-promote.zsh` flow
+selects the version the next MMM image serves. A release before the first
+promotion builds an empty key origin. With a promotion, the release verifies
+the signed `latest.json`, fills missing assets in the selected version's
+`.release-checkpoints/<version>/ur-browser/v1` from its public release, and
+checks each local file again as it copies it into the image.
+
 The final MMM image build sets `UR_PRESERVE_NETWORK_STATS=1` only for that
 command. Candidate checks still refresh and verify the network snapshot before
 it is committed and sealed; the final rebuild consumes those same bytes. The

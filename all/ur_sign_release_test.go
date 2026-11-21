@@ -26,8 +26,21 @@ func throwawayReleaseKey(t *testing.T) (string, string) {
 	return key, key + ".pub"
 }
 
-// A release as run.sh leaves it: the table's artifacts, and ursums's SHA256SUMS and ur-release.json.
+var browserTestFiles = []string{"index.html", "loader.js", "worker.js", "sidecar.wasm"}
+
+// A release as run.sh leaves it, with all four browser assets beside the native files.
 func writeSignTestRelease(t *testing.T, version string) string {
+	t.Helper()
+	browser := t.TempDir()
+	for _, name := range browserTestFiles {
+		copyTestContent(t, filepath.Join(browser, name), "browser fixture: "+name)
+	}
+	return writeSignTestSums(t, version, browser)
+}
+
+// Include exactly the browser files supplied by a candidate. An empty directory name
+// models a native-only release that cannot be promoted to the key origin.
+func writeSignTestSums(t *testing.T, version string, browser string) string {
 	t.Helper()
 	artifacts := t.TempDir()
 	for _, name := range urTableNames(t, version) {
@@ -41,10 +54,30 @@ func writeSignTestRelease(t *testing.T, version string) string {
 		t.Fatalf("build ursums: %v\n%s", err, output)
 	}
 	release := t.TempDir()
-	if output, err := exec.Command(ursums, "-dir", artifacts, "-version", version, "-table", filepath.Join(rolloutRoot(t), "ur", "artifacts.txt"), "-o", release).CombinedOutput(); err != nil {
+	args := []string{"-dir", artifacts, "-version", version, "-table", filepath.Join(rolloutRoot(t), "ur", "artifacts.txt"), "-o", release}
+	if browser != "" {
+		for _, name := range browserTestFiles {
+			args = append(args, "-also", name+"="+filepath.Join(browser, name))
+		}
+	}
+	if output, err := exec.Command(ursums, args...).CombinedOutput(); err != nil {
 		t.Fatalf("ursums: %v\n%s", err, output)
 	}
 	return release
+}
+
+func TestPromotionRefusesSignedReleaseWithoutBrowserFiles(t *testing.T) {
+	key, public := throwawayReleaseKey(t)
+	release := writeSignTestSums(t, urTestVersion, "")
+	if result := runSign(t, urTestVersion, "sign", urTestVersion, key, release); result.exitCode != 0 {
+		t.Fatal(result)
+	}
+	mmm := newPromoteMmm(t)
+	before := mmmState(t, mmm)
+	result := runPromote(t, public, mmm, urTestVersion, filepath.Join(release, "SHA256SUMS.sig"))
+	if result.exitCode == 0 || !strings.Contains(result.output, "complete signed ur browser bundle") || mmmState(t, mmm) != before {
+		t.Fatalf("native-only promotion: %+v", result)
+	}
 }
 
 func runSign(t *testing.T, typed string, arguments ...string) componentResult {

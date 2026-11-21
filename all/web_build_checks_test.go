@@ -53,8 +53,14 @@ WEB_BUILD_CHECKS=caller-value
 URNETWORK_ROOT=caller-root
 UR_PRESERVE_NETWORK_STATS=caller-value
 BUILD_ENV=main
+unset GOWORK
 mkdir -p "$WARP_HOME/mmm/mmm"
 printf 'module github.com/urnetwork/mmm/mmm\n\ngo 1.25.0\n\nrequire github.com/urnetwork/warp v0.0.0\n' > "$WARP_HOME/mmm/mmm/go.mod"
+UR_BROWSER_RELEASES="$WARP_HOME/.release-checkpoints"
+make() {
+    [[ "$PWD" == "$WARP_HOME/mmm/mmm" && "$1" == fetch-promoted-sidecar ]] || return 59
+    record_component_step promoted-browser
+}
 warpctl() {
     [[ "$WEB_BUILD_CHECKS" == 0 && "$URNETWORK_ROOT" == "$BUILD_HOME" ]] || return 52
     case "$*" in
@@ -84,7 +90,7 @@ replace github.com/urnetwork/warp => $BUILD_HOME/warp" ]] || return 55
 [[ ! -e "$(<"$BUILD_HOME/gowork-path")" ]] || exit 56
 `
 	result := runComponent(t, source, setup)
-	if result.exitCode != 0 || strings.ReplaceAll(result.events, "message\n", "") != "web-image\nmmm-image\nrelease-continued\n" {
+	if result.exitCode != 0 || strings.ReplaceAll(result.events, "message\n", "") != "web-image\npromoted-browser\nmmm-image\nrelease-continued\n" {
 		t.Fatalf("final site build settings are wrong or leaked outside their build commands: %+v", result)
 	}
 }

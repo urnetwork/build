@@ -60,7 +60,7 @@ class MmmReleaseInputs(unittest.TestCase):
         self.service = self.root / "mmm/mmm"
         self.build = self.root / "build"
         self.build.mkdir()
-        for relative in ("mmm/Makefile", "mmm/go.mod", "ur.io/astro/Makefile",
+        for relative in ("mmm/Makefile", "mmm/go.mod", "sidecar.ur.io/promoted.py", "ur.io/astro/Makefile",
                          "lag.dev/astro/Makefile", "ur.io/react/scripts/generate-network-stats.mjs",
                          "ur.io/react/src/data/networkStatsFeed.js"):
             target = self.root / "mmm" / relative

@@ -70,6 +70,20 @@ listed=$(awk '$2 == "ur-release.json" { print $1 }' "$sums")
     ur_promote_die "the signed SHA256SUMS does not list this ur-release.json"
 grep -qxF "  \"version\": \"$version\"," "$release" || ur_promote_die "ur-release.json is not version $version's"
 
+# An image can serve only a whole key-origin release. Keep the large assets on
+# the release; the image builder checks each byte against this signed selection.
+python3 - "$release" "$sums" <<'PY' || ur_promote_die "release does not list the complete signed ur browser bundle"
+import json, re, sys
+from pathlib import Path
+
+artifacts = json.loads(Path(sys.argv[1]).read_bytes())["artifacts"]
+signed = [line.split("  ")[1] for line in Path(sys.argv[2]).read_text().splitlines()
+          if re.fullmatch(r"[0-9a-f]{64}  [A-Za-z0-9][A-Za-z0-9._+-]*", line)]
+for name in ("index.html", "loader.js", "worker.js", "sidecar.wasm"):
+    if not isinstance(artifacts, list) or artifacts.count(name) != 1 or signed.count(name) != 1:
+        sys.exit(1)
+PY
+
 # a release version as numbers: yyyy, m, d and the code, compared in that order
 ur_promote_older () {
     local -a a b

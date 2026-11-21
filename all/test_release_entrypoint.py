@@ -64,6 +64,11 @@ elif name=="go":
     else: event("FORBIDDEN-GO:"+" ".join(args)); sys.exit(92)
 elif name=="make":
     event("make:"+str(pathlib.Path.cwd().relative_to(root)))
+    if pathlib.Path.cwd()==root/"mmm/mmm" and args[0]=="stage-sidecar-candidate":
+        out=pathlib.Path(next(arg.split("=",1)[1] for arg in args if arg.startswith("SIDECAR_CANDIDATE_DIR=")))
+        for asset in ("index.html","loader.js","worker.js","sidecar.wasm"):
+            put(out/"v1"/asset, asset.encode())
+        sys.exit(0)
     if pathlib.Path.cwd()!=root/"build/sdk/build": sys.exit(93)
     for relative in ("sdk/build/android/URnetworkSdk.aar","sdk/build/android/URnetworkSdk-sources.jar","sdk/build/apple/URnetworkSdk.xcframework.zip","sdk/js/build/URnetworkSdkJs.zip","sdk/js/wasm/main.wasm","sdk/cgo/build/linux/arm64/liburnetwork.so","sdk/cgo/build/URnetworkSdkLinux.zip"):
         put(root/"build"/relative)
@@ -261,6 +266,9 @@ class CanonicalEntrypoint(unittest.TestCase):
         self.assertIn("--resume "+VERSION,first.stdout+first.stderr)
         first_events=(self.root/"events").read_text().splitlines()
         self.assertEqual(first_events.count("make:build/sdk/build"),1)
+        self.assertEqual(first_events.count("make:mmm/mmm"),1)
+        browser=self.root/".release-checkpoints"/VERSION/"ur-browser"
+        shutil.rmtree(browser)
         self.assertEqual(first_events.count("sdk-mobile"),1)
         self.assertNotIn("preflight:main-lan",first_events)  # fixture explicitly skips deployment
         self.assertFalse([e for e in first_events if e.startswith("FORBIDDEN")],first_events)
@@ -272,6 +280,8 @@ class CanonicalEntrypoint(unittest.TestCase):
         second=self.invoke("--resume",VERSION,environment=configured)
         self.assertEqual(second.returncode,89,second.stdout+second.stderr)
         self.assertIn("reuse sdk: verified",second.stdout+second.stderr)
+        self.assertIn("reuse ur-browser: verified",second.stdout+second.stderr)
+        self.assertEqual((browser/"v1/sidecar.wasm").read_bytes(),b"sidecar.wasm")
         events=(self.root/"events").read_text().splitlines()
         self.assertEqual(events.count("make:build/sdk/build"),1,events)
         self.assertEqual(events.count("sdk-mobile"),2,events)
@@ -342,6 +352,8 @@ class CanonicalEntrypoint(unittest.TestCase):
         events=(self.root/"events").read_text().splitlines()
         self.assertEqual([event for event in events if event.startswith("cli-build:")],cli_events)
         self.assertEqual(events.count("make:build/sdk/build"),1)
+        self.assertEqual(events.count("make:mmm/mmm"),1)
+        self.assertEqual((self.root/".release-checkpoints"/VERSION/"ur-browser/v1/sidecar.wasm").read_bytes(),b"sidecar.wasm")
         self.assertEqual(events.count("sdk-mobile"),2)
 
         # A corrupt retained CLI output cannot silently become a rebuild.

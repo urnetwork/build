@@ -2815,6 +2815,21 @@ sn_cli_release () {
 github_create_draft_release
 
 
+# Keep the exact key-origin candidate across resumes and later promotions. Build it
+# before the SDK stage, which owns and can clean sdk/js/wasm. No image reads this
+# candidate until its version is named by a signed promotion in mmm.
+UR_BROWSER_RELEASES="$WARP_HOME/.release-checkpoints"
+UR_BROWSER_OUT="$UR_BROWSER_RELEASES/$EXTERNAL_WARP_VERSION/ur-browser"
+if release_build ur-browser "$UR_BROWSER_OUT"; then
+    rm -rf "$UR_BROWSER_OUT"
+    error_trap 'clean incomplete ur browser release candidate'
+    (cd "$WARP_HOME/mmm/mmm" && GOWORK=off make stage-sidecar-candidate \
+        SDK_JS_DIR="$BUILD_HOME/sdk/js" SIDECAR_HOST_TABLE="$BUILD_HOME/sidecar${GO_MOD_SUFFIX}/api_hosts_v1.json" \
+        SIDECAR_CANDIDATE_DIR="$UR_BROWSER_OUT")
+    error_trap 'build ur browser release candidate'
+    release_complete ur-browser "$UR_BROWSER_OUT"
+fi
+
 if release_build sdk "$BUILD_HOME/sdk/build/android" "$BUILD_HOME/sdk/build/apple" "$BUILD_HOME/sdk/js/build" "$BUILD_HOME/sdk/js/wasm" "$BUILD_HOME/sdk/cgo/build/linux" "$BUILD_HOME/sdk/cgo/build/URnetworkSdkLinux.zip"; then
 (cd $BUILD_HOME/sdk/build && make)
 error_trap 'build sdk'
@@ -3423,6 +3438,12 @@ error_trap 'retained required ur artifacts'
 for ur_artifact in "${(@f)$(ur_artifact_names "$EXTERNAL_WARP_VERSION")}"; do
     github_release_upload "$ur_artifact" "$UR_OUT/$ur_artifact"
 done
+ur_browser_files=(index.html loader.js worker.js sidecar.wasm)
+ur_browser_sums=()
+for ur_artifact in "${ur_browser_files[@]}"; do
+    github_release_upload "$ur_artifact" "$UR_BROWSER_OUT/v1/$ur_artifact"
+    ur_browser_sums+=(-also "$ur_artifact=$UR_BROWSER_OUT/v1/$ur_artifact")
+done
 # SHA256SUMS over ur's artifacts and ur-release.json (REPO-M3-01), made once
 # every artifact is final, since notarization, stapling and Authenticode all
 # change the bytes, and uploaded after each artifact's VirusTotal scan. Nothing
@@ -3432,7 +3453,7 @@ done
 UR_SUMS_OUT="${BUILD_OUT:-$BUILD_HOME/out}/ur-sums"
 rm -rf "$UR_SUMS_OUT"
 (cd "$BUILD_HOME/all" &&
-    GOWORK=off GOFLAGS= go run ./ursums -dir "$UR_OUT" -version "$EXTERNAL_WARP_VERSION" -table ur/artifacts.txt -o "$UR_SUMS_OUT")
+    GOWORK=off GOFLAGS= go run ./ursums -dir "$UR_OUT" -version "$EXTERNAL_WARP_VERSION" -table ur/artifacts.txt -o "$UR_SUMS_OUT" "${ur_browser_sums[@]}")
 error_trap 'ur sums'
 github_release_upload "ur-release.json" "$UR_SUMS_OUT/ur-release.json"
 github_release_upload "SHA256SUMS" "$UR_SUMS_OUT/SHA256SUMS"
@@ -4015,6 +4036,12 @@ builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 # build, then committed and sealed above: live refresh here would change a
 # pinned input after hours of artifact work, just before image publication.
 if release_build image-mmm "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-mmm.json" "$WARP_HOME/mmm/mmm/build/linux" "$WARP_HOME/mmm/mmm/build/darwin"; then
+# A clean builder may lack the promoted release's checkpoint. Only the signed
+# version's published assets can fill it; the image verifies the local files again.
+SIDECAR_RELEASE_KEY="$BUILD_HOME/sidecar${GO_MOD_SUFFIX}/RELEASE-KEY.pub"
+(cd "$WARP_HOME/mmm/mmm" && make fetch-promoted-sidecar \
+    SIDECAR_RELEASES="$UR_BROWSER_RELEASES" SIDECAR_RELEASE_KEY="$SIDECAR_RELEASE_KEY")
+error_trap 'prepare promoted ur browser assets'
 release_image_publication_begin mmm
 error_trap 'verify unpublished mmm image'
 mmm_go_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/urnetwork-mmm-gowork.XXXXXX")
@@ -4024,7 +4051,7 @@ printf 'go %s\n\nuse %s\n\nreplace github.com/urnetwork/warp => %s\n' \
     "$WARP_HOME/mmm/mmm" \
     "$BUILD_HOME/warp" > "$mmm_go_work_dir/go.work"
 error_trap 'mmm go workspace'
-(cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 UR_PRESERVE_NETWORK_STATS=1 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
+(cd $BUILD_HOME && GOWORK="$mmm_go_work_dir/go.work" SIDECAR_RELEASES="$UR_BROWSER_RELEASES" SIDECAR_RELEASE_KEY="$SIDECAR_RELEASE_KEY" URNETWORK_ROOT="$BUILD_HOME" WEB_BUILD_CHECKS=0 UR_PRESERVE_NETWORK_STATS=1 warpctl build $BUILD_ENV "$WARP_HOME/mmm/mmm/Makefile")
 error_trap 'warpctl build mmm'
 rm -rf "$mmm_go_work_dir"
 release_verify_mmm
