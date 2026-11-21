@@ -1640,6 +1640,25 @@ go_mod_drop_require () {
     go mod edit -droprequire=$1
 }
 
+# Drop each directory replacement whose target is the given sibling checkout or
+# lies inside it, such as SN's ../server/third_party/quic-go. A module that
+# drops its requirement on a sibling released after it drops these too: that
+# sibling's own fork later moves its trees into vNNNN, so a kept target would
+# be gone by the time this module's commands are built.
+go_mod_drop_replaces_into () {
+    local root="${1%/}"
+    local replaced old_module
+    replaced=$(go mod edit -json | jq -r --arg root "$root" '
+        .Replace[]?
+        | select(.New.Version == null)
+        | select(.New.Path == $root or (.New.Path | startswith($root + "/")))
+        | .Old.Path + (if .Old.Version == null then "" else "@" + .Old.Version end)
+    ') || return $?
+    for old_module in ${(f)replaced}; do
+        go mod edit "-dropreplace=$old_module" || return $?
+    done
+}
+
 go_edit_require () {
     find . \( -iname '*.go' -o -iname 'Makefile' \) -type f -exec $BUILD_SED -i "s|\"$1\"|\"$1${GO_MOD_SUFFIX}\"|g" {} \;
 }
@@ -2089,6 +2108,12 @@ error_trap 'js-sdk publish'
     # need unpublished server packages stay outside the versioned module below;
     # remaining library tests can resolve an already-published server version.
     go_mod_drop_require github.com/urnetwork/server &&
+    # SN builds the server checkout's third_party copies (pgx, go-redis,
+    # quic-go) so it compiles against server main. Drop those replacements with
+    # the server edge: the server's fork below moves third_party into
+    # server/vNNNN before the SN commands are built, and the provider,
+    # validator and snclaim keep building with the upstream modules.
+    go_mod_drop_replaces_into ../server &&
     go_mod_edit_require github.com/urnetwork/proxy &&
     go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urfoundation/sn &&

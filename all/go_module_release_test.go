@@ -3,6 +3,7 @@
 package allbuild
 
 import (
+	"archive/zip"
 	"errors"
 	"os"
 	"os/exec"
@@ -268,6 +269,182 @@ eval "$6"
 	}
 	if strings.Contains(string(goMod), "example.invalid/server") {
 		t.Fatalf("published SN module retained the server edge:\n%s", goMod)
+	}
+}
+
+// SN replaces modules with the server checkout's third_party copies (pgx,
+// go-redis, quic-go) so that it compiles against server main. The release drops
+// SN's server edge, and the server's own fork, which runs after SN's, moves
+// third_party into server/vNNNN, so a replacement kept into ../server names a
+// directory that is gone when the SN commands are built. Run the production SN
+// drops and fork, then the production server fork, and build an SN command as
+// sn_cli_release does: the module SN took from the server checkout must come
+// from its upstream release, and replacements into other siblings must stay.
+func TestSNReleaseDropsReplacementsIntoServerCheckout(t *testing.T) {
+	outer := t.TempDir()
+	const upstreamModule = "example.invalid/upstreamfork"
+	const upstreamVersion = "v1.0.0"
+	upstreamGoMod := "module " + upstreamModule + "\n\ngo 1.26.7\n"
+
+	// A file proxy stands in for the module's upstream release.
+	proxyDir := filepath.Join(outer, "goproxy", upstreamModule, "@v")
+	files := map[string]string{
+		filepath.Join(proxyDir, "list"):                                  upstreamVersion + "\n",
+		filepath.Join(proxyDir, upstreamVersion+".info"):                 `{"Version":"` + upstreamVersion + `","Time":"2026-01-01T00:00:00Z"}` + "\n",
+		filepath.Join(proxyDir, upstreamVersion+".mod"):                  upstreamGoMod,
+		filepath.Join(outer, "server", "go.mod"):                         "module github.com/urnetwork/server\n\ngo 1.26.7\n",
+		filepath.Join(outer, "server", "server.go"):                      "package server\n",
+		filepath.Join(outer, "server", "third_party", "fork", "go.mod"):  upstreamGoMod,
+		filepath.Join(outer, "server", "third_party", "fork", "fork.go"): "package upstreamfork\n\nconst Source = \"server copy\"\n",
+		filepath.Join(outer, "connect", "sctp", "go.mod"):                "module example.invalid/sctp\n\ngo 1.26.7\n",
+		filepath.Join(outer, "connect", "sctp", "sctp.go"):               "package sctp\n\nconst Source = \"connect sibling\"\n",
+		filepath.Join(outer, "server-other", "go.mod"):                   "module example.invalid/serverother\n\ngo 1.26.7\n",
+		filepath.Join(outer, "server-other", "other.go"):                 "package serverother\n\nconst Source = \"other sibling\"\n",
+		filepath.Join(outer, "sn", "go.mod"): `module github.com/urfoundation/sn
+
+go 1.26.7
+
+require (
+	example.invalid/sctp v0.0.0
+	example.invalid/serverother v0.0.0
+	example.invalid/upstreamfork v1.0.0
+	github.com/urnetwork/server v0.0.0
+)
+
+replace example.invalid/sctp => ../connect/sctp
+
+replace github.com/urnetwork/server => ../server
+
+replace example.invalid/upstreamfork => ../server/third_party/fork
+
+replace example.invalid/serverother => ../server-other
+`,
+		filepath.Join(outer, "sn", "cli", "miner", "main.go"): `package main
+
+import (
+	"fmt"
+
+	"example.invalid/sctp"
+	"example.invalid/serverother"
+	"example.invalid/upstreamfork"
+)
+
+func main() {
+	fmt.Println(upstreamfork.Source + " | " + sctp.Source + " | " + serverother.Source)
+}
+`,
+	}
+	for name, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zipFile, err := os.Create(filepath.Join(proxyDir, upstreamVersion+".zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zip.NewWriter(zipFile)
+	for _, entry := range []struct{ name, contents string }{
+		{"go.mod", upstreamGoMod},
+		{"fork.go", "package upstreamfork\n\nconst Source = \"upstream\"\n"},
+	} {
+		writer, err := archive.Create(upstreamModule + "@" + upstreamVersion + "/" + entry.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(entry.contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	snEdit := componentRegion(t, "(cd $BUILD_HOME/sn &&\n    go_mod_edit_module", "error_trap 'sn edit'")
+	var drops []string
+	for _, match := range regexp.MustCompile(`(?m)^    (go_mod_drop_[a-z_]+ [^\n&]+) &&$`).FindAllStringSubmatch(snEdit, -1) {
+		drops = append(drops, match[1])
+	}
+	if len(drops) == 0 || drops[0] != "go_mod_drop_require github.com/urnetwork/server" {
+		t.Fatalf("SN release drops = %q, want the server edge first", drops)
+	}
+	snFork := regexp.MustCompile(`(?m)^    (go_mod_fork [^\n]+)\)$`).FindStringSubmatch(snEdit)
+	serverEdit := componentRegion(t, "(cd $BUILD_HOME/server &&\n    go_mod_edit_module", "error_trap 'server edit'")
+	serverFork := regexp.MustCompile(`(?m)^    (go_mod_fork [^\n]+)\)$`).FindStringSubmatch(serverEdit)
+	if len(snFork) != 2 || len(serverFork) != 2 {
+		t.Fatal("SN or server release module fork command is missing")
+	}
+
+	harness := `
+set -eu
+GO_MOD_VERSION=2026
+BUILD_SED=true
+eval "$1"
+cd "$2/sn"
+eval "$3"
+eval "$4"
+cd "$2/server"
+eval "$5"
+cd "$2/sn/v2026/cli/miner"
+go build -trimpath -o "$2/provider" .
+"$2/provider"
+`
+	command := exec.Command(
+		"zsh", "-c", harness, "sn-release-server-replace-test",
+		componentFunctions(t,
+			"go_mod_drop_require",
+			"go_mod_drop_replaces_into",
+			"go_mod_fork_rebase_local_replaces",
+			"go_mod_fork_prepare",
+			"go_mod_fork_tidy",
+			"go_mod_fork",
+		),
+		outer,
+		strings.Join(drops, "\n"),
+		snFork[1],
+		serverFork[1],
+	)
+	command.Env = append(os.Environ(),
+		"GOPROXY=file://"+filepath.ToSlash(filepath.Join(outer, "goproxy")),
+		"GOSUMDB=off",
+		"GOPRIVATE=",
+		"GONOPROXY=",
+		"GONOSUMDB=",
+		"GOWORK=off",
+		"GOTOOLCHAIN=local",
+		"GOFLAGS=-modcacherw",
+		"GOMODCACHE="+filepath.Join(outer, "modcache"),
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("SN command does not build after the server's release fork: %v\n%s", err, output)
+	}
+	if got, want := strings.TrimSpace(string(output)), "upstream | connect sibling | other sibling"; !strings.HasSuffix(got, want) {
+		t.Fatalf("SN command output = %q, want it to end with %q", got, want)
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(outer, "sn", "v2026", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, directive := range []string{
+		"replace example.invalid/sctp => ../../connect/sctp",
+		"replace example.invalid/serverother => ../../server-other",
+	} {
+		if !strings.Contains(string(goMod), directive) {
+			t.Errorf("published SN go.mod lacks %q:\n%s", directive, goMod)
+		}
+	}
+	for _, retired := range []string{"=> ../../server/", "=> ../../server\n", "github.com/urnetwork/server"} {
+		if strings.Contains(string(goMod), retired) {
+			t.Errorf("published SN go.mod keeps %q:\n%s", retired, goMod)
+		}
 	}
 }
 
