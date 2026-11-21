@@ -76,22 +76,24 @@ warp_rollout_deploy() {
         --timeout 0
     )
     case "$service" in
-        config-updater|lb|proxy|gossip|alt|smtpedge|dnsedge-1)
+        config-updater|lb|proxy|gossip|alt)
             ;;
-        dnsedge-2)
+        smtpedge|dnsedge-1|dnsedge-2)
             # a preflight checks the class alone; the stop rule reads the first NS at deploy time
-            if [[ "${3:-}" != preflight ]] && ! dns_rollout_stop_check "$service"; then
+            if [[ "$service" = dnsedge-2 && "${3:-}" != preflight ]] && ! dns_rollout_stop_check "$service"; then
                 return 65
             fi
+            deploy_args+=(--initialize-unset)
+            success_suffix=" (initialize unset)"
             ;;
-        mmm)
-            # New MMM blocks have no selector or old-LB status route. The
+        mmm|evs|gkm|sockets|dns|tlsedge|mxedge|mxedge-platform)
+            # Newly added blocks have no selector or old-LB status route. The
             # opt-in initializes only absent records, then recognizes this
             # release's completed initialization in later cumulative waves.
             deploy_args+=(--only-older --initialize-unset)
             success_suffix=" (only older; initialize unset)"
             ;;
-        grafana|taskworker|api|connect|web|app|mcp|evs|gkm|sockets|dns|tlsedge|mxedge|mxedge-platform)
+        grafana|taskworker|api|connect|web|app|mcp)
             deploy_args+=(--only-older)
             success_suffix=" (only older)"
             ;;

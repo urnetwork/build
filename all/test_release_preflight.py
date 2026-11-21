@@ -220,10 +220,11 @@ exit "$code"
                 for event in started:
                     name = event["name"]
                     expected = ["deploy", "main", name, "9999.0.0+0", "--percent=100", "--timeout", "0"]
-                    if name == "mmm":
+                    if name in ("mmm", "dns", "gkm", "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"):
                         expected += ["--only-older", "--initialize-unset"]
-                    elif name in ("grafana", "taskworker", "api", "connect", "web", "app", "mcp", "dns", "gkm",
-                                  "evs", "sockets", "tlsedge", "mxedge", "mxedge-platform"):
+                    elif name in ("smtpedge", "dnsedge-1", "dnsedge-2"):
+                        expected += ["--initialize-unset"]
+                    elif name in ("grafana", "taskworker", "api", "connect", "web", "app", "mcp"):
                         expected += ["--only-older"]
                     expected += ["--preflight"]
                     if phase == "future":
