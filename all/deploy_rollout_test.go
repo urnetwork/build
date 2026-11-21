@@ -262,7 +262,7 @@ func TestRolloutUsesOnlyOlderOnlyForSampleableServicesAcrossEveryWave(t *testing
 			for _, service := range rolloutSinglePassServices {
 				if service == "dnsedge-2" {
 					// Q-OPS-5: the first NS serves clean before the second deploys
-					expected = append(expected, "dns-check")
+					expected = append(expected, "dns-check\t--service=dnsedge-1\t--expected-version=2026.9.3+1036806790")
 				}
 				expected = append(
 					expected,
