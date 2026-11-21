@@ -104,6 +104,7 @@ require (
 	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/urnetwork/glog v0.0.0 // indirect
 	github.com/urnetwork/goidenticons v0.0.0 // indirect
+	github.com/urnetwork/quic-go v0.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -128,6 +129,11 @@ replace github.com/urnetwork/sdk => ../../../sdk
 replace github.com/urnetwork/connect => ../../../connect
 
 replace github.com/urnetwork/glog => ../../../glog
+
+// URnetwork's quic-go, its own module (../../../quic-go/URNETWORK.md).
+// Go ignores a dependency's replacements, so each main module that builds
+// connect selects the sibling checkout, as it does glog.
+replace github.com/urnetwork/quic-go => ../../../quic-go
 
 replace github.com/urnetwork/goidenticons => ../../../goidenticons
 
