@@ -16,9 +16,9 @@
 # first serves clean (Q-OPS-5). The bare role name dnsedge stays unknown.
 
 # Q-OPS-5's stop rule before the second NS: a clean canary signature and equal NS
-# serials. DNS_ROLLOUT_CHECK names a command that exits 0 only when both hold, such
-# as `monitor check-burn --service=dnsedge-1`, which reads them from the dns canary
-# (SIGNALS.md §30); with
+# serials on the target release. Point DNS_ROLLOUT_CHECK at `monitor check-burn
+# --status-url=<private ns1 block /status URL>`. It checks g1 at the requested
+# version before and after the canary (SIGNALS.md §30). With
 # none set nothing can read them, which stops the step, as a burn state the monitor
 # cannot read does (plan-OPS-small-readings #11). An operator who has checked by
 # hand overrides by naming the service in ROLLOUT_STOP_OVERRIDE.
@@ -32,7 +32,14 @@ dns_rollout_stop_check() {
         printf '%s waits: no DNS_ROLLOUT_CHECK reads the canary signature and NS serials\n' "$service" >&2
         return 1
     fi
-    ${(z)DNS_ROLLOUT_CHECK}
+    local evidence line
+    evidence="$(${(z)DNS_ROLLOUT_CHECK} --service=dnsedge-1 --expected-version="$WARP_VERSION")" || return 1
+    printf '%s\n' "$evidence"
+    for line in "${(@f)evidence}"; do
+        [[ "$line" == "dnsedge-1/g1 ready $WARP_VERSION dns-canary clear" ]] && return 0
+    done
+    printf '%s waits: no ready dnsedge-1/g1 and clear canary for %s\n' "$service" "$WARP_VERSION" >&2
+    return 1
 }
 # The sidecar's services, whose SLO burn gates every rollout wave they are in
 # (D-OPS-9, §19.8; OPS-M3-02).
