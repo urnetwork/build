@@ -17,8 +17,9 @@
 
 # Q-OPS-5's stop rule before the second NS: a clean canary signature and equal NS
 # serials on the target release. Point DNS_ROLLOUT_CHECK at `monitor check-burn
-# --status-url=<private ns1 block /status URL>`. It checks g1 at the requested
-# version before and after the canary (SIGNALS.md §30). With
+# --status-url=<private ns1 block /status URL>`. Before and after the canary, the
+# ready g1 process must confirm fresh signatures it served on every public ns1
+# TCP and UDP address at the requested version (SIGNALS.md §30). With
 # none set nothing can read them, which stops the step, as a burn state the monitor
 # cannot read does (plan-OPS-small-readings #11). An operator who has checked by
 # hand overrides by naming the service in ROLLOUT_STOP_OVERRIDE.
@@ -36,7 +37,7 @@ dns_rollout_stop_check() {
     evidence="$(${(z)DNS_ROLLOUT_CHECK} --service=dnsedge-1 --expected-version="$WARP_VERSION")" || return 1
     printf '%s\n' "$evidence"
     for line in "${(@f)evidence}"; do
-        [[ "$line" == "dnsedge-1/g1 ready $WARP_VERSION dns-canary clear" ]] && return 0
+        [[ "$line" == "dnsedge-1/g1 serving $WARP_VERSION tcp+udp dns-canary clear" ]] && return 0
     done
     printf '%s waits: no ready dnsedge-1/g1 and clear canary for %s\n' "$service" "$WARP_VERSION" >&2
     return 1
