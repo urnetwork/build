@@ -32,7 +32,14 @@ dns_rollout_stop_check() {
         printf '%s waits: no DNS_ROLLOUT_CHECK reads the canary signature and NS serials\n' "$service" >&2
         return 1
     fi
-    ${(z)DNS_ROLLOUT_CHECK} --service=dnsedge-1 --expected-version="$WARP_VERSION"
+    local evidence line
+    evidence="$(${(z)DNS_ROLLOUT_CHECK} --service=dnsedge-1 --expected-version="$WARP_VERSION")" || return 1
+    printf '%s\n' "$evidence"
+    for line in "${(@f)evidence}"; do
+        [[ "$line" == "dnsedge-1/g1 ready $WARP_VERSION dns-canary clear" ]] && return 0
+    done
+    printf '%s waits: no ready dnsedge-1/g1 and clear canary for %s\n' "$service" "$WARP_VERSION" >&2
+    return 1
 }
 # The sidecar's services, whose SLO burn gates every rollout wave they are in
 # (D-OPS-9, §19.8; OPS-M3-02).

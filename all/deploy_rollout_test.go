@@ -76,8 +76,12 @@ slo_burn_check() {
 SLO_BURN_CHECK=${SLO_BURN_CHECK-slo_burn_check}
 
 # Q-OPS-5's stop rule before the second NS: clean unless DNS_CHECK_CODE says otherwise
+dns_rollout_receipt() {
+    printf 'dnsedge-1/g1 ready %s dns-canary clear\n' "${DNS_REPORTED_VERSION:-$WARP_VERSION}"
+}
 dns_rollout_check() {
     record_event dns-check "$@"
+    dns_rollout_receipt
     return "${DNS_CHECK_CODE:-0}"
 }
 DNS_ROLLOUT_CHECK=${DNS_ROLLOUT_CHECK-dns_rollout_check}
@@ -564,13 +568,13 @@ func TestRolloutDeploysTheDnsEdgesOneHostAtATime(t *testing.T) {
 	if want := []string{deployEvent("dnsedge-1", 100, false), deployMessage("dnsedge-1", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
 		t.Errorf("dnsedge-1 exit = %d, events = %q, want %q; output=%s", result.exitCode, result.events, want, result.output)
 	}
-	for _, stopped := range [][]string{{"DNS_ROLLOUT_CHECK="}, {"DNS_ROLLOUT_CHECK=false"}} {
+	for _, stopped := range [][]string{{"DNS_ROLLOUT_CHECK="}, {"DNS_ROLLOUT_CHECK=false"}, {"DNS_ROLLOUT_CHECK=true"}, {"DNS_ROLLOUT_CHECK=dns_rollout_receipt", "DNS_REPORTED_VERSION=old"}} {
 		result := runRollout(t, append([]string{"SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100"}, stopped...)...)
 		if result.exitCode != 65 || len(result.events) != 0 {
 			t.Errorf("dnsedge-2 with %q: exit = %d, events = %q, want 65 and nothing deployed", stopped, result.exitCode, result.events)
 		}
 	}
-	for _, clean := range []string{"DNS_ROLLOUT_CHECK=true", "ROLLOUT_STOP_OVERRIDE=dnsedge-2"} {
+	for _, clean := range []string{"DNS_ROLLOUT_CHECK=dns_rollout_receipt", "ROLLOUT_STOP_OVERRIDE=dnsedge-2"} {
 		result := runRollout(t, "SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100", clean)
 		if want := []string{deployEvent("dnsedge-2", 100, false), deployMessage("dnsedge-2", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
 			t.Errorf("dnsedge-2 with %s: exit = %d, events = %q, want %q; output=%s", clean, result.exitCode, result.events, want, result.output)
@@ -625,7 +629,7 @@ func rolloutImageServices(t *testing.T) []string {
 func TestEveryImageRunShBuildsHasARolloutClass(t *testing.T) {
 	for _, service := range rolloutImageServices(t) {
 		// dnsedge-2's stop rule reads the first NS clean here, so the run shows its class alone
-		if result := runRollout(t, "SINGLE_SERVICE="+service, "DNS_ROLLOUT_CHECK=true"); result.exitCode != 0 {
+		if result := runRollout(t, "SINGLE_SERVICE="+service, "DNS_ROLLOUT_CHECK=dns_rollout_receipt"); result.exitCode != 0 {
 			t.Errorf("%s has an image and no class: exit %d; output=%s", service, result.exitCode, result.output)
 		}
 	}
