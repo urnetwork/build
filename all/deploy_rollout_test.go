@@ -77,7 +77,10 @@ SLO_BURN_CHECK=${SLO_BURN_CHECK-slo_burn_check}
 
 # Q-OPS-5's stop rule before the second NS: clean unless DNS_CHECK_CODE says otherwise
 dns_rollout_receipt() {
-    printf 'dnsedge-1/g1 ready %s dns-canary clear\n' "${DNS_REPORTED_VERSION:-$WARP_VERSION}"
+    printf 'dnsedge-1/g1 serving %s tcp+udp dns-canary clear\n' "${DNS_REPORTED_VERSION:-$WARP_VERSION}"
+}
+dns_legacy_status_receipt() {
+    printf 'dnsedge-1/g1 ready %s dns-canary clear\n' "$WARP_VERSION"
 }
 dns_rollout_check() {
     record_event dns-check "$@"
@@ -581,7 +584,7 @@ func TestRolloutDeploysTheDnsEdgesOneHostAtATime(t *testing.T) {
 	if want := []string{deployEvent("dnsedge-1", 100, false), deployMessage("dnsedge-1", 100, false)}; result.exitCode != 0 || !slices.Equal(result.events, want) {
 		t.Errorf("dnsedge-1 exit = %d, events = %q, want %q; output=%s", result.exitCode, result.events, want, result.output)
 	}
-	for _, stopped := range [][]string{{"DNS_ROLLOUT_CHECK="}, {"DNS_ROLLOUT_CHECK=false"}, {"DNS_ROLLOUT_CHECK=true"}, {"DNS_ROLLOUT_CHECK=dns_rollout_receipt", "DNS_REPORTED_VERSION=old"}} {
+	for _, stopped := range [][]string{{"DNS_ROLLOUT_CHECK="}, {"DNS_ROLLOUT_CHECK=false"}, {"DNS_ROLLOUT_CHECK=true"}, {"DNS_ROLLOUT_CHECK=dns_legacy_status_receipt"}, {"DNS_ROLLOUT_CHECK=dns_rollout_receipt", "DNS_REPORTED_VERSION=old"}} {
 		result := runRollout(t, append([]string{"SINGLE_SERVICE=dnsedge-2", "SINGLE_PERCENT=100"}, stopped...)...)
 		if result.exitCode != 65 || len(result.events) != 0 {
 			t.Errorf("dnsedge-2 with %q: exit = %d, events = %q, want 65 and nothing deployed", stopped, result.exitCode, result.events)
