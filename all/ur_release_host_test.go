@@ -15,6 +15,7 @@ package allbuild
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,8 +97,15 @@ func TestCopiedGitHelperOnThisHostRunsUrChildren(t *testing.T) {
 	agent := exec.CommandContext(ctx, agentPath, "lfs-agent", "--repo="+repo)
 	agent.Env = environment
 	agent.Stdin = strings.NewReader("{\"event\":\"init\",\"operation\":\"download\"}\n{\"event\":\"terminate\"}\n")
-	if output, err := agent.CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "{}" {
+	output, err := agent.CombinedOutput()
+	if err != nil {
 		t.Fatalf("configured LFS agent: %v\n%s", err, output)
+	}
+	var reply map[string]string
+	decodeErr := json.Unmarshal(output, &reply)
+	event, hasEvent := reply["event"]
+	if decodeErr != nil || reply == nil || (len(reply) != 0 && (!hasEvent || len(reply) != 1 || event != "")) {
+		t.Fatalf("unexpected LFS initialization reply %q (%v)", output, decodeErr)
 	}
 	// The probe exits immediately after recording the actual detached child's arguments; the helper then
 	// reaches its ordinary cold-start timeout on the private socket. No system daemon or keychain is opened.
