@@ -273,7 +273,7 @@ eval "$6"
 }
 
 // SN replaces modules with the server checkout's third_party copies (pgx,
-// go-redis, quic-go) so that it compiles against server main. The release drops
+// go-redis) so that it compiles against server main. The release drops
 // SN's server edge, and the server's own fork, which runs after SN's, moves
 // third_party into server/vNNNN, so a replacement kept into ../server names a
 // directory that is gone when the SN commands are built. Run the production SN
