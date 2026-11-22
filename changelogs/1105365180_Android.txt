@@ -1,0 +1,8 @@
+This release is named Champion. It includes major new features and continual bug fixes and improvements to:
+- Packet flow performance, including optimizations for diverse network conditions
+- Extenders and VLESS support, to make the network more accessible
+- Memory and CPU optimizations
+- Expanded DNS options
+- SN25/ur.xyz earnings integration
+- Improved session management
+- Bug fixes
