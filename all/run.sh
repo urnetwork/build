@@ -3323,6 +3323,46 @@ builder_message "warning: no \`v${EXTERNAL_WARP_VERSION}-fdroid\` tag: F-Droid c
 fi
 
 
+# The community provider image, bringyour/community-provider: this release's
+# provider, the linux/amd64 and linux/arm64 binaries sn_cli_release built
+# above, for the operators who run it in Docker (all/community/provider).
+# warpctl names the image after that directory and checks the binaries with
+# govulncheck before it publishes, as it does for the service images; they are
+# checked here first, so a refusal records no publication intent. The release
+# is GitHub's latest by now (published above, before the F-Droid tag), so
+# promote.sh then moves the tags operators follow (latest, beta-latest and
+# g1-latest to g4-latest) to it, in step with the providers that update
+# themselves. A refused or failed image leaves the tags on the last image and
+# doesn't stop the release.
+community_provider_image () {
+    local binaries="$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/miner/build"
+    local receipt="$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-community-provider.json"
+    local arch report
+    if release_build image-community-provider "$receipt"; then
+        for arch in amd64 arm64; do
+            report="$BUILD_HOME/.govulncheck-community-provider-$arch.txt"
+            if ! govulncheck -mode=binary "$binaries/linux/$arch/provider" > "$report" 2>&1; then
+                builder_message "warning: govulncheck rejected the linux/$arch provider for the community provider image:\n$(grep -E '^Vulnerability #|Found in:|Fixed in:' "$report")"
+                return 1
+            fi
+        done
+        release_image_publication_begin community-provider community-provider || return $?
+        (cd $BUILD_HOME && PROVIDER_BINARIES="$binaries" warpctl build community all/community/provider/Makefile) || return $?
+        release_image_publication_complete community-provider community-provider || return $?
+        release_complete image-community-provider "$receipt"
+    fi
+    release_image_receipt community-provider community-provider >/dev/null || return $?
+    "$BUILD_HOME/all/community/provider/promote.sh" "$EXTERNAL_WARP_VERSION"
+}
+if [ "$BUILD_ENV" = main ]; then
+    if community_provider_image; then
+        builder_message "community provider image \`${EXTERNAL_WARP_VERSION}\` published: bringyour/community-provider latest, beta-latest and g1-latest to g4-latest"
+    else
+        builder_message "warning: community provider image \`${EXTERNAL_WARP_VERSION}\` not published (errors above); its tags stay on the last image. Build will continue."
+    fi
+fi
+
+
 # Warp services
 
 # Generate both databases from the selected versioned Server before packaging

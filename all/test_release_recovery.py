@@ -904,7 +904,7 @@ class ShellSideEffectGuards(unittest.TestCase):
     def test_all_canonical_image_builds_and_imports_bracket_publication_intent(self):
         source = (HERE / "run.sh").read_text()
         stages = list(re.finditer(r'(?m)^\s*if release_build image-([a-z-]+) ', source))
-        self.assertEqual({stage[1] for stage in stages}, {"config-updater","grafana","lb","taskworker","api","connect","mcp","gossip","proxy","web","mmm","manager","app"})
+        self.assertEqual({stage[1] for stage in stages}, {"config-updater","grafana","lb","taskworker","api","connect","mcp","gossip","proxy","web","mmm","manager","app","community-provider"})
         for stage in stages:
             name = stage[1]
             end = source.index("release_complete image-" + name + " ", stage.end())
