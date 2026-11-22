@@ -59,11 +59,14 @@ release_apple_upload() {
 # Registry reads compare the full manifest bytes, including every platform's
 # digest. Reuse is permitted only while the immutable version tag still names
 # exactly that manifest. The receipt lives privately outside generated trees.
+# The image helpers take the image's service name, and optionally its
+# repository, which is otherwise ${BUILD_ENV}-<service> (bringyour/main-api);
+# the community provider image is bringyour/community-provider.
 release_image_receipt() {
-    local service="$1" target="$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-$1.json"
+    local service="$1" repository="${2:-${BUILD_ENV}-$1}" target="$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/image-$1.json"
     local probe
     probe=$(mktemp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/.image.XXXXXXXX") || return $?
-    if ! docker buildx imagetools inspect --raw "bringyour/${BUILD_ENV}-${service}:${EXTERNAL_WARP_VERSION}" > "$probe"; then
+    if ! docker buildx imagetools inspect --raw "bringyour/${repository}:${EXTERNAL_WARP_VERSION}" > "$probe"; then
         rm -f "$probe"
         return 1
     fi
@@ -82,9 +85,9 @@ release_image_receipt() {
 }
 
 release_image_absent() {
-    local diagnostic result
+    local repository="${2:-${BUILD_ENV}-$1}" diagnostic result
     diagnostic=$(mktemp "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/.registry.XXXXXXXX") || return $?
-    docker buildx imagetools inspect --raw "bringyour/${BUILD_ENV}-$1:${EXTERNAL_WARP_VERSION}" >/dev/null 2>"$diagnostic"
+    docker buildx imagetools inspect --raw "bringyour/${repository}:${EXTERNAL_WARP_VERSION}" >/dev/null 2>"$diagnostic"
     result=$?
     if (( result == 0 )); then
         print -u2 -- "Image $1 already exists without a completed checkpoint; refusing to overwrite an unverified publication. Reconcile the exact image or start a new release."
@@ -96,7 +99,7 @@ release_image_absent() {
     # manifest-absence errors, and never an accompanying auth/transport error.
     if grep -Eqi 'unauthorized|denied|forbidden|credential|authentication|token|transport|tls|certificate|timeout|timed out' "$diagnostic" ||
        { ! grep -Eqi 'manifest unknown|no such manifest' "$diagnostic" &&
-         ! grep -F "docker.io/bringyour/${BUILD_ENV}-$1:${EXTERNAL_WARP_VERSION}: not found" "$diagnostic" >/dev/null; }; then
+         ! grep -F "docker.io/bringyour/${repository}:${EXTERNAL_WARP_VERSION}: not found" "$diagnostic" >/dev/null; }; then
         print -u2 -- "Cannot establish that image $1 is absent (registry/auth/transport error); no image will be replaced"
         rm -f "$diagnostic"
         return 65
@@ -110,7 +113,7 @@ release_image_absent() {
 # import can start, and never automatically replay a previously recorded one.
 release_image_publication_begin() {
     local service="$1" observed
-    release_image_absent "$service" || return $?
+    release_image_absent "$@" || return $?
     observed=$(release_state effect-begin "image-$service-publication") || return $?
     if [[ -n "$observed" ]]; then
         print -u2 -- "Image $service publication was already attempted without a completed checkpoint. A daemon-owned BuildKit job may still publish even though the tag is currently absent. Verify the old job and exact version with the owning operator; do not retry or clear its intent. Start a new release after owned cleanup if authoritative reconciliation is unavailable."
@@ -123,7 +126,7 @@ release_image_publication_begin() {
 # interrupted job has terminated. The later stage completion retains the
 # receipt atomically; a gap before that checkpoint still refuses publication.
 release_image_publication_complete() {
-    release_image_receipt "$1" || return $?
+    release_image_receipt "$@" || return $?
     release_state effect-complete "image-$1-publication"
 }
 
