@@ -273,7 +273,7 @@ eval "$6"
 }
 
 // SN replaces modules with the server checkout's third_party copies (pgx,
-// go-redis, quic-go) so that it compiles against server main. The release drops
+// go-redis) so that it compiles against server main. The release drops
 // SN's server edge, and the server's own fork, which runs after SN's, moves
 // third_party into server/vNNNN, so a replacement kept into ../server names a
 // directory that is gone when the SN commands are built. Run the production SN
@@ -824,6 +824,36 @@ func TestRunReleasesQuicGoLikeGlog(t *testing.T) {
 	}
 	if !strings.Contains(string(gitmodules), "[submodule \"quic-go\"]\n\tpath = quic-go\n\turl = git@github.com:urnetwork/quic-go.git\n") {
 		t.Errorf("the build repository does not carry quic-go as a submodule:\n%s", gitmodules)
+	}
+}
+
+// The release's dependency vulnerability gate runs osv-scanner over each
+// checkout it names, reading every go.mod and lockfile under it. URnetwork's
+// quic-go is a checkout of its own, so the gate names it with warp, sdk and
+// server, and scans it after the release pulls it.
+func TestRunScansQuicGoForVulnerabilities(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(runData)
+	loops := regexp.MustCompile(`(?m)^    for scan_dir in ([a-z -]+); do\n        scan_vulnerabilities "\$scan_dir"\n    done$`).FindAllStringSubmatchIndex(source, -1)
+	if len(loops) != 1 {
+		t.Fatalf("run.sh must run scan_vulnerabilities over one list of checkouts, found %d", len(loops))
+	}
+	list := source[loops[0][2]:loops[0][3]]
+	scanned := map[string]bool{}
+	for _, dir := range strings.Fields(list) {
+		scanned[dir] = true
+	}
+	for _, want := range []string{"warp", "sdk", "server", "quic-go"} {
+		if !scanned[want] {
+			t.Errorf("the vulnerability scan does not cover %s: it scans %q", want, list)
+		}
+	}
+	pull := strings.Index(source, "(cd $BUILD_HOME/quic-go && git_main)")
+	if pull < 0 || loops[0][0] < pull {
+		t.Errorf("the vulnerability scan must run after the release pulls quic-go: pull=%d scan=%d", pull, loops[0][0])
 	}
 }
 

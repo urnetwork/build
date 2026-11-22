@@ -1123,7 +1123,10 @@ if [ ! "$BUILD_SKIP_VULN_SCAN" ]; then
         error_trap 'install osv-scanner'
         export PATH="$(go env GOPATH)/bin:$PATH"
     fi
-    for scan_dir in warp sdk server; do
+    # osv-scanner reads every go.mod and lockfile under each checkout named
+    # here. URnetwork's quic-go is a checkout of its own: its go.mod is no
+    # longer inside the server's tree.
+    for scan_dir in warp sdk server quic-go; do
         scan_vulnerabilities "$scan_dir"
     done
     builder_message "dependency vulnerability scan passed."
@@ -1646,7 +1649,7 @@ go_mod_drop_require () {
 }
 
 # Drop each directory replacement whose target is the given sibling checkout or
-# lies inside it, such as SN's ../server/third_party/quic-go. A module that
+# lies inside it, such as SN's ../server/third_party/pgx. A module that
 # drops its requirement on a sibling released after it drops these too: that
 # sibling's own fork later moves its trees into vNNNN, so a kept target would
 # be gone by the time this module's commands are built.
@@ -2138,9 +2141,9 @@ error_trap 'js-sdk publish'
     # need unpublished server packages stay outside the versioned module below;
     # remaining library tests can resolve an already-published server version.
     go_mod_drop_require github.com/urnetwork/server &&
-    # SN builds the server checkout's third_party copies (pgx, go-redis,
-    # quic-go) so it compiles against server main. Drop those replacements with
-    # the server edge: the server's fork below moves third_party into
+    # SN builds the server checkout's third_party copies (pgx, go-redis) so it
+    # compiles against server main. Drop those replacements with the server
+    # edge: the server's fork below moves third_party into
     # server/vNNNN before the SN commands are built, and the provider,
     # validator and snclaim keep building with the upstream modules.
     go_mod_drop_replaces_into ../server &&
