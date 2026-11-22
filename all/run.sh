@@ -1988,24 +1988,9 @@ error_trap 'quic-go edit'
 error_trap 'quic-go push branch'
 
 
-(cd $BUILD_HOME/connect &&
-    go_mod_edit_module github.com/urnetwork/connect &&
-    go_mod_edit_gvisor &&
-    go_edit_require_subpackages github.com/urnetwork/connect &&
-    go_mod_edit_require github.com/urnetwork/glog &&
-    go_edit_require_subpackages github.com/urnetwork/glog &&
-    go_mod_edit_require github.com/urnetwork/quic-go &&
-    go_edit_require_subpackages github.com/urnetwork/quic-go &&
-    go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
-    go_mod_fork 'api')
-error_trap 'connect edit'
-
-(cd $BUILD_HOME/connect && 
-    git_commit &&
-    git_tag)
-error_trap 'connect push branch'
-
-
+# Modules are versioned in dependency order, breadth-first from the leaves.
+# userwireguard and goidenticons require no URnetwork module, like glog and
+# quic-go, so they are tagged with them, before connect.
 (cd $BUILD_HOME/userwireguard &&
     go_mod_edit_module github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/userwireguard)
@@ -2026,6 +2011,24 @@ error_trap 'goidenticons edit'
     git_commit &&
     git_tag)
 error_trap 'goidenticons push branch'
+
+
+(cd $BUILD_HOME/connect &&
+    go_mod_edit_module github.com/urnetwork/connect &&
+    go_mod_edit_gvisor &&
+    go_edit_require_subpackages github.com/urnetwork/connect &&
+    go_mod_edit_require github.com/urnetwork/glog &&
+    go_edit_require_subpackages github.com/urnetwork/glog &&
+    go_mod_edit_require github.com/urnetwork/quic-go &&
+    go_edit_require_subpackages github.com/urnetwork/quic-go &&
+    go mod edit -dropretract '[v0.0.1, v0.1.13]' &&
+    go_mod_fork 'api')
+error_trap 'connect edit'
+
+(cd $BUILD_HOME/connect && 
+    git_commit &&
+    git_tag)
+error_trap 'connect push branch'
 
 
 (cd $BUILD_HOME/proxy &&
