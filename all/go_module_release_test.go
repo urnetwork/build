@@ -679,6 +679,73 @@ func TestRunPublishesImmutableAcyclicGoModuleTags(t *testing.T) {
 	}
 }
 
+// The release versions URnetwork's Go modules in dependency order,
+// breadth-first from the leaves. A leaf is a module whose release edit
+// requires no URnetwork module: glog, quic-go, userwireguard and goidenticons.
+// Each is edited and tagged before connect, the first module edit that
+// requires another module, so the leaf layer is versioned before any module
+// above it.
+func TestRunTagsLeafModulesBeforeConnect(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(runData)
+
+	type moduleEdit struct {
+		name       string
+		start, end int
+		leaf       bool
+	}
+	edits := []moduleEdit{}
+	for _, match := range regexp.MustCompile(`(?m)^\(cd \$BUILD_HOME/([a-z-]+) &&\n    go_mod_edit_module `).FindAllStringSubmatchIndex(source, -1) {
+		name := source[match[2]:match[3]]
+		terminal := "\nerror_trap '" + name + " edit'\n"
+		length := strings.Index(source[match[0]:], terminal)
+		if length < 0 {
+			t.Fatalf("%s release edit has no checked terminal stage", name)
+		}
+		edits = append(edits, moduleEdit{
+			name:  name,
+			start: match[0],
+			end:   match[0] + length + len(terminal),
+			leaf:  !strings.Contains(source[match[0]:match[0]+length], "go_mod_edit_require "),
+		})
+	}
+
+	leaves := []string{}
+	var firstRequiring *moduleEdit
+	for i := range edits {
+		if edits[i].leaf {
+			leaves = append(leaves, edits[i].name)
+		} else if firstRequiring == nil {
+			firstRequiring = &edits[i]
+		}
+	}
+	wantLeaves := []string{"glog", "quic-go", "userwireguard", "goidenticons"}
+	if strings.Join(leaves, " ") != strings.Join(wantLeaves, " ") {
+		t.Fatalf("leaf module edits = %v, want %v", leaves, wantLeaves)
+	}
+	if firstRequiring == nil || firstRequiring.name != "connect" {
+		t.Fatalf("connect must be the first module edit that requires another module: %+v", edits)
+	}
+	for _, edit := range edits {
+		if !edit.leaf {
+			continue
+		}
+		name := regexp.QuoteMeta(edit.name)
+		tag := regexp.MustCompile(`(?m)^\(cd \$BUILD_HOME/` + name + ` && ?\n    git_commit &&\n    git_tag\)\nerror_trap '` + name + ` push branch'$`)
+		tags := tag.FindAllStringIndex(source, -1)
+		if len(tags) != 1 {
+			t.Errorf("%s tag publication count = %d, want 1", edit.name, len(tags))
+			continue
+		}
+		if !(edit.end <= tags[0][0] && tags[0][1] < firstRequiring.start) {
+			t.Errorf("leaf module %s must be edited and tagged before connect's edit: edit=%d-%d tag=%d connect-edit=%d", edit.name, edit.start, edit.end, tags[0][0], firstRequiring.start)
+		}
+	}
+}
+
 // SDK commits its nested build-module locks after its root module tag has been
 // published. The release branch and tag deliberately have the same name, so
 // the production commit helper must push an explicit heads ref instead of an
