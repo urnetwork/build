@@ -827,6 +827,36 @@ func TestRunReleasesQuicGoLikeGlog(t *testing.T) {
 	}
 }
 
+// The release's dependency vulnerability gate runs osv-scanner over each
+// checkout it names, reading every go.mod and lockfile under it. URnetwork's
+// quic-go is a checkout of its own, so the gate names it with warp, sdk and
+// server, and scans it after the release pulls it.
+func TestRunScansQuicGoForVulnerabilities(t *testing.T) {
+	runData, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(runData)
+	loops := regexp.MustCompile(`(?m)^    for scan_dir in ([a-z -]+); do\n        scan_vulnerabilities "\$scan_dir"\n    done$`).FindAllStringSubmatchIndex(source, -1)
+	if len(loops) != 1 {
+		t.Fatalf("run.sh must run scan_vulnerabilities over one list of checkouts, found %d", len(loops))
+	}
+	list := source[loops[0][2]:loops[0][3]]
+	scanned := map[string]bool{}
+	for _, dir := range strings.Fields(list) {
+		scanned[dir] = true
+	}
+	for _, want := range []string{"warp", "sdk", "server", "quic-go"} {
+		if !scanned[want] {
+			t.Errorf("the vulnerability scan does not cover %s: it scans %q", want, list)
+		}
+	}
+	pull := strings.Index(source, "(cd $BUILD_HOME/quic-go && git_main)")
+	if pull < 0 || loops[0][0] < pull {
+		t.Errorf("the vulnerability scan must run after the release pulls quic-go: pull=%d scan=%d", pull, loops[0][0])
+	}
+}
+
 // buildSed is the GNU sed run.sh exports as BUILD_SED (gsed on macOS).
 func buildSed(t *testing.T) string {
 	t.Helper()

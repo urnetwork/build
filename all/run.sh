@@ -1123,7 +1123,10 @@ if [ ! "$BUILD_SKIP_VULN_SCAN" ]; then
         error_trap 'install osv-scanner'
         export PATH="$(go env GOPATH)/bin:$PATH"
     fi
-    for scan_dir in warp sdk server; do
+    # osv-scanner reads every go.mod and lockfile under each checkout named
+    # here. URnetwork's quic-go is a checkout of its own: its go.mod is no
+    # longer inside the server's tree.
+    for scan_dir in warp sdk server quic-go; do
         scan_vulnerabilities "$scan_dir"
     done
     builder_message "dependency vulnerability scan passed."
