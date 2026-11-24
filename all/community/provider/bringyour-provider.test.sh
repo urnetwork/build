@@ -22,6 +22,8 @@ cat > "$fake" <<'EOF'
     for arg in "$@"; do printf ' %s' "$arg"; done
     printf '\n'
     printf 'state:%s\n' "${URNETWORK_STATE_DIR:-<unset>}"
+    printf 'substituted:%s\n' "${BRINGYOUR_PROVIDER_STATE_DIR:-<unset>}"
+    printf 'problem:%s\n' "${BRINGYOUR_PROVIDER_STATE_PROBLEM:-<unset>}"
     if [ -e "/proc/$$/fd/9" ]; then
         printf 'fd9:%s\n' "$(readlink "/proc/$$/fd/9")"
         if flock -n "$(readlink "/proc/$$/fd/9")" true; then
@@ -102,6 +104,7 @@ expect own "args: provide --allow-client-registration"
 expect own "state:$dir"
 expect own "fd9:$dir"
 expect own "locked:yes"
+expect own "substituted:<unset>"
 expect_err own "fake provider log line"
 [ ! -e "$private_root/private-state" ] || fail "own: private-state marker written"
 
@@ -137,7 +140,11 @@ private="$work/private-world/state"
 expect world "args: provide --allow-client-registration"
 expect world "state:$private"
 expect world "fd9:none"
-expect_err world "writable by group or others"
+expect_err world "writable by group or others (mode 777)"
+expect_err world "Fix: mount a named volume at $dir"
+# the miner is told which directory it stands in for and why
+expect world "substituted:$dir"
+expect world "problem:it is writable by group or others (mode 777)"
 [ "$(cat "$private/jwt")" = mounted-jwt ] || fail "world: jwt not seeded"
 [ "$(mode_of "$private/jwt")" = 600 ] || fail "world: private jwt mode $(mode_of "$private/jwt")"
 [ "$(mode_of "$private")" = 700 ] || fail "world: private dir mode $(mode_of "$private")"
@@ -156,13 +163,17 @@ env HOME=/nonexistent URNETWORK_STATE_DIR= FAKE_LOG="$log" BRINGYOUR_PROVIDER_BI
     BRINGYOUR_PROVIDER_PRIVATE="$work/private-world" sh "$wrapper" status 2>/dev/null
 expect world-status "args: status"
 expect world-status "state:$private"
+expect world-status "substituted:$dir"
+expect world-status "problem:it is writable by group or others (mode 777)"
 
 # Owned by the host user (a bind mount): private.
 dir=$(new_state hostuser 0755)
 chown 1000:1000 "$dir"
 run hostuser "$dir" provide
 expect hostuser "state:$work/private-hostuser/state"
-expect_err hostuser "owned by another user"
+expect_err hostuser "it is owned by uid 1000, and this container runs as uid 0"
+expect hostuser "substituted:$dir"
+expect hostuser "problem:it is owned by uid 1000, and this container runs as uid 0"
 
 # A jwt others can read: private.
 dir=$(new_state openjwt 0755)
