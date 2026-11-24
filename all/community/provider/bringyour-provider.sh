@@ -27,7 +27,10 @@
 #    directory's jwt and proxy settings, the way the old provider ran: the
 #    device lasts as long as the container, and a new container registers a
 #    new one. `auth` writes its jwt into such a directory through a private
-#    one.
+#    one. The miner is told which directory it stands in for and why
+#    (BRINGYOUR_PROVIDER_STATE_DIR and BRINGYOUR_PROVIDER_STATE_PROBLEM), so
+#    its log, provider status and provider doctor name that directory and the
+#    volume that fixes it (sn miner/state_persistence.go).
 #
 # Every other command runs unchanged.
 
@@ -62,7 +65,13 @@ custody_problem() {
         return
     fi
     if ! owned_without "$dir" 022; then
-        echo "it is owned by another user or writable by group or others"
+        # a bind mount of the host user's folder is the common case
+        meta=$(stat -c '%u %a' -- "$dir" 2>/dev/null)
+        if [ -n "$meta" ] && [ "${meta%% *}" != "$uid" ]; then
+            echo "it is owned by uid ${meta%% *}, and this container runs as uid $uid"
+        else
+            echo "it is writable by group or others (mode ${meta#* })"
+        fi
         return
     fi
     if [ ! -w "$dir" ]; then
@@ -102,13 +111,21 @@ lock_state() {
     flock -n 9
 }
 
+# Tells the miner which state directory it stands in for and why ($1).
+export_substitution() {
+    BRINGYOUR_PROVIDER_STATE_DIR="$state"
+    BRINGYOUR_PROVIDER_STATE_PROBLEM="$1"
+    export BRINGYOUR_PROVIDER_STATE_DIR BRINGYOUR_PROVIDER_STATE_PROBLEM
+}
+
 # Runs the miner on the private state directory, seeded from $state.
 use_private() {
-    note "the state directory $state can't keep this container's device ($1)." \
-        "Running on a private state directory in the container, seeded with its jwt and proxy settings." \
-        "The device lasts as long as this container. To keep it across new containers, give each" \
-        "container its own state directory, owned by root and not writable by group or others," \
-        "such as a named volume (docker volume create)."
+    note "the state directory $state can't keep this container's device ($1)," \
+        "so the miner runs on a private state directory inside the container, seeded with its jwt and proxy settings." \
+        "The device lasts only as long as this container: a new container registers a new device." \
+        "Fix: mount a named volume at $state, one for each node (docker volume create urnetwork-provider," \
+        "then docker run -v urnetwork-provider:$state ...), or on the host make the directory mounted there" \
+        "owned by uid $uid and writable only by its owner (sudo chown -R $uid:$uid <dir>; sudo chmod 700 <dir>)."
     mkdir -p "$private_root" && mkdir -p -m 0700 "$private" && chmod 0700 "$private" || return 1
     if [ ! -e "$private/jwt" ] && [ -r "$state/jwt" ]; then
         install -m 0600 "$state/jwt" "$private/jwt" || return 1
@@ -118,9 +135,11 @@ use_private() {
     else
         rm -f "$private/proxy"
     fi
-    printf '%s\n' "$1" > "$private_root/private-state" || return 1
+    # the reason, then the directory, for status and doctor
+    printf '%s\n%s\n' "$1" "$state" > "$private_root/private-state" || return 1
     URNETWORK_STATE_DIR="$private"
     export URNETWORK_STATE_DIR
+    export_substitution "$1"
 }
 
 # Runs `auth` on a private directory seeded with $state's jwt, then puts the
@@ -200,10 +219,14 @@ auth|login)
     exec "$provider" "$@"
     ;;
 status|doctor)
-    # in a container that runs on the private state directory
+    # in a container that runs on the private state directory, with the
+    # reason its provide was given
     if [ -f "$private_root/private-state" ] && [ -z "${URNETWORK_STATE_DIR:-}" ]; then
         URNETWORK_STATE_DIR="$private"
         export URNETWORK_STATE_DIR
+        given=$(sed -n 2p "$private_root/private-state")
+        [ -z "$given" ] || state=$given
+        export_substitution "$(sed -n 1p "$private_root/private-state")"
     fi
     exec "$provider" "$@"
     ;;
