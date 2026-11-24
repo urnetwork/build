@@ -3063,6 +3063,14 @@ release_state effect-complete sdk-desktop
 error_trap 'record native SDK publication completion'
 release_complete sdk-desktop "${sdk_desktop_outputs[@]}"
 fi
+# Stable SDK packages: every native registry package (PyPI, NuGet, RubyGems,
+# crates.io, Maven, SwiftPM/CocoaPods, Conan/vcpkg) built and checked again with
+# the app's release version, attached to this nightly and not published.
+# factury/release publishes them when this nightly ships as the stable release.
+# A language that fails here is reported there; it does not stop the nightly.
+SDK_STABLE_VERSION="$WARP_VERSION_BASE" SDK_RELEASE_TAG="v${EXTERNAL_WARP_VERSION}" \
+    go -C "$BUILD_HOME/sdk/packaging" run . release stable ||
+    builder_message "warning: not every stable SDK package was staged for \`${EXTERNAL_WARP_VERSION}\`; see URnetworkSdk-stable-${EXTERNAL_WARP_VERSION}.json and factury/release plan"
 for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
     github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
 done
