@@ -2408,6 +2408,27 @@ github_release_upload () {
     error_trap "verify published github release artifact $1"
 }
 
+# Stable SDK package assets are staged for a later stable release, not shipped
+# by this nightly. github_release_upload runs unchanged in a subshell, where a
+# refused reconciliation, a failed upload or a VirusTotal verdict exits only the
+# subshell: the asset stays off the release, the warning says so, and the
+# nightly goes on. A published asset keeps its row in the release body table.
+github_release_upload_staged () {
+    local rows result
+    rows=$(
+        release_failure_hint () { : ; }
+        VIRUSTOTAL_ARTIFACTS=()
+        github_release_upload "$1" "$2" >&2 &&
+            print -rl -- "${VIRUSTOTAL_ARTIFACTS[@]}"
+    )
+    result=$?
+    if (( result != 0 )); then
+        builder_message "warning: stable SDK package asset \`$1\` was not attached to \`${EXTERNAL_WARP_VERSION}\` (exit $result); the nightly continues without it"
+        return 0
+    fi
+    VIRUSTOTAL_ARTIFACTS+=(${(f)rows})
+}
+
 # virustotal analysis is best-effort context for the release notes: a
 # malicious/suspicious VERDICT is fatal (virustotal_verify exits), but failing
 # to GET a verdict — api quota (429 QuotaExceededError), transport errors, or
@@ -3067,10 +3088,54 @@ fi
 # crates.io, Maven, SwiftPM/CocoaPods, Conan/vcpkg) built and checked again with
 # the app's release version, attached to this nightly and not published.
 # factury/release publishes them when this nightly ships as the stable release.
-# A language that fails here is reported there; it does not stop the nightly.
-SDK_STABLE_VERSION="$WARP_VERSION_BASE" SDK_RELEASE_TAG="v${EXTERNAL_WARP_VERSION}" \
-    go -C "$BUILD_HOME/sdk/packaging" run . release stable ||
-    builder_message "warning: not every stable SDK package was staged for \`${EXTERNAL_WARP_VERSION}\`; see URnetworkSdk-stable-${EXTERNAL_WARP_VERSION}.json and factury/release plan"
+# A language that fails here is reported there; it does not stop the nightly,
+# and neither does a refused or failed upload or a VirusTotal verdict (see
+# github_release_upload_staged). An sdk without the phase skips it.
+#
+# The phase writes into the nightly's release/assets. The files it adds move
+# into this stage's own directory, which the checkpoint retains even when a
+# language failed: the loop after this block still publishes only the nightly's
+# assets, and a resumed nightly restores the bytes it uploaded instead of
+# rebuilding new ones (it does not retry a failed language). The first attempt
+# records the nightly's asset names, so a file outside that list is a stable
+# file, also when an interrupted attempt left it behind.
+sdk_stable_dir="$BUILD_HOME/sdk/packaging/release/stable"
+sdk_stable_stage () {
+    local assets="$BUILD_HOME/sdk/packaging/release/assets"
+    local listing="$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION/sdk-stable-nightly-assets.txt"
+    local -a nightly
+    local asset result
+    if [[ ! -f "$listing" ]]; then
+        (umask 077; print -rl -- "$assets/"*(N.:t) > "$listing.part" && mv "$listing.part" "$listing") || return $?
+    fi
+    nightly=("${(@f)$(<"$listing")}")
+    rm -rf -- "$sdk_stable_dir" && mkdir -p "$sdk_stable_dir" || return $?
+    for asset in "$assets/"*(N.); do
+        (( ${nightly[(Ie)${asset:t}]} )) || rm -f -- "$asset" || return $?
+    done
+    SDK_STABLE_VERSION="$WARP_VERSION_BASE" SDK_RELEASE_TAG="v${EXTERNAL_WARP_VERSION}" \
+        go -C "$BUILD_HOME/sdk/packaging" run . release stable
+    result=$?
+    for asset in "$assets/"*(N.); do
+        (( ${nightly[(Ie)${asset:t}]} )) || mv -f -- "$asset" "$sdk_stable_dir/" || return $?
+    done
+    return $result
+}
+if ! grep -qsF 'case "stable":' "$BUILD_HOME/sdk/packaging/release.go"; then
+    echo "info: the sdk has no stable release phase (sdk/packaging/release.go); stable SDK packages are not staged for ${EXTERNAL_WARP_VERSION}"
+else
+    if release_build sdk-stable "$sdk_stable_dir"; then
+        sdk_stable_stage ||
+            builder_message "warning: not every stable SDK package was staged for \`${EXTERNAL_WARP_VERSION}\`; see URnetworkSdk-stable-${EXTERNAL_WARP_VERSION}.json and factury/release plan"
+        sdk_stable_assets=("$sdk_stable_dir/"*(N.L+0))
+        if (( ${#sdk_stable_assets} )); then
+            release_complete sdk-stable "$sdk_stable_dir"
+        fi
+    fi
+    for sdk_stable_asset in "$sdk_stable_dir/"*(N.); do
+        github_release_upload_staged "$(basename "$sdk_stable_asset")" "$sdk_stable_asset"
+    done
+fi
 for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
     github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
 done
