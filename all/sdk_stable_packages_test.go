@@ -4,17 +4,24 @@ package allbuild
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// The stable SDK block of run.sh through the loop that publishes the nightly's
-// own SDK assets. Both markers predate the checkpointed stage, so the same
-// region also runs against the code before it.
-func sdkStableRegion(t *testing.T) string {
+// The stable SDK stage of run.sh through the loop that publishes the nightly's
+// own SDK assets.
+func sdkStableStageRegion(t *testing.T) string {
 	t.Helper()
 	return componentRegion(t, "# Stable SDK packages: every native registry package", "\n# THE FLATPAK")
+}
+
+// The stable SDK uploads, the last uploads before the release is published.
+func sdkStableUploadRegion(t *testing.T) string {
+	t.Helper()
+	return componentRegion(t, "# The stable SDK package assets go last", "\ngithub_create_release\n")
 }
 
 const (
@@ -29,17 +36,19 @@ var sdkStableAssets = []string{sdkStableBundle, sdkStableIndex, sdkStableArchive
 // A journal, a GitHub release and an sdk packaging tool that keep their state
 // in $STATE, with the refusals of release-state.py and release-publication.py
 // that the stable block can meet. The packaging tool writes new bytes on every
-// build, as the real tarballs get new mtimes.
+// build, as the real tarballs get new mtimes. LATER_ASSETS stand for the
+// nightly's assets that run.sh uploads between the stage and the stable uploads.
 const sdkStableSetup = `
 WARP_VERSION_BASE=0.0.0
 GITHUB_RELEASE_ID=1
-mkdir -p "$BUILD_HOME/sdk/packaging/release/assets" "$STATE/github" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION"
+mkdir -p "$BUILD_HOME/sdk/packaging/release/assets" "$BUILD_HOME/out/later" "$STATE/github" "$WARP_HOME/.release-checkpoints/$EXTERNAL_WARP_VERSION"
 if [[ "$SDK_PHASE" == stable ]]; then
     printf 'package main\n\nfunc releaseStage(phase string) {\n\tswitch phase {\n\tcase "stable":\n\t\treleaseStable()\n\t}\n}\n' > "$BUILD_HOME/sdk/packaging/release.go"
 else
     printf 'package main\n\nfunc releaseStage(phase string) {\n\tswitch phase {\n\tdefault:\n\t\tpanic("unknown SDK release phase")\n\t}\n}\n' > "$BUILD_HOME/sdk/packaging/release.go"
 fi
 for name in ${=NIGHTLY_ASSETS}; do printf 'nightly %s\n' "$name" > "$BUILD_HOME/sdk/packaging/release/assets/$name"; done
+for name in ${=LATER_ASSETS}; do printf 'nightly %s\n' "$name" > "$BUILD_HOME/out/later/$name"; done
 # An earlier attempt was interrupted while the packaging tool ran: it recorded
 # the nightly's asset names, started the stage and left stable files behind.
 if [[ -n "$INTERRUPTED" ]]; then
@@ -111,26 +120,76 @@ go() {
 }
 `
 
+// VirusTotal for the production virustotal helpers: VT_BUDGET analyses, then
+// QuotaExceededError, counted in $STATE as the real service counts them.
+const sdkStableVirusTotalSetup = `
+VIRUSTOTAL_API_KEY=synthetic-virustotal-key
+BUILD_CURL=(virustotal_api)
+virustotal_api() {
+    local file
+    case "$*" in
+        *api/v3/files/upload_url*)
+            printf 'vt-upload-url\n' >> "$event_log"
+            print -r -- '{"data":"https://virustotal.example.test/upload"}' ;;
+        *virustotal.example.test/upload*)
+            file="${${@[-1]}#file=@}"
+            printf 'vt-upload:%s\n' "${file:t}" >> "$event_log"
+            print -r -- "{\"data\":{\"id\":\"${file:t}\"}}" ;;
+        *api/v3/analyses/*)
+            local used=$(( $(cat "$STATE/virustotal-used" 2>/dev/null || print 0) + 1 ))
+            print -r -- "$used" > "$STATE/virustotal-used"
+            printf 'vt-analysis:%s\n' "${${@[-1]}:t}" >> "$event_log"
+            if (( used > VT_BUDGET )); then
+                print -r -- '{"error":{"code":"QuotaExceededError","message":"Quota exceeded"}}'
+                return 22
+            fi
+            print -r -- '{"data":{"attributes":{"status":"completed","stats":{"malicious":0,"suspicious":0}}}}' ;;
+        *) printf 'unexpected-virustotal-api\n' >> "$event_log"; return 41 ;;
+    esac
+}
+`
+
 // Record what a run left behind for the assertions.
 const sdkStableEpilogue = `print -rl -- "${VIRUSTOTAL_ARTIFACTS[@]/#/row:}" >> "$event_log"
+print -r -- "quota-flag:$VIRUSTOTAL_QUOTA_EXCEEDED" >> "$event_log"
 for name in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.:t); do print -r -- "assets-dir:$name"; done >> "$event_log"
 for name in "$BUILD_HOME/sdk/packaging/release/stable/"*(N.:t); do print -r -- "stable-dir:$name"; done >> "$event_log"
 `
 
-// Run the region `runs` times in one shell: a nightly, then its resumes.
-func runSDKStable(t *testing.T, runs int, overrides ...string) (componentResult, string) {
+// The nightly's assets that run.sh uploads between the stage and the stable uploads.
+const sdkStableLaterUploads = `for name in ${=LATER_ASSETS}; do github_release_upload "$name" "$BUILD_HOME/out/later/$name"; done
+`
+
+// Run the stage and the stable uploads `runs` times in one shell: a nightly,
+// then its resumes.
+func runSDKStableWith(t *testing.T, runs int, extraSetup string, overrides ...string) (componentResult, string) {
 	t.Helper()
 	state := t.TempDir()
-	source := strings.Repeat(sdkStableRegion(t)+"printf 'run-finished\\n' >> \"$event_log\"\n", runs) + sdkStableEpilogue
-	setup := componentFunctions(t, "github_release_upload_staged") + sdkStableSetup
-	defaults := []string{"STATE=" + state, "SDK_PHASE=stable", "NIGHTLY_ASSETS=" + sdkNightlyAsset, "INTERRUPTED=", "LEFTOVER_ASSETS=",
-		"GO_MODE=", "GO_STATUS=", "FAIL_ASSET=", "REFUSE_ASSET=", "VERDICT_ASSET="}
-	return runComponent(t, source, setup, append(defaults, overrides...)...), state
+	run := sdkStableStageRegion(t) + sdkStableLaterUploads + sdkStableUploadRegion(t) + "printf 'run-finished\\n' >> \"$event_log\"\n"
+	setup := componentFunctions(t, "github_release_upload_staged") + sdkStableSetup + extraSetup
+	defaults := []string{"STATE=" + state, "SDK_PHASE=stable", "NIGHTLY_ASSETS=" + sdkNightlyAsset, "LATER_ASSETS=", "INTERRUPTED=", "LEFTOVER_ASSETS=",
+		"GO_MODE=", "GO_STATUS=", "FAIL_ASSET=", "REFUSE_ASSET=", "VERDICT_ASSET=", "VT_BUDGET=0"}
+	return runComponent(t, strings.Repeat(run, runs)+sdkStableEpilogue, setup, append(defaults, overrides...)...), state
+}
+
+func runSDKStable(t *testing.T, runs int, overrides ...string) (componentResult, string) {
+	t.Helper()
+	return runSDKStableWith(t, runs, "", overrides...)
 }
 
 func sdkStableAttached(state, name string) (string, bool) {
 	data, err := os.ReadFile(filepath.Join(state, "github", name))
 	return string(data), err == nil
+}
+
+// The release-table row recorded for an asset.
+func sdkStableRow(events, name string) string {
+	for _, line := range strings.Split(events, "\n") {
+		if strings.HasPrefix(line, "row:|["+name+"](") {
+			return line
+		}
+	}
+	return ""
 }
 
 // sdk main has no stable phase yet: one info line per run, no warning, no
@@ -193,16 +252,103 @@ func TestRunSDKStableKeepsNightlyAssetsStrict(t *testing.T) {
 			t.Fatalf("%s was not staged and attached: %+v", name, result)
 		}
 	}
-	if !strings.Contains(sdkStableRegion(t), `for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
+	if !strings.Contains(sdkStableStageRegion(t), `for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
     github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
 done
 `) {
 		t.Fatal("the nightly's SDK asset loop changed")
 	}
+	// A nightly asset failure still stops the run, after the stage is retained
+	// and before any stable asset is attached; a resume uploads them.
 	for _, override := range []string{"FAIL_ASSET=" + sdkNightlyAsset, "REFUSE_ASSET=" + sdkNightlyAsset, "VERDICT_ASSET=" + sdkNightlyAsset} {
-		failed, _ := runSDKStable(t, 1, override)
-		if failed.exitCode == 0 || strings.Contains(failed.events, "release-continued") || !strings.Contains(failed.events, "asset:"+sdkStableBundle+"\n") {
+		failed, state := runSDKStable(t, 1, override)
+		if failed.exitCode == 0 || strings.Contains(failed.events, "release-continued") || !strings.Contains(failed.events, "release_complete sdk-stable\n") {
 			t.Fatalf("%s: a nightly SDK asset failure was masked: %+v", override, failed)
+		}
+		if _, attached := sdkStableAttached(state, sdkStableBundle); attached {
+			t.Fatalf("%s: a stable asset was attached before the nightly's assets: %+v", override, failed)
+		}
+	}
+}
+
+// In run.sh the stable SDK assets upload after every other asset of the
+// nightly's release and before that release is published.
+func TestRunSDKStableUploadsAfterNightlyAssets(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	publish := strings.Index(source, "\ngithub_create_release\n")
+	stagedCall := `github_release_upload_staged "$(basename "$sdk_stable_asset")" "$sdk_stable_asset"`
+	staged := strings.Index(source, stagedCall)
+	stage := strings.Index(source, "if release_build sdk-stable ")
+	if publish < 0 || strings.Count(source, "\ngithub_create_release\n") != 1 || staged < 0 || strings.Count(source, stagedCall) != 1 || stage < 0 {
+		t.Fatal("missing the stable stage, its uploads or the release publication")
+	}
+	uploads := regexp.MustCompile(`(?m)^[ \t]*github_release_upload[ \t]+[^( \t]`).FindAllStringIndex(source[:publish], -1)
+	if len(uploads) == 0 {
+		t.Fatal("missing the nightly's uploads")
+	}
+	if last := uploads[len(uploads)-1][0]; !(stage < staged && last < staged && staged < publish) {
+		t.Fatalf("stable SDK uploads at %d must follow the stage (%d) and the nightly's last upload (%d), before publication (%d)", staged, stage, last, publish)
+	}
+}
+
+// On a quota-limited VirusTotal key the nightly's assets get their verdicts
+// first: the stable scans run after them, skip VirusTotal once the quota has
+// tripped, and never set the run's quota flag when they trip it themselves.
+func TestRunSDKStableLeavesVirusTotalQuotaToNightlyAssets(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("the production VirusTotal helpers read responses with jq")
+	}
+	later := []string{"URnetwork-0.0.0-123-arm64.flatpak", "com.bringyour.network-0.0.0-123.apk"}
+	nightly := append([]string{sdkNightlyAsset}, later...)
+	setup := componentFunctions(t, "virustotal", "virustotal_unavailable", "virustotal_verify") + sdkStableVirusTotalSetup
+	for _, testCase := range []struct {
+		budget          string
+		nightlyStatus   []string
+		stableStatus    string
+		quotaFlag       string
+		stableVirusCall bool
+	}{
+		// The quota lasts exactly for the nightly's assets; the first stable scan trips it.
+		{budget: "3", nightlyStatus: []string{"[ok](", "[ok](", "[ok]("}, stableStatus: "not analyzed", quotaFlag: "", stableVirusCall: true},
+		// The nightly's second asset trips it; no stable asset calls VirusTotal.
+		{budget: "1", nightlyStatus: []string{"[ok](", "not analyzed", "not submitted"}, stableStatus: "not submitted", quotaFlag: "1", stableVirusCall: false},
+	} {
+		result, state := runSDKStableWith(t, 1, setup, "VT_BUDGET="+testCase.budget, "LATER_ASSETS="+strings.Join(later, " "))
+		if result.exitCode != 0 || !strings.Contains(result.events, "release-continued") {
+			t.Fatalf("budget %s: the nightly stopped: %+v", testCase.budget, result)
+		}
+		for index, name := range nightly {
+			if row := sdkStableRow(result.events, name); !strings.Contains(row, "|"+testCase.nightlyStatus[index]) {
+				t.Fatalf("budget %s: %s row %q, want %q: %+v", testCase.budget, name, row, testCase.nightlyStatus[index], result)
+			}
+		}
+		firstStable := len(result.events)
+		for _, name := range sdkStableAssets {
+			if row := sdkStableRow(result.events, name); !strings.HasSuffix(row, "|"+testCase.stableStatus+"|") {
+				t.Fatalf("budget %s: %s row %q, want %q: %+v", testCase.budget, name, row, testCase.stableStatus, result)
+			}
+			if _, attached := sdkStableAttached(state, name); !attached {
+				t.Fatalf("budget %s: %s was not attached: %+v", testCase.budget, name, result)
+			}
+			called := strings.Contains(result.events, "vt-upload:"+name+"\n")
+			if called != testCase.stableVirusCall {
+				t.Fatalf("budget %s: %s called VirusTotal = %v: %+v", testCase.budget, name, called, result)
+			}
+			if index := strings.Index(result.events, "vt-upload:"+name+"\n"); index >= 0 && index < firstStable {
+				firstStable = index
+			}
+		}
+		for _, name := range nightly {
+			if index := strings.LastIndex(result.events, "vt-upload:"+name+"\n"); index > firstStable {
+				t.Fatalf("budget %s: %s was scanned after a stable asset: %+v", testCase.budget, name, result)
+			}
+		}
+		if !strings.Contains(result.events, "quota-flag:"+testCase.quotaFlag+"\n") {
+			t.Fatalf("budget %s: run quota flag, want %q: %+v", testCase.budget, testCase.quotaFlag, result)
 		}
 	}
 }

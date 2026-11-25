@@ -2413,6 +2413,8 @@ github_release_upload () {
 # refused reconciliation, a failed upload or a VirusTotal verdict exits only the
 # subshell: the asset stays off the release, the warning says so, and the
 # nightly goes on. A published asset keeps its row in the release body table.
+# The subshell sees VIRUSTOTAL_QUOTA_EXCEEDED, so it skips VirusTotal once an
+# earlier scan tripped the quota, but its own scans never set it for the run.
 github_release_upload_staged () {
     local rows result
     rows=$(
@@ -3090,7 +3092,8 @@ fi
 # factury/release publishes them when this nightly ships as the stable release.
 # A language that fails here is reported there; it does not stop the nightly,
 # and neither does a refused or failed upload or a VirusTotal verdict (see
-# github_release_upload_staged). An sdk without the phase skips it.
+# github_release_upload_staged). An sdk without the phase skips it. Its assets
+# upload last, just before the release is published (see sdk_stable_uploads).
 #
 # The phase writes into the nightly's release/assets. The files it adds move
 # into this stage's own directory, which the checkpoint retains even when a
@@ -3121,6 +3124,7 @@ sdk_stable_stage () {
     done
     return $result
 }
+sdk_stable_uploads=()
 if ! grep -qsF 'case "stable":' "$BUILD_HOME/sdk/packaging/release.go"; then
     echo "info: the sdk has no stable release phase (sdk/packaging/release.go); stable SDK packages are not staged for ${EXTERNAL_WARP_VERSION}"
 else
@@ -3132,9 +3136,7 @@ else
             release_complete sdk-stable "$sdk_stable_dir"
         fi
     fi
-    for sdk_stable_asset in "$sdk_stable_dir/"*(N.); do
-        github_release_upload_staged "$(basename "$sdk_stable_asset")" "$sdk_stable_asset"
-    done
+    sdk_stable_uploads=("$sdk_stable_dir/"*(N.))
 fi
 for sdk_package_asset in "$BUILD_HOME/sdk/packaging/release/assets/"*(N.); do
     github_release_upload "$(basename "$sdk_package_asset")" "$sdk_package_asset"
@@ -3342,6 +3344,14 @@ fi
 # Upload releases to testing channels
 
 builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+# The stable SDK package assets go last: every asset of the nightly itself is
+# attached and scanned first, so on a quota-limited VirusTotal key the stable
+# assets are the ones left without a verdict. They still go before the release
+# is published, as a published release takes no new assets.
+for sdk_stable_asset in "${sdk_stable_uploads[@]}"; do
+    github_release_upload_staged "$(basename "$sdk_stable_asset")" "$sdk_stable_asset"
+done
 
 
 github_create_release
