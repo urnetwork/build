@@ -354,9 +354,9 @@ func TestUrMacosShipsTheEngineOnArm64Alone(t *testing.T) {
 	}
 }
 
-// The helper's entitlements (§6.5): the App Sandbox, library validation off, read-only exceptions naming the default
-// instance's engine and model directories, never the home; no network, no app group, no keychain access and no
-// restricted entitlement, so it needs no profile; every value literal.
+// The helper's entitlements (§6.5): the App Sandbox, library validation off, one read-only exception naming <ur>/_local,
+// the folder of every instance's engine and model files, never the home or an instance's state; no network, no app
+// group, no keychain access and no restricted entitlement, so it needs no profile; every value literal.
 func TestUrEngineEntitlementsHoldTheSandboxAndLibraryValidationOff(t *testing.T) {
 	path := filepath.Join(rolloutRoot(t), "ur", "macos", "ur-engine.entitlements")
 	data, err := os.ReadFile(path)
@@ -373,8 +373,7 @@ func TestUrEngineEntitlementsHoldTheSandboxAndLibraryValidationOff(t *testing.T)
 		"<key>com.apple.security.app-sandbox</key>\n\t<true/>",
 		"<key>com.apple.security.cs.disable-library-validation</key>\n\t<true/>",
 		"<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>\n\t<array>\n" +
-			"\t\t<string>/Library/Application Support/ur/default/engine/</string>\n" +
-			"\t\t<string>/Library/Application Support/ur/default/models/</string>\n\t</array>",
+			"\t\t<string>/Library/Application Support/ur/_local/</string>\n\t</array>",
 	} {
 		if !strings.Contains(text, value) {
 			t.Errorf("ur-engine.entitlements lacks %q", value)
@@ -388,16 +387,17 @@ func TestUrEngineEntitlementsHoldTheSandboxAndLibraryValidationOff(t *testing.T)
 			t.Errorf("ur-engine.entitlements holds %q", absent)
 		}
 	}
-	// each exception a directory under Application Support, never the home or a parent of the instance's state
+	// the one exception the folder of engine and model files, which no instance can be named (its names are
+	// [a-z0-9][a-z0-9-]{0,31}), never the home, ur's folder of instances or an instance's state
+	exceptions := []string{}
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if value, ok := strings.CutPrefix(trimmed, "<string>"); ok {
-			value = strings.TrimSuffix(value, "</string>")
-			if !strings.HasPrefix(value, "/Library/Application Support/ur/default/") || !strings.HasSuffix(value, "/") ||
-				len(strings.Split(strings.Trim(value, "/"), "/")) != 5 {
-				t.Errorf("an exception names %q, not one of the instance's directories", value)
-			}
+			exceptions = append(exceptions, strings.TrimSuffix(value, "</string>"))
 		}
+	}
+	if len(exceptions) != 1 || exceptions[0] != "/Library/Application Support/ur/_local/" {
+		t.Errorf("the exceptions name %q, not ur's folder of engine and model files alone", exceptions)
 	}
 }
 
