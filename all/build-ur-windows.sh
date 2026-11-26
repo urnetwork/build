@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The Windows zips of ur's release (DESIGN.md §4.10; REPO-M1-03; plan-REPO-small-readings #12). ur.exe
-# for amd64 and arm64 goes to the build VM (build/all/windows's helpers), where ur/windows/sign-ur.ps1
-# signs each with the Authenticode certificate behind the VM's URN_SIGN_THUMBPRINT and verifies it
-# (signtool verify /pa /all). Then each ur-<version>-windows-<arch>.zip holds the signed ur.exe,
-# git-remote-ur.exe copied from it, LICENSE, NOTICE and README.txt.
+# for amd64 and arm64, and ur-engine.exe, the local engine's helper, for amd64 alone, since Windows on
+# arm64 has no engine build and gets remote models only (DESIGN-COMPUTE §6.5; INFER-M11-05), go to the
+# build VM (build/all/windows's helpers), where ur/windows/sign-ur.ps1 signs each with the Authenticode
+# certificate behind the VM's URN_SIGN_THUMBPRINT and verifies it (signtool verify /pa /all). Then each
+# ur-<version>-windows-<arch>.zip holds the signed ur.exe, git-remote-ur.exe copied from it, on amd64
+# the signed ur-engine.exe, LICENSE, NOTICE and README.txt.
 #
 # Signing is the gate (owner decision 77): unlike windows/app/build.ps1, which skips signing when no
 # thumbprint is set, this fails. The copy is made only after signing, so both exes are the signed bytes,
@@ -26,6 +28,8 @@ sidecar_module="$(ur_sidecar_module)"
 for arch in amd64 arm64; do
   [ -s "$UR_BIN_DIR/windows/$arch/ur.exe" ] || ur_die "no windows/$arch ur.exe at $UR_BIN_DIR/windows/$arch/ur.exe"
 done
+[ -s "$UR_BIN_DIR/windows/amd64/ur-engine.exe" ] || ur_die "no windows/amd64 ur-engine.exe at $UR_BIN_DIR/windows/amd64/ur-engine.exe"
+[ ! -e "$UR_BIN_DIR/windows/arm64/ur-engine.exe" ] || ur_die "a windows/arm64 ur-engine.exe, which Windows on arm64 never ships"
 
 # shellcheck source=windows/lib.sh
 source "$here/windows/lib.sh"
@@ -43,8 +47,9 @@ win_scp_to "$here/ur/windows/sign-ur.ps1" "$guest/sign-ur.ps1"
 for arch in amd64 arm64; do
   win_scp_to "$UR_BIN_DIR/windows/$arch/ur.exe" "$guest/$arch/ur.exe"
 done
+win_scp_to "$UR_BIN_DIR/windows/amd64/ur-engine.exe" "$guest/amd64/ur-engine.exe"
 win_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $guest/sign-ur.ps1 -Directory $guest" ||
-  ur_die "sign-ur.ps1 did not sign and verify both ur.exe"
+  ur_die "sign-ur.ps1 did not sign and verify both ur.exe and ur-engine.exe"
 
 for arch in amd64 arm64; do
   mkdir -p "$work/$arch"
@@ -55,10 +60,19 @@ for arch in amd64 arm64; do
     ur_die "the ur.exe that came back for $arch is the unsigned one"
   fi
   cp "$work/$arch/ur.exe" "$work/$arch/git-remote-ur.exe"
+  engine=()
+  if [ "$arch" = amd64 ]; then
+    win_scp_from "$guest/$arch/ur-engine.exe" "$work/$arch/ur-engine.exe"
+    [ -s "$work/$arch/ur-engine.exe" ] || ur_die "no signed ur-engine.exe came back for $arch"
+    if cmp -s "$work/$arch/ur-engine.exe" "$UR_BIN_DIR/windows/$arch/ur-engine.exe"; then
+      ur_die "the ur-engine.exe that came back for $arch is the unsigned one"
+    fi
+    engine=("ur-engine.exe=$work/$arch/ur-engine.exe")
+  fi
   name="ur-$EXTERNAL_WARP_VERSION-windows-$arch.zip"
   rm -f "$OUT_DIR/$name"
   "$URARCHIVE" zip -o "$OUT_DIR/$name" -mtime "$SOURCE_DATE_EPOCH" \
-    "ur.exe=$work/$arch/ur.exe" "git-remote-ur.exe=$work/$arch/git-remote-ur.exe" \
+    "ur.exe=$work/$arch/ur.exe" "git-remote-ur.exe=$work/$arch/git-remote-ur.exe" ${engine[@]+"${engine[@]}"} \
     "LICENSE=$sidecar_module/LICENSE" "NOTICE=$sidecar_module/NOTICE" "README.txt=$here/ur/windows/README.txt"
   echo ">>> $name"
 done

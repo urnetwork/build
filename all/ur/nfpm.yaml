@@ -9,7 +9,10 @@
 #
 # ur is static (CGO_ENABLED=0), so the packages depend on nothing. They carry no maintainer script and
 # no unit: the daemon runs as the person (Q-CORE-3), and `ur install-daemon` writes its unit
-# (CORE-M1-12). git-remote-ur is a link to ur, which dispatches on argv[0].
+# (CORE-M1-12). git-remote-ur is a link to ur, which dispatches on argv[0]. ur-engine, the local
+# engine's helper, sits beside ur, where the daemon starts it; it confines itself with Landlock and a
+# seccomp filter before it loads anything, and pulls its engine's libraries at first use, so it too
+# depends on nothing the package names (DESIGN-COMPUTE §6.5, Appendix D's §4.10 row; INFER-M11-05).
 name: ur
 arch: "@ARCH@"
 platform: linux
@@ -42,6 +45,12 @@ contents:
   - src: /usr/bin/ur
     dst: /usr/bin/git-remote-ur
     type: symlink
+  - src: "@ENGINE@"
+    dst: /usr/bin/ur-engine
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
   - src: "@LICENSE@"
     dst: /usr/share/doc/ur/LICENSE
     file_info:

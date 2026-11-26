@@ -3,10 +3,16 @@
 # and #8). Per architecture:
 #
 #   1. ur.app, id network.ur.cli: Contents/Info.plist, Contents/MacOS/ur and the `ur Download` profile
-#      as Contents/embedded.provisionprofile.
-#   2. codesign with the Developer ID Application identity, the hardened runtime, a timestamp and
-#      ur/macos/ur.entitlements; codesign --verify; notarize and staple (macos-notarize.zsh, run.sh's
-#      own); spctl --assess --type execute.
+#      as Contents/embedded.provisionprofile; and on arm64 the local engine's helper, ur-engine.app, id
+#      network.ur.cli.engine, at Contents/Helpers/ur-engine.app (Contents/Info.plist from
+#      ur/macos/ur-engine-Info.plist, Contents/MacOS/ur-engine), which macOS on Intel does not get: it has
+#      no engine build and gets remote models only (DESIGN-COMPUTE §6.5, Appendix D's §4.10 row).
+#   2. On arm64, ur-engine.app first: codesign with the same identity, the hardened runtime, a timestamp
+#      and ur/macos/ur-engine.entitlements (the App Sandbox, read-only on the engine and model
+#      directories, library validation off for it alone), and codesign --verify; then ur.app around it:
+#      codesign with the Developer ID Application identity, the hardened runtime, a timestamp and
+#      ur/macos/ur.entitlements, which seals the helper's signature as nested code; codesign --verify;
+#      notarize and staple (macos-notarize.zsh, run.sh's own); spctl --assess --type execute.
 #   3. ur-<version>-darwin-<arch>.tar.gz of the stapled bundle, by urarchive, with LICENSE and NOTICE.
 #   4. ur-<version>-darwin-<arch>.pkg: pkgbuild of the bundle at /usr/local/lib/ur/ur.app with a
 #      postinstall that links /usr/local/bin/ur and /usr/local/bin/git-remote-ur to its executable;
@@ -14,8 +20,10 @@
 #      spctl --assess --type install.
 #
 # Traps: a restricted entitlement outside a bundle with its profile kills the process at launch, so ur is
-# never a bare Mach-O, and the two names on PATH are links, never copies. Staple after signing and pack
-# after stapling: re-signing or stripping after that breaks the seal. The .pkg needs the Installer
+# never a bare Mach-O, and the two names on PATH are links, never copies. The helper is signed before the
+# bundle around it and never with --deep, so each keeps its own entitlements, and ur's never take the
+# sandbox or library validation off. Staple after signing and pack after stapling: re-signing or
+# stripping after that breaks the seal. The .pkg needs the Installer
 # certificate, not the Application one. Signing needs run.sh's per-run keychain (REMOTEBUILD.md), so a
 # build over plain ssh fails with errSecInternalComponent. Every step is fatal.
 #
@@ -82,6 +90,11 @@ for arch in amd64 arm64; do
     esac
     binary="$UR_BIN_DIR/darwin/$arch/ur"
     [[ -s "$binary" ]] || ur_macos_die "no darwin/$arch ur at $binary"
+    engine="$UR_BIN_DIR/darwin/$arch/ur-engine"
+    case "$arch" in
+        arm64) [[ -s "$engine" ]] || ur_macos_die "no darwin/$arch ur-engine at $engine" ;;
+        *) [[ ! -e "$engine" ]] || ur_macos_die "a darwin/$arch ur-engine at $engine, which macOS on Intel never ships" ;;
+    esac
     stage="$work/$arch"
     app="$stage/ur.app"
     mkdir -p "$app/Contents/MacOS"
@@ -90,6 +103,19 @@ for arch in amd64 arm64; do
     cp "$binary" "$app/Contents/MacOS/ur"
     chmod 0755 "$app/Contents/MacOS/ur"
     cp "$profile" "$app/Contents/embedded.provisionprofile"
+
+    if [[ "$arch" == arm64 ]]; then
+        engine_app="$app/Contents/Helpers/ur-engine.app"
+        mkdir -p "$engine_app/Contents/MacOS"
+        sed -e "s/@VERSION_BASE@/$VERSION_BASE/g" -e "s/@VERSION_RELEASE@/$VERSION_RELEASE/g" \
+            "$here/ur/macos/ur-engine-Info.plist" > "$engine_app/Contents/Info.plist"
+        cp "$engine" "$engine_app/Contents/MacOS/ur-engine"
+        chmod 0755 "$engine_app/Contents/MacOS/ur-engine"
+        print -r -- ">>> ur-engine.app for darwin/$arch"
+        codesign --force --options runtime --timestamp --entitlements "$here/ur/macos/ur-engine.entitlements" \
+            --sign "$application_identity" "$engine_app"
+        codesign --verify --strict --verbose=2 "$engine_app"
+    fi
 
     print -r -- ">>> ur.app for darwin/$arch"
     codesign --force --options runtime --timestamp --entitlements "$here/ur/macos/ur.entitlements" \

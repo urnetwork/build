@@ -3,8 +3,9 @@
 # architecture, ur_<version>_<arch>.deb, ur-<version>.<rpmarch>.rpm and
 # ur-<version>-<pkgarch>.pkg.tar.zst from the one template ur/nfpm.yaml, by nfpm v2.47.0 in
 # build/all/linux's daemon image, which pins and checksums it and which build-linux.sh builds earlier in
-# the same release. Each holds /usr/bin/ur, /usr/bin/git-remote-ur as a link to it, and LICENSE and
-# NOTICE under /usr/share/doc/ur; no dependency, maintainer script or unit (Q-CORE-3). Then
+# the same release. Each holds /usr/bin/ur, /usr/bin/git-remote-ur as a link to it, /usr/bin/ur-engine,
+# the local engine's helper (DESIGN-COMPUTE §6.5), and LICENSE and NOTICE under /usr/share/doc/ur; no
+# dependency, maintainer script or unit (Q-CORE-3). Then
 # ur/distro-smoke.sh installs each on its distributions with no network, and removes it.
 #
 # Traps from linux/packaging: VERSION splits at its last hyphen into nfpm's version and release, or nfpm
@@ -43,6 +44,7 @@ ur_nfpm_render() {
     -e "s|@VERSION_BASE@|$VERSION_BASE|g" \
     -e "s|@VERSION_RELEASE@|$VERSION_RELEASE|g" \
     -e "s|@BINARY@|/stage/ur|g" \
+    -e "s|@ENGINE@|/stage/ur-engine|g" \
     -e "s|@LICENSE@|/stage/LICENSE|g" \
     -e "s|@NOTICE@|/stage/NOTICE|g" \
     "$here/ur/nfpm.yaml"
@@ -58,8 +60,10 @@ for arch in amd64 arm64; do
   stage="$work/$arch"
   mkdir -p "$stage"
   [ -s "$UR_BIN_DIR/linux/$arch/ur" ] || ur_die "no linux/$arch ur at $UR_BIN_DIR/linux/$arch/ur"
+  [ -s "$UR_BIN_DIR/linux/$arch/ur-engine" ] || ur_die "no linux/$arch ur-engine at $UR_BIN_DIR/linux/$arch/ur-engine"
   cp "$UR_BIN_DIR/linux/$arch/ur" "$stage/ur"
-  chmod 0755 "$stage/ur"
+  cp "$UR_BIN_DIR/linux/$arch/ur-engine" "$stage/ur-engine"
+  chmod 0755 "$stage/ur" "$stage/ur-engine"
   cp "$sidecar_module/LICENSE" "$sidecar_module/NOTICE" "$stage/"
   ur_nfpm_render "$arch" > "$stage/nfpm.yaml"
   for packager in deb rpm archlinux; do

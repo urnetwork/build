@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ur-engine.app's entitlements (DESIGN-COMPUTE §6.5, D-INFER-2, Appendix D's §4.10 row; INFER-M11-05): the local
+     engine's helper, inside ur.app at Contents/Helpers/ur-engine.app, signed with these, the hardened runtime and a
+     timestamp before ur.app is signed around it (build-ur-macos.sh). The App Sandbox confines it to reading its engine
+     and model directories, read-only, which the exceptions name home-relative, the default instance's (§5.9's
+     <state>/engine and <state>/models): directories, never the home. No network entitlement, so no network; no app
+     group and no keychain access group, so nothing of ur's. Library validation is off for it alone, so it loads
+     LiteRT-LM's libraries, which another team signs; ur.entitlements never takes it, so the daemon that holds the keys
+     keeps library validation. Every value is unrestricted, so no profile is embedded in the helper. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/ur/default/engine/</string>
+		<string>/Library/Application Support/ur/default/models/</string>
+	</array>
+</dict>
+</plist>

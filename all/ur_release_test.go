@@ -99,18 +99,29 @@ func writeTestScript(t *testing.T, path string, content string) {
 	}
 }
 
-// make: the six targets' ur, each a script printing its version line.
+// make: build writes the six targets' ur, engine the four targets' ur-engine (UR_STUB_ENGINE_TARGETS in place of
+// them where set), each a script printing its name and target.
 const urStubMake = `#!/bin/sh
 printf 'make %s\n' "$*" >> "$UR_STUB_LOG"
 out=""
+goal=build
 for argument in "$@"; do
-    case "$argument" in OUT=*) out="${argument#OUT=}" ;; esac
+    case "$argument" in
+        OUT=*) out="${argument#OUT=}" ;;
+        build | engine) goal="$argument" ;;
+    esac
 done
-for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
-    name=ur
-    case "$target" in windows/*) name=ur.exe ;; esac
+base=ur
+targets="darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
+if [ "$goal" = engine ]; then
+    base=ur-engine
+    targets="${UR_STUB_ENGINE_TARGETS:-darwin/arm64 linux/amd64 linux/arm64 windows/amd64}"
+fi
+for target in $targets; do
+    name=$base
+    case "$target" in windows/*) name=$base.exe ;; esac
     mkdir -p "$out/$target"
-    printf '#!/bin/sh\necho "ur %s"\n' "$target" > "$out/$target/$name"
+    printf '#!/bin/sh\necho "%s %s"\n' "$base" "$target" > "$out/$target/$name"
     chmod 0755 "$out/$target/$name"
 done
 `
@@ -264,12 +275,40 @@ func TestBuildUrWritesEveryTargetsName(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps := strings.Split(strings.TrimSpace(string(log)), "\n")
-	if len(steps) != 5 || !strings.HasPrefix(steps[0], "make -C "+home.directory+"/sidecar/cli build OUT=") || !strings.HasPrefix(steps[1], "go test ") ||
-		steps[2] != "macos" || steps[3] != "linux" || steps[4] != "windows" {
+	if len(steps) != 6 || !strings.HasPrefix(steps[0], "make -C "+home.directory+"/sidecar/cli build OUT=") ||
+		!strings.HasPrefix(steps[1], "make -C "+home.directory+"/sidecar/cli engine OUT=") || !strings.HasPrefix(steps[2], "go test ") ||
+		steps[3] != "macos" || steps[4] != "linux" || steps[5] != "windows" {
 		t.Errorf("build-ur.sh ran %q", steps)
 	}
-	if binaries := strings.Fields(strings.TrimPrefix(steps[1], "go test ")); len(binaries) != 6 {
-		t.Errorf("TestHygieneReleaseBinary read %v, not the six", binaries)
+	// six ur and four ur-engine (DESIGN-COMPUTE §6.5's desktop row: macOS on Intel and Windows on arm64 get none)
+	binaries := strings.Fields(strings.TrimPrefix(steps[2], "go test "))
+	engines := []string{}
+	for _, binary := range binaries {
+		if name := filepath.Base(binary); strings.HasPrefix(name, "ur-engine") {
+			engines = append(engines, filepath.Base(filepath.Dir(filepath.Dir(binary)))+"/"+filepath.Base(filepath.Dir(binary)))
+		}
+	}
+	if len(binaries) != 10 || !slices.Equal(engines, []string{"darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"}) {
+		t.Errorf("TestHygieneReleaseBinary read %v, not the six ur and the four ur-engine", binaries)
+	}
+}
+
+// A ur-engine for a target that gets remote models only, or none for one of the four, stops the build before any
+// package is made.
+func TestBuildUrShipsTheEngineForItsFourTargetsAlone(t *testing.T) {
+	for _, targets := range []string{
+		"darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64",
+		"darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64",
+		"darwin/arm64 linux/amd64 linux/arm64",
+	} {
+		home := newUrBuildHome(t)
+		code, output := home.run("UR_STUB_ENGINE_TARGETS=" + targets)
+		if code == 0 || !strings.Contains(output, "ur-engine for") {
+			t.Fatalf("make engine for %q went on: %d\n%s", targets, code, output)
+		}
+		if written := home.written(); len(written) != 0 {
+			t.Errorf("a refused build wrote %v", written)
+		}
 	}
 }
 
@@ -306,17 +345,17 @@ func TestBuildUrLinuxArchiveLinksGitRemoteUr(t *testing.T) {
 		if header.Name == "git-remote-ur" && (header.Typeflag != tar.TypeSymlink || header.Linkname != "ur") {
 			t.Errorf("git-remote-ur is %c to %q, not a link to ur", header.Typeflag, header.Linkname)
 		}
-		if header.Name == "ur" {
+		if header.Name == "ur" || header.Name == "ur-engine" {
 			content, err := io.ReadAll(reader)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(content), "ur linux/arm64") {
-				t.Errorf("the arm64 archive holds another target's ur: %q", content)
+			if !strings.Contains(string(content), header.Name+" linux/arm64") {
+				t.Errorf("the arm64 archive holds another target's %s: %q", header.Name, content)
 			}
 		}
 	}
-	if want := []string{"LICENSE", "NOTICE", "git-remote-ur", "ur"}; !slices.Equal(names, want) {
+	if want := []string{"LICENSE", "NOTICE", "git-remote-ur", "ur", "ur-engine"}; !slices.Equal(names, want) {
 		t.Errorf("the archive holds %v, want %v", names, want)
 	}
 }

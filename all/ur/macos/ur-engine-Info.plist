@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ur-engine.app's Info.plist (DESIGN-COMPUTE §6.5, D-INFER-2; INFER-M11-05): the local engine's helper, its own
+     executable inside ur.app with its own identifier, which its App Sandbox container is named by.
+     build-ur-macos.sh fills @VERSION_BASE@ and @VERSION_RELEASE@, as for ur's own. ur's daemon starts it as a child
+     process; it never shows in the Dock. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>network.ur.cli.engine</string>
+	<key>CFBundleName</key>
+	<string>ur-engine</string>
+	<key>CFBundleExecutable</key>
+	<string>ur-engine</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION_BASE@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION_RELEASE@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>LSBackgroundOnly</key>
+	<true/>
+</dict>
+</plist>

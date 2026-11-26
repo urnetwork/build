@@ -55,14 +55,23 @@ esac
 `,
 	"codesign": urMacosStubHeader + `
 app=$(last "$@")
+entitlements=$(basename "$6")
 case "$*" in
+    "--force --options runtime --timestamp --entitlements "*" --sign ` + urMacosApplicationIdentity + ` "*ur-engine.app)
+        if [ "$entitlements" = ur-engine.entitlements ] && [ -f "$app/Contents/MacOS/ur-engine" ] && [ -f "$app/Contents/Info.plist" ] && [ ! -e "$app/Contents/embedded.provisionprofile" ]; then
+            record sign-engine
+        else
+            record sign-bare-engine
+        fi
+        ;;
     "--force --options runtime --timestamp --entitlements "*" --sign ` + urMacosApplicationIdentity + ` "*)
-        if [ -f "$app/Contents/embedded.provisionprofile" ] && [ -f "$app/Contents/MacOS/ur" ] && [ -f "$app/Contents/Info.plist" ]; then
+        if [ "$entitlements" = ur.entitlements ] && [ -f "$app/Contents/embedded.provisionprofile" ] && [ -f "$app/Contents/MacOS/ur" ] && [ -f "$app/Contents/Info.plist" ]; then
             record sign-app
         else
             record sign-bare-app
         fi
         ;;
+    "--verify --strict --verbose=2 "*ur-engine.app) record verify-engine ;;
     "--verify --strict --verbose=2 "*) record verify-app ;;
     *) record unexpected-codesign; exit 41 ;;
 esac
@@ -111,7 +120,8 @@ printf 'signed product\n' > "$(last "$@")"
 
 // The healthy chain: the identities and the ur profile once, then per architecture the bundle signed with
 // its profile, verified, notarized, stapled and assessed, packed, and the .pkg built, signed with the
-// Installer identity, notarized, stapled and assessed.
+// Installer identity, notarized, stapled and assessed; on arm64 alone the local engine's helper first,
+// signed with its own entitlements and verified before the bundle around it is signed (INFER-M11-05).
 var urMacosArchSteps = []string{
 	"sign-app", "verify-app", "notarize-app", "staple-app", "assess-app",
 	"pkgbuild", "productbuild", "productsign", "notarize-pkg", "staple-pkg", "assess-pkg",
@@ -120,6 +130,7 @@ var urMacosArchSteps = []string{
 func urMacosSteps() []string {
 	steps := []string{"identity:application", "identity:installer", "profile:other", "profile:ur"}
 	steps = append(steps, urMacosArchSteps...)
+	steps = append(steps, "sign-engine", "verify-engine")
 	return append(steps, urMacosArchSteps...)
 }
 
@@ -143,6 +154,8 @@ func newUrMacosHarness(t *testing.T) *urMacosHarness {
 	for _, arch := range []string{"amd64", "arm64"} {
 		writeTestScript(t, filepath.Join(directory, "bin", "darwin", arch, "ur"), "#!/bin/sh\necho ur darwin/"+arch+"\n")
 	}
+	// the helper for darwin/arm64 alone: macOS on Intel gets remote models only
+	writeTestScript(t, filepath.Join(directory, "bin", "darwin", "arm64", "ur-engine"), "#!/bin/sh\necho ur-engine darwin/arm64\n")
 	copyTestContent(t, filepath.Join(directory, "home", "sidecar", "LICENSE"), "license\n")
 	copyTestContent(t, filepath.Join(directory, "home", "sidecar", "NOTICE"), "notice\n")
 	copyTestContent(t, filepath.Join(directory, "AuthKey_synthetic.p8"), "synthetic p8\n")
@@ -272,6 +285,133 @@ func TestUrBundleHoldsItsProfile(t *testing.T) {
 	}
 	if contents["LICENSE"] != "license\n" || contents["NOTICE"] != "notice\n" {
 		t.Errorf("the archive lacks LICENSE or NOTICE")
+	}
+	// the local engine's helper, its own bundle inside ur.app, on arm64
+	if contents["ur.app/Contents/Helpers/ur-engine.app/Contents/MacOS/ur-engine"] != "#!/bin/sh\necho ur-engine darwin/arm64\n" {
+		t.Errorf("the arm64 bundle holds no helper: %v", slices.Sorted(maps.Keys(contents)))
+	}
+	enginePlist := contents["ur.app/Contents/Helpers/ur-engine.app/Contents/Info.plist"]
+	if !strings.Contains(enginePlist, "<string>network.ur.cli.engine</string>") || !strings.Contains(enginePlist, "<string>2026.11.6</string>") ||
+		strings.Contains(enginePlist, "@VERSION") {
+		t.Errorf("the helper's Info.plist is not its own, filled:\n%s", enginePlist)
+	}
+	if _, ok := contents["ur.app/Contents/Helpers/ur-engine.app/Contents/embedded.provisionprofile"]; ok {
+		t.Error("the helper carries a profile, which only restricted entitlements need")
+	}
+}
+
+// The archive's names, read from out.
+func urMacosArchiveNames(t *testing.T, path string) []string {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	decompressor, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := tar.NewReader(decompressor)
+	names := []string{}
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, header.Name)
+	}
+	return names
+}
+
+// macOS on Intel has no engine build and gets remote models only (DESIGN-COMPUTE §6.5): its bundle holds no helper,
+// and a darwin/amd64 ur-engine handed to the step, or none for arm64, stops it before anything is signed.
+func TestUrMacosShipsTheEngineOnArm64Alone(t *testing.T) {
+	harness := newUrMacosHarness(t)
+	if result := harness.run(); result.exitCode != 0 {
+		t.Fatalf("build-ur-macos.sh failed: %+v", result)
+	}
+	for _, name := range urMacosArchiveNames(t, filepath.Join(harness.out, "ur-"+urTestVersion+"-darwin-amd64.tar.gz")) {
+		if strings.Contains(name, "ur-engine") || strings.Contains(name, "Helpers") {
+			t.Errorf("the amd64 bundle holds %s", name)
+		}
+	}
+	stray := newUrMacosHarness(t)
+	writeTestScript(t, filepath.Join(stray.directory, "bin", "darwin", "amd64", "ur-engine"), "#!/bin/sh\n")
+	if result := stray.run(); result.exitCode == 0 || strings.Contains(result.events, "sign-") || !strings.Contains(result.output, "never ships") {
+		t.Errorf("a darwin/amd64 helper was taken: %+v", result)
+	}
+	missing := newUrMacosHarness(t)
+	if err := os.Remove(filepath.Join(missing.directory, "bin", "darwin", "arm64", "ur-engine")); err != nil {
+		t.Fatal(err)
+	}
+	result := missing.run()
+	if result.exitCode == 0 || strings.Contains(result.events, "sign-engine") || len(missing.written()) != 2 {
+		t.Errorf("an arm64 bundle went on with no helper: %+v %v", result, missing.written())
+	}
+}
+
+// The helper's entitlements (§6.5): the App Sandbox, library validation off, read-only exceptions naming the default
+// instance's engine and model directories, never the home; no network, no app group, no keychain access and no
+// restricted entitlement, so it needs no profile; every value literal.
+func TestUrEngineEntitlementsHoldTheSandboxAndLibraryValidationOff(t *testing.T) {
+	path := filepath.Join(rolloutRoot(t), "ur", "macos", "ur-engine.entitlements")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exec.LookPath("plutil"); err == nil {
+		if output, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+			t.Errorf("ur-engine.entitlements is not a property list: %v\n%s", err, output)
+		}
+	}
+	text := string(data)
+	for _, value := range []string{
+		"<key>com.apple.security.app-sandbox</key>\n\t<true/>",
+		"<key>com.apple.security.cs.disable-library-validation</key>\n\t<true/>",
+		"<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>\n\t<array>\n" +
+			"\t\t<string>/Library/Application Support/ur/default/engine/</string>\n" +
+			"\t\t<string>/Library/Application Support/ur/default/models/</string>\n\t</array>",
+	} {
+		if !strings.Contains(text, value) {
+			t.Errorf("ur-engine.entitlements lacks %q", value)
+		}
+	}
+	for _, absent := range []string{
+		"com.apple.security.network", "application-groups", "keychain-access-groups", "com.apple.application-identifier",
+		"team-identifier", "read-write", "absolute-path", "com.apple.security.inherit", "$(", "${",
+	} {
+		if strings.Contains(text, absent) {
+			t.Errorf("ur-engine.entitlements holds %q", absent)
+		}
+	}
+	// each exception a directory under Application Support, never the home or a parent of the instance's state
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if value, ok := strings.CutPrefix(trimmed, "<string>"); ok {
+			value = strings.TrimSuffix(value, "</string>")
+			if !strings.HasPrefix(value, "/Library/Application Support/ur/default/") || !strings.HasSuffix(value, "/") ||
+				len(strings.Split(strings.Trim(value, "/"), "/")) != 5 {
+				t.Errorf("an exception names %q, not one of the instance's directories", value)
+			}
+		}
+	}
+}
+
+// ur's own entitlements never take the sandbox or library validation off, so the daemon that holds the keys keeps
+// library validation (§6.5).
+func TestUrEntitlementsKeepLibraryValidation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(rolloutRoot(t), "ur", "macos", "ur.entitlements"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"disable-library-validation", "app-sandbox", "allow-unsigned-executable-memory", "allow-dyld-environment-variables"} {
+		if strings.Contains(string(data), absent) {
+			t.Errorf("ur.entitlements holds %s", absent)
+		}
 	}
 }
 

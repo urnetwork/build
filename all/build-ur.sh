@@ -3,13 +3,17 @@
 # all/ur/artifacts.txt, for darwin, linux and windows on amd64 and arm64.
 #
 #   1. ur for the six targets, by sidecar/cli's `make build`: CGO_ENABLED=0 -trimpath,
-#      GOEXPERIMENT=greenteagc, -ldflags "-w -s" (plan-REPO-small-readings #13).
+#      GOEXPERIMENT=greenteagc, -ldflags "-w -s" (plan-REPO-small-readings #13); and ur-engine, the local
+#      engine's helper, by `make engine` with the same flags and the ur_engine tag, for the four targets
+#      with an engine build, darwin/arm64, linux/amd64, linux/arm64 and windows/amd64; macOS on Intel and
+#      Windows on arm64 get remote models only, so none for them (DESIGN-COMPUTE §6.5, Appendix D's §4.10
+#      row; INFER-M11-05).
 #   2. Each binary must keep cli's gVisor fork and connect's sctp fork, read by go version -m: the
 #      release fixture strips every replace and cannot see this (reading 3).
-#   3. sidecar's TestHygieneReleaseBinary over all six, the row that refuses a release leg built with
+#   3. sidecar's TestHygieneReleaseBinary over all ten, the row that refuses a release leg built with
 #      sidecar_testhooks.
 #   4. This host's ur runs --version, and on a release tree prints the release's version.
-#   5. The Linux .tar.gz of each arch: ur, git-remote-ur as a link to it, LICENSE and NOTICE.
+#   5. The Linux .tar.gz of each arch: ur, git-remote-ur as a link to it, ur-engine, LICENSE and NOTICE.
 #   6. build-ur-macos.sh: the notarized ur.app's .tar.gz and .pkg (REPO-M1-02).
 #   7. build-ur-linux.sh: the .deb, .rpm and .pkg.tar.zst (REPO-M1-03).
 #   8. build-ur-windows.sh: the signed .zip (REPO-M1-03).
@@ -69,13 +73,25 @@ done
 
 echo ">>> ur $EXTERNAL_WARP_VERSION for six targets, SOURCE_DATE_EPOCH $SOURCE_DATE_EPOCH"
 "$MAKE" -C "$BUILD_HOME/sidecar/cli" build OUT="$work/bin" GO="$GO"
+echo ">>> ur-engine for the four targets with an engine build"
+"$MAKE" -C "$BUILD_HOME/sidecar/cli" engine OUT="$work/bin" GO="$GO"
 
 binaries=()
 for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
   binary="$work/bin/$target/ur"
-  case "$target" in windows/*) binary="$binary.exe" ;; esac
+  engine="$work/bin/$target/ur-engine"
+  case "$target" in windows/*) binary="$binary.exe" engine="$engine.exe" ;; esac
   [ -s "$binary" ] || ur_die "make build wrote no ur for $target at $binary"
   binaries+=("$binary")
+  case "$target" in
+    darwin/amd64 | windows/arm64)
+      [ ! -e "$engine" ] || ur_die "make engine wrote a ur-engine for $target, which gets remote models only"
+      ;;
+    *)
+      [ -s "$engine" ] || ur_die "make engine wrote no ur-engine for $target at $engine"
+      binaries+=("$engine")
+      ;;
+  esac
 done
 
 # go version -m prints each replaced module's => line after its dep line. cli's gVisor is the urnetwork
@@ -95,7 +111,7 @@ for binary in "${binaries[@]}"; do
     END { exit !found }' || ur_die "$binary does not link connect's sctp fork (go version -m shows no => to connect/sctp)"
 done
 
-echo ">>> TestHygieneReleaseBinary over the six"
+echo ">>> TestHygieneReleaseBinary over the ten"
 if ! (cd "$sidecar_module/check" &&
   RELEASE_BINARIES="${binaries[*]}" GOFLAGS= GOWORK=off GOTOOLCHAIN=local \
     "$GO" test -count=1 -v -tags sidecar_check -run '^TestHygieneReleaseBinary$' .) > "$work/hygiene.log" 2>&1; then
@@ -124,7 +140,7 @@ echo ">>> $host_target: $version_line"
 
 for arch in amd64 arm64; do
   "$URARCHIVE" tar -o "$OUT_DIR/ur-$EXTERNAL_WARP_VERSION-linux-$arch.tar.gz" -mtime "$SOURCE_DATE_EPOCH" \
-    "ur=$work/bin/linux/$arch/ur" "git-remote-ur@ur" \
+    "ur=$work/bin/linux/$arch/ur" "git-remote-ur@ur" "ur-engine=$work/bin/linux/$arch/ur-engine" \
     "LICENSE=$sidecar_module/LICENSE" "NOTICE=$sidecar_module/NOTICE"
 done
 

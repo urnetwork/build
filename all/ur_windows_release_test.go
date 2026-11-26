@@ -37,8 +37,9 @@ win_ssh() {
         *sign-ur.ps1*)
             printf 'sign\n' >> "$UR_STUB_EVENTS"
             [ "${UR_STUB_SIGN:-}" = fail ] && return 1
-            for arch in amd64 arm64; do
-                [ "${UR_STUB_SIGN:-}" = none ] || printf 'SIGNATURE' >> "$UR_STUB_GUEST/Windows/Temp/ur-sign/$arch/ur.exe"
+            for exe in amd64/ur.exe amd64/ur-engine.exe arm64/ur.exe; do
+                [ -f "$UR_STUB_GUEST/Windows/Temp/ur-sign/$exe" ] || return 1
+                [ "${UR_STUB_SIGN:-}" = none ] || printf 'SIGNATURE' >> "$UR_STUB_GUEST/Windows/Temp/ur-sign/$exe"
             done
             ;;
         *) printf 'unexpected win_ssh %s\n' "$*" >&2; return 41 ;;
@@ -70,6 +71,8 @@ func newUrWindowsHarness(t *testing.T) *urWindowsHarness {
 	for _, arch := range []string{"amd64", "arm64"} {
 		copyTestContent(t, filepath.Join(directory, "bin", "windows", arch, "ur.exe"), "MZ ur "+arch+"\n")
 	}
+	// the helper for amd64 alone: Windows on arm64 gets remote models only
+	copyTestContent(t, filepath.Join(directory, "bin", "windows", "amd64", "ur-engine.exe"), "MZ ur-engine amd64\n")
 	if err := os.MkdirAll(self.out, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +172,10 @@ func TestZipHoldsBothExesByteEqual(t *testing.T) {
 			t.Errorf("%s's git-remote-ur.exe differs from ur.exe", arch)
 		}
 	}
+	// the helper is the signed one, amd64's alone
+	if engine := harness.zipContents("amd64")["ur-engine.exe"]; engine != "MZ ur-engine amd64\nSIGNATURE" {
+		t.Errorf("amd64's ur-engine.exe is %q, not the signed one", engine)
+	}
 }
 
 // No wintun.dll until plan-BRIDGE-windows-tun-driver's checked loader takes one (reading 12).
@@ -185,7 +192,11 @@ func TestZipHoldsNoWintun(t *testing.T) {
 				}
 			}
 		})
-		if want := []string{"LICENSE", "NOTICE", "README.txt", "git-remote-ur.exe", "ur.exe"}; !slices.Equal(names, want) {
+		want := []string{"LICENSE", "NOTICE", "README.txt", "git-remote-ur.exe", "ur.exe"}
+		if arch == "amd64" {
+			want = []string{"LICENSE", "NOTICE", "README.txt", "git-remote-ur.exe", "ur-engine.exe", "ur.exe"}
+		}
+		if !slices.Equal(names, want) {
 			t.Errorf("%s's zip holds %v, want %v", arch, names, want)
 		}
 		for _, name := range names {
@@ -213,5 +224,36 @@ func TestWindowsStepRefusesAnUnsignedExe(t *testing.T) {
 		if entries, _ := os.ReadDir(harness.out); len(entries) != 0 {
 			t.Errorf("%s: a refused step wrote %d files", mode, len(entries))
 		}
+	}
+}
+
+// Windows on arm64 has no engine build and gets remote models only (DESIGN-COMPUTE §6.5): an arm64 ur-engine.exe, or
+// none for amd64, stops the step before the VM boots, and the README names the helper.
+func TestWindowsStepShipsTheEngineOnAmd64Alone(t *testing.T) {
+	stray := newUrWindowsHarness(t)
+	copyTestContent(t, filepath.Join(stray.directory, "bin", "windows", "arm64", "ur-engine.exe"), "MZ ur-engine arm64\n")
+	if result := stray.run(); result.exitCode == 0 || strings.Contains(result.events, "boot") || !strings.Contains(result.output, "never ships") {
+		t.Errorf("an arm64 helper was taken: %+v", result)
+	}
+	missing := newUrWindowsHarness(t)
+	if err := os.Remove(filepath.Join(missing.directory, "bin", "windows", "amd64", "ur-engine.exe")); err != nil {
+		t.Fatal(err)
+	}
+	if result := missing.run(); result.exitCode == 0 || strings.Contains(result.events, "boot") {
+		t.Errorf("a zip went on with no amd64 helper: %+v", result)
+	}
+	readme, err := os.ReadFile(filepath.Join(rolloutRoot(t), "ur", "windows", "README.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "ur-engine.exe") {
+		t.Error("README.txt does not name ur-engine.exe")
+	}
+	script, err := os.ReadFile(filepath.Join(rolloutRoot(t), "ur", "windows", "sign-ur.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), `"amd64\ur-engine.exe"`) {
+		t.Error("sign-ur.ps1 does not sign ur-engine.exe")
 	}
 }

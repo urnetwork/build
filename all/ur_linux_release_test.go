@@ -66,6 +66,7 @@ func newUrLinuxHarness(t *testing.T) *urLinuxHarness {
 	writeTestScript(t, filepath.Join(directory, "stub-bin", "docker"), urStubDocker)
 	for _, arch := range []string{"amd64", "arm64"} {
 		writeTestScript(t, filepath.Join(directory, "bin", "linux", arch, "ur"), "binary "+arch+"\n")
+		writeTestScript(t, filepath.Join(directory, "bin", "linux", arch, "ur-engine"), "engine "+arch+"\n")
 	}
 	copyTestContent(t, filepath.Join(directory, "home", "sidecar", "LICENSE"), "license\n")
 	copyTestContent(t, filepath.Join(directory, "home", "sidecar", "NOTICE"), "notice\n")
@@ -209,7 +210,7 @@ func TestPackageShipsNoUnitOrScript(t *testing.T) {
 			destinations = append(destinations, strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "dst: ")))
 		}
 	}
-	want := []string{"/usr/share/doc/ur", "/usr/bin/ur", "/usr/bin/git-remote-ur", "/usr/share/doc/ur/LICENSE", "/usr/share/doc/ur/NOTICE"}
+	want := []string{"/usr/share/doc/ur", "/usr/bin/ur", "/usr/bin/git-remote-ur", "/usr/bin/ur-engine", "/usr/share/doc/ur/LICENSE", "/usr/share/doc/ur/NOTICE"}
 	if !slices.Equal(destinations, want) {
 		t.Errorf("the packages install %v, want %v", destinations, want)
 	}
@@ -281,5 +282,28 @@ func TestDistroSmokeRunsEachDistributionOffline(t *testing.T) {
 		if !found {
 			t.Errorf("distro-smoke.sh did not run %s", c.distro)
 		}
+	}
+}
+
+// Each package carries ur-engine, the local engine's helper, beside ur, executable, from its own architecture's
+// build (DESIGN-COMPUTE §6.5); a build with no helper for an architecture stops before any package is made.
+func TestLinuxPackagesShipTheEngine(t *testing.T) {
+	harness := newUrLinuxHarness(t)
+	if result := harness.run(); result.exitCode != 0 {
+		t.Fatalf("build-ur-linux.sh failed: %+v", result)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		rendered := harness.rendered(arch)
+		if !strings.Contains(rendered, "  - src: \"/stage/ur-engine\"\n    dst: /usr/bin/ur-engine\n    file_info:\n      mode: 0755\n") {
+			t.Errorf("the %s template does not install ur-engine beside ur:\n%s", arch, rendered)
+		}
+	}
+	missing := newUrLinuxHarness(t)
+	if err := os.Remove(filepath.Join(missing.directory, "bin", "linux", "arm64", "ur-engine")); err != nil {
+		t.Fatal(err)
+	}
+	result := missing.run()
+	if result.exitCode == 0 || !strings.Contains(result.output, "no linux/arm64 ur-engine") {
+		t.Fatalf("a package went on with no helper: %+v", result)
 	}
 }
