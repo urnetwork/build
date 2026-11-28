@@ -2052,12 +2052,17 @@ error_trap 'proxy edit'
 error_trap 'proxy push branch'
 
 
+# The android binding also binds the sdk's hotspot proxy (sdk/hotspot), which
+# imports the proxy repo; its requirements come with it. The cgo and js modules
+# build no package that imports it, so they need neither.
 (cd $BUILD_HOME/sdk/build &&
     go_mod_edit_gvisor &&
     go_mod_edit_require github.com/urnetwork/connect &&
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    go_mod_edit_require github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_mod_edit_require github.com/urnetwork/sdk)
 error_trap 'sdk build edit'
 
@@ -2093,11 +2098,14 @@ error_trap 'sdk js edit'
     go_mod_edit_require github.com/urnetwork/glog &&
     go_mod_edit_require github.com/urnetwork/quic-go &&
     go_mod_edit_require github.com/urnetwork/goidenticons &&
+    go_mod_edit_require github.com/urnetwork/proxy &&
+    go_mod_edit_require github.com/urnetwork/userwireguard &&
     go_edit_require_subpackages github.com/urnetwork/sdk &&
     go_edit_require_subpackages github.com/urnetwork/connect &&
     go_edit_require_subpackages github.com/urnetwork/glog &&
     go_edit_require_subpackages github.com/urnetwork/quic-go &&
     go_edit_require_subpackages github.com/urnetwork/goidenticons &&
+    go_edit_require_subpackages github.com/urnetwork/proxy &&
     $BUILD_SED -i "s/Version string = \"\"/Version string = \"${WARP_VERSION}\"/g" sdk.go &&
     go_mod_fork 'build' 'cgo' 'js' 'packaging' 'python' 'ruby' 'rust' 'csharp' 'java' 'kotlin' 'swift')
 error_trap 'sdk edit'
