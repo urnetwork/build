@@ -538,13 +538,19 @@ else
   check "tarball: VERSION"      test -f "${ROOT}/VERSION"
   check "tarball: payload/ tree" test -d "${ROOT}/payload"
 
+  # Exercise the local archive on hosts where install.sh defaults to apt.
+  # Older archive installers always use their own payload.
+  INSTALL_ARGS=()
+  if [[ "$("${ROOT}/install.sh" --help)" == *--no-apt* ]]; then
+    INSTALL_ARGS+=(--no-apt)
+  fi
+
   # install.sh's preflight hard-requires a live systemd (/run/systemd/system),
   # which a container does not have. --force downgrades preflight refusals to
   # warnings, and every systemctl call in the script is already guarded on that
   # same directory — so with --force the FILE-PLACEMENT lifecycle runs for real
   # here while the unit enable/start path is simply not reached. That path is
   # reported as its own skip below rather than hidden inside these passes.
-  INSTALL_ARGS=()
   if [ ! -d /run/systemd/system ]; then
     INSTALL_ARGS+=(--force)
     skip "install.sh systemd unit enable/start path" \
@@ -561,6 +567,7 @@ else
   check "install.sh placed the daemon"   test -x /usr/lib/urnetwork/urnetworkd
   check "install.sh placed the launcher" test -x /usr/bin/urnetwork
   exclude_check "install.sh placed the split tunnel launcher" test -x "${EXCLUDE_LAUNCHER}"
+  check "install.sh wrote the tarball manifest" test -s /usr/lib/urnetwork/.install-manifest
   check "install.sh created the group"   getent group urnetwork
 
   # Upgrade over itself must preserve /etc state (the same command installs
@@ -591,10 +598,10 @@ else
   # worst failure mode available here, and it is silent until an upgrade.
   if [ -f "${DEB}" ]; then
     dpkg -i "${DEB}" >/dev/null 2>&1
-    if "${ROOT}/install.sh" >"${WORK}/conflict.log" 2>&1; then
+    if "${ROOT}/install.sh" "${INSTALL_ARGS[@]}" >"${WORK}/conflict.log" 2>&1; then
       fail "install.sh aborts when dpkg owns the install"
     else
-      if grep -qiE 'dpkg|apt' "${WORK}/conflict.log"; then
+      if grep -qF 'is installed and owned by dpkg/apt' "${WORK}/conflict.log"; then
         pass "install.sh aborts against a dpkg-owned install, pointing at apt"
       else
         fail "install.sh aborts against a dpkg-owned install with an apt-pointing message"
@@ -604,7 +611,12 @@ else
     dpkg -P urnetwork-daemon >/dev/null 2>&1
     # dpkg -P removed the shared paths; reinstall from the tarball so the
     # uninstall test below exercises a real install.
-    "${ROOT}/install.sh" "${INSTALL_ARGS[@]}" >/dev/null 2>&1
+    if "${ROOT}/install.sh" "${INSTALL_ARGS[@]}" >"${WORK}/reinstall.log" 2>&1; then
+      check "reinstall restored the tarball manifest" test -s /usr/lib/urnetwork/.install-manifest
+    else
+      fail "install.sh reinstalls the tarball after dpkg purge"
+      tail -25 "${WORK}/reinstall.log" | sed 's/^/       /' >&2
+    fi
   else
     skip "install.sh aborts against a dpkg-owned install" "no .deb was produced"
   fi
