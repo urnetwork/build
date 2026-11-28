@@ -212,234 +212,6 @@
               "summary": "CBC padding oracle issue in AWS S3 Crypto SDK for golang in github.com/aws/aws-sdk-go"
             }
           ]
-        },
-        {
-          "package": {
-            "name": "golang.org/x/crypto",
-            "version": "0.58.0",
-            "ecosystem": "Go"
-          },
-          "groups": [
-            {
-              "ids": [
-                "GO-2026-5932"
-              ],
-              "aliases": [
-                "GO-2026-5932"
-              ],
-              "max_severity": ""
-            }
-          ],
-          "vulnerabilities": [
-            {
-              "affected": [
-                {
-                  "database_specific": {
-                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
-                  },
-                  "ecosystem_specific": {
-                    "imports": [
-                      {
-                        "path": "golang.org/x/crypto/openpgp"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/packet"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/armor"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/clearsign"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/errors"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/elgamal"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/s2k"
-                      }
-                    ]
-                  },
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/crypto",
-                    "purl": "pkg:golang/golang.org/x/crypto"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "0.58.1-0.20261009181718-2f1f834330b2"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                },
-                {
-                  "database_specific": {
-                    "source": "https://vuln.go.dev/ID/GO-2026-5932.json"
-                  },
-                  "ecosystem_specific": {
-                    "imports": [
-                      {
-                        "path": "golang.org/x/crypto/openpgp"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/packet"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/armor"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/clearsign"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/errors"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/elgamal"
-                      },
-                      {
-                        "path": "golang.org/x/crypto/openpgp/s2k"
-                      }
-                    ]
-                  },
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/crypto/openpgp",
-                    "purl": "pkg:golang/golang.org/x/crypto/openpgp"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ],
-              "database_specific": {
-                "review_status": "REVIEWED",
-                "url": "https://pkg.go.dev/vuln/GO-2026-5932"
-              },
-              "details": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
-              "id": "GO-2026-5932",
-              "modified": "2026-11-02T22:15:06.677088389Z",
-              "published": "2026-07-07T22:15:29Z",
-              "references": [
-                {
-                  "type": "REPORT",
-                  "url": "https://go.dev/issue/44226"
-                },
-                {
-                  "type": "WEB",
-                  "url": "https://go.dev/issue/81227"
-                }
-              ],
-              "schema_version": "1.9.2",
-              "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues"
-            }
-          ]
-        },
-        {
-          "package": {
-            "name": "golang.org/x/image",
-            "version": "0.44.0",
-            "ecosystem": "Go"
-          },
-          "groups": [
-            {
-              "ids": [
-                "GO-2026-6222"
-              ],
-              "aliases": [
-                "CVE-2026-46603",
-                "GO-2026-6222"
-              ],
-              "max_severity": ""
-            }
-          ],
-          "vulnerabilities": [
-            {
-              "affected": [
-                {
-                  "database_specific": {
-                    "source": "https://vuln.go.dev/ID/GO-2026-6222.json"
-                  },
-                  "ecosystem_specific": {
-                    "imports": [
-                      {
-                        "path": "golang.org/x/image/vp8l",
-                        "symbols": [
-                          "Decode",
-                          "decoder.decodeHuffmanGroups",
-                          "decoder.decodeHuffmanTree"
-                        ]
-                      }
-                    ]
-                  },
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/image",
-                    "purl": "pkg:golang/golang.org/x/image"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "0.45.0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ],
-              "aliases": [
-                "CVE-2026-46603"
-              ],
-              "credits": [
-                {
-                  "name": "Daniele Ballarini"
-                }
-              ],
-              "database_specific": {
-                "review_status": "REVIEWED",
-                "url": "https://pkg.go.dev/vuln/GO-2026-6222"
-              },
-              "details": "VP8L decoding in golang.org/x/image/vp8l can allocate an excessive amount of memory when processing a crafted VP8L image containing many unused Huffman tree groups. This allows a remote attacker to cause a denial of service via memory exhaustion.",
-              "id": "GO-2026-6222",
-              "modified": "2026-08-15T09:41:53.891904586Z",
-              "published": "2026-08-14T16:22:50Z",
-              "references": [
-                {
-                  "type": "REPORT",
-                  "url": "https://go.dev/issue/80069"
-                },
-                {
-                  "type": "FIX",
-                  "url": "https://go.dev/cl/793460"
-                }
-              ],
-              "related": [
-                "CGA-hm5h-v84j-m3gx"
-              ],
-              "schema_version": "1.9.0",
-              "summary": "Excessive memory allocation during VP8L decoding in golang.org/x/image"
-            }
-          ]
         }
       ]
     },
@@ -552,7 +324,7 @@
               },
               "details": "A norm.Iter can enter an infinite loop when handling input containing invalid UTF-8 bytes.",
               "id": "GO-2026-5970",
-              "modified": "2026-11-14T13:12:13.157756222Z",
+              "modified": "2026-11-23T21:12:29.269820156Z",
               "published": "2026-07-14T17:29:56Z",
               "references": [
                 {
@@ -600,7 +372,15 @@
                 "RHSA-2026:52912",
                 "RHSA-2026:54364",
                 "RHSA-2026:54549",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
                 "RHSA-2026:69258",
+                "RHSA-2026:70201",
+                "RHSA-2026:90330",
+                "RHSA-2026:92858",
+                "RHSA-2026:92859",
+                "RHSA-2026:92860",
+                "RHSA-2026:99824",
                 "RHSA-2026:99826",
                 "RHSA-2026:99827"
               ],
@@ -667,7 +447,7 @@
               },
               "details": "The Nickname profile can panic with an out-of-bounds slice error when transforming crafted input into a short destination buffer.",
               "id": "GO-2026-6629",
-              "modified": "2026-11-14T13:12:14.100810021Z",
+              "modified": "2026-11-23T21:12:29.495073874Z",
               "published": "2026-10-07T14:09:43Z",
               "references": [
                 {
@@ -680,8 +460,16 @@
                 }
               ],
               "related": [
+                "RHSA-2026:58472",
+                "RHSA-2026:62391",
+                "RHSA-2026:68717",
+                "RHSA-2026:68729",
+                "RHSA-2026:70031",
                 "RHSA-2026:70537",
+                "RHSA-2026:70670",
                 "RHSA-2026:70700",
+                "RHSA-2026:72496",
+                "RHSA-2026:72570",
                 "RHSA-2026:72750",
                 "RHSA-2026:73401",
                 "RHSA-2026:73522",
