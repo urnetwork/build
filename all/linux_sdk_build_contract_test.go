@@ -153,12 +153,9 @@ func TestBuildLinuxRejectsPartialSdkAfterMaskedArchitectureFailure(t *testing.T)
 	}
 }
 
-// Noble names the zxing-cpp development binary package libzxing-dev. Keep the
-// distro package and the pkg-config module as separate contracts: confusing
-// the upstream project name with Ubuntu's package name prevents the GUI image
-// from building, while omitting the module check can silently defer the same
-// mistake until Meson configures the product.
-func TestLinuxGuiImageUsesNobleZxingPackage(t *testing.T) {
+// Check the Noble development packages and the pkg-config modules that Meson
+// needs for the GUI. The development package names differ from the modules.
+func TestLinuxGuiImageProvidesRequiredNoblePackages(t *testing.T) {
 	allDir := filepath.Dir(buildLinuxScript(t))
 	dockerfile, err := os.ReadFile(filepath.Join(allDir, "linux", "Dockerfile.gui"))
 	if err != nil {
@@ -174,6 +171,9 @@ func TestLinuxGuiImageUsesNobleZxingPackage(t *testing.T) {
 	if got := strings.Count(source, "\n        libzxing-dev \\\n"); got != 1 {
 		t.Fatalf("Linux GUI image libzxing-dev count = %d, want 1", got)
 	}
+	if got := strings.Count(source, "\n        libssl-dev \\\n"); got != 1 {
+		t.Fatalf("Linux GUI image libssl-dev count = %d, want 1", got)
+	}
 
 	smokeTest, err := os.ReadFile(filepath.Join(allDir, "linux", "smoke-test.sh"))
 	if err != nil {
@@ -181,5 +181,8 @@ func TestLinuxGuiImageUsesNobleZxingPackage(t *testing.T) {
 	}
 	if !strings.Contains(string(smokeTest), "check_pc zxing       zxing") {
 		t.Fatal("Linux GUI smoke test does not verify the zxing pkg-config module")
+	}
+	if !strings.Contains(string(smokeTest), "check_pc libcrypto   'libcrypto >= 3.0'") {
+		t.Fatal("Linux GUI smoke test does not verify the OpenSSL 3 libcrypto pkg-config module")
 	}
 }
