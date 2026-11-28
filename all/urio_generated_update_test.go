@@ -11,6 +11,8 @@ import (
 	"testing"
 )
 
+const urioTestReleaseVersion = "2026.10.13-1071358670"
+
 // Representative outputs of ur.io/astro's required preflight generators. The
 // release must record these alongside the dates, including the docs/API mirrors,
 // examples and stats that were left unstaged in the failed 2026-10-13 release.
@@ -109,7 +111,7 @@ print -r -- push-region-continued
 	command.Env = environmentWith(
 		"WARP_HOME="+buildHome,
 		"MMM_CANDIDATE_HEAD="+runGit(t, filepath.Join(buildHome, "mmm"), "rev-parse", "HEAD"),
-		"EXTERNAL_WARP_VERSION=2026.10.13-1071358670",
+		"EXTERNAL_WARP_VERSION="+urioTestReleaseVersion,
 		"GIT_AUTHOR_NAME=Build Harness Test",
 		"GIT_AUTHOR_EMAIL=build-harness-test@example.invalid",
 		"GIT_COMMITTER_NAME=Build Harness Test",
@@ -144,12 +146,16 @@ func TestRunUrioGeneratedPushPreservesUnrelatedChanges(t *testing.T) {
 			beforeIndex := runGit(t, repository, "diff", "--cached", "--binary")
 			beforeWorktree := runGit(t, repository, "diff", "--binary")
 			output, err := runUrioPush(t, buildHome)
-			if mode == "unstaged" {
+			if mode != "staged" {
 				if err != nil || !strings.Contains(string(output), "push-region-continued") {
 					t.Fatalf("scoped push failed: %v\n%s", err, output)
 				}
-				if changed := runGit(t, remote, "diff", "--name-only", beforeRemote, "main"); changed != generated {
-					t.Fatalf("pushed paths = %q, want only %s", changed, generated)
+				if mode == "unstaged" {
+					if changed := runGit(t, remote, "diff", "--name-only", beforeRemote, "main"); changed != generated {
+						t.Fatalf("pushed paths = %q, want only %s", changed, generated)
+					}
+				} else if head := runGit(t, remote, "rev-parse", "main"); head != beforeRemote {
+					t.Fatalf("concurrent push was overwritten: %s -> %s", beforeRemote, head)
 				}
 			} else {
 				if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "ur.io content and page dates update push") {
@@ -158,15 +164,11 @@ func TestRunUrioGeneratedPushPreservesUnrelatedChanges(t *testing.T) {
 				if head := runGit(t, remote, "rev-parse", "main"); head != beforeRemote {
 					t.Fatalf("failed push changed remote main: %s -> %s", beforeRemote, head)
 				}
-				if mode == "staged" {
-					if head := runGit(t, repository, "rev-parse", "HEAD"); head != beforeHead {
-						t.Fatal("preexisting staged edit was committed")
-					}
-					if diff := runGit(t, repository, "diff", "--binary"); diff != beforeWorktree {
-						t.Fatal("preexisting staged edit changed worktree staging")
-					}
-				} else if !strings.Contains(string(output), "[rejected]") || !strings.Contains(string(output), "Start a fresh release") {
-					t.Fatalf("concurrent push did not stop preparation: %s", output)
+				if head := runGit(t, repository, "rev-parse", "HEAD"); head != beforeHead {
+					t.Fatal("preexisting staged edit was committed")
+				}
+				if diff := runGit(t, repository, "diff", "--binary"); diff != beforeWorktree {
+					t.Fatal("preexisting staged edit changed worktree staging")
 				}
 			}
 			if index := runGit(t, repository, "diff", "--cached", "--binary"); index != beforeIndex {
@@ -216,6 +218,12 @@ func TestRunUrioGeneratedPushHandlesNoopAndMirrorAdditionsAndRemovals(t *testing
 	if status := runGit(t, repository, "status", "--porcelain"); status != "" {
 		t.Fatalf("mirror changes were left behind: %s", status)
 	}
+	if branch := runGit(t, repository, "symbolic-ref", "--short", "HEAD"); branch != "main" {
+		t.Fatalf("successful publication left checkout on %s", branch)
+	}
+	if head := runGit(t, repository, "rev-parse", "HEAD"); head != runGit(t, remote, "rev-parse", "main") {
+		t.Fatal("successful publication did not keep local and remote main aligned")
+	}
 }
 
 func TestRunUrioGeneratedPushKeepsCandidateSourceOnConcurrentMainAdvance(t *testing.T) {
@@ -230,22 +238,69 @@ func TestRunUrioGeneratedPushKeepsCandidateSourceOnConcurrentMainAdvance(t *test
 			remoteCommit := commitTestFile(t, concurrent, remotePath, "concurrent change\n", "concurrent MMM update")
 			runGit(t, concurrent, "push")
 			output, err := runUrioPush(t, buildHome)
-			if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "Start a fresh release") {
-				t.Fatalf("concurrent MMM update did not stop preparation: %v\n%s", err, output)
+			if err != nil || !strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "mmm main advanced") {
+				t.Fatalf("concurrent MMM update prevented preparation: %v\n%s", err, output)
 			}
 			if head := runGit(t, remote, "rev-parse", "main"); head != remoteCommit {
-				t.Fatal("failed push changed remote main")
+				t.Fatal("candidate overwrote remote main")
 			}
-			if head := runGit(t, repository, "rev-parse", "HEAD"); head != candidateHead {
-				t.Fatalf("checked source changed from %s to %s", candidateHead, head)
+			releaseBranch := "v" + urioTestReleaseVersion
+			if branch := runGit(t, repository, "symbolic-ref", "--short", "HEAD"); branch != releaseBranch {
+				t.Fatalf("candidate checkout is on %s, want %s", branch, releaseBranch)
 			}
-			if status := runGit(t, repository, "status", "--porcelain"); status != "M "+generated {
-				t.Fatalf("generated output was not kept as an unstaged edit: %s", status)
+			releaseHead := runGit(t, repository, "rev-parse", "HEAD")
+			if parent := runGit(t, repository, "rev-parse", "HEAD^"); parent != candidateHead {
+				t.Fatalf("release parent is %s, want checked source %s", parent, candidateHead)
 			}
-			contents, err := os.ReadFile(filepath.Join(repository, generated))
-			if err != nil || string(contents) != "local generated dates\n" {
-				t.Fatalf("generated dates changed: %v, %q", err, contents)
+			if changed := runGit(t, repository, "diff", "--name-only", candidateHead, releaseHead); changed != generated {
+				t.Fatalf("release changed paths = %q, want only %s", changed, generated)
+			}
+			if contents := runGit(t, repository, "show", releaseHead+":"+generated); contents != "local generated dates" {
+				t.Fatalf("candidate generated dates = %q", contents)
+			}
+			if status := runGit(t, repository, "status", "--porcelain"); status != "" {
+				t.Fatalf("generated outputs were left uncommitted: %s", status)
+			}
+			if head := runGit(t, repository, "rev-parse", "main"); head != candidateHead {
+				t.Fatal("local main diverged from its original commit")
+			}
+			runGit(t, repository, "checkout", "main")
+			runGit(t, repository, "pull", "--ff-only")
+			if head := runGit(t, repository, "rev-parse", "HEAD"); head != remoteCommit {
+				t.Fatal("next full release did not acquire the advanced main")
+			}
+			if head := runGit(t, repository, "rev-parse", releaseBranch); head != releaseHead {
+				t.Fatal("pulling main lost the checked release commit")
 			}
 		})
+	}
+}
+
+func TestRunUrioGeneratedPushRejectsOtherPushFailures(t *testing.T) {
+	const generated = "ur.io/react/src/data/content-dates.js"
+	buildHome, repository, remote := urioPushFixture(t)
+	candidateHead := runGit(t, repository, "rev-parse", "HEAD")
+	writeUrioTestFile(t, repository, generated, "local generated dates\n")
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runUrioPush(t, buildHome)
+	if err == nil || strings.Contains(string(output), "push-region-continued") || !strings.Contains(string(output), "A verified main advance is required") {
+		t.Fatalf("unrelated push rejection did not stop preparation: %v\n%s", err, output)
+	}
+	if branch := runGit(t, repository, "symbolic-ref", "--short", "HEAD"); branch != "main" {
+		t.Fatalf("failed preparation left checkout on %s", branch)
+	}
+	if head := runGit(t, repository, "rev-parse", "HEAD"); head != candidateHead {
+		t.Fatal("failed preparation changed local main")
+	}
+	if head := runGit(t, remote, "rev-parse", "main"); head != candidateHead {
+		t.Fatal("failed preparation changed remote main")
+	}
+	if status := runGit(t, repository, "status", "--porcelain"); status != "M "+generated {
+		t.Fatalf("generated output was not kept as an unstaged edit: %s", status)
+	}
+	if contents, err := os.ReadFile(filepath.Join(repository, generated)); err != nil || string(contents) != "local generated dates\n" {
+		t.Fatalf("generated output changed: %v, %q", err, contents)
 	}
 }

@@ -201,6 +201,25 @@ class RealSourceProvenance(unittest.TestCase):
         self.write(self.root/"mmm/build/generated.js","different generated scratch\n")
         self.assertEqual(self.snapshot(),before)
 
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_mmm_release_commit_stays_pinned_when_remote_main_advances(self):
+        repo = self.repos["mmm"]
+        checked = self.git(repo, "rev-parse", "HEAD")
+        self.git(repo, "checkout", "-b", "v" + VERSION)
+        self.write(repo / "generated.js", "checked generated output\n")
+        self.commit(repo)
+
+        snapshot = self.snapshot()
+        sealed = {"sources": snapshot, "environment": state.environment_snapshot()}
+        remote_main = self.git(repo, "commit-tree", checked + "^{tree}", "-p", checked, "-m", "remote main advance")
+        self.git(repo, "update-ref", "refs/remotes/origin/main", remote_main)
+        self.assertEqual(self.validate_sources(sealed), snapshot)
+        self.assertEqual(snapshot["mmm"]["head"], self.git(repo, "rev-parse", "v" + VERSION))
+
+        self.git(repo, "checkout", "--detach", remote_main)
+        with self.assertRaisesRegex(state.Refusal, "changed: mmm"):
+            self.validate_sources(sealed)
+
     def test_deployment_settings_are_pinned_without_refreshable_auth_bytes(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             settings = {"dockerNamespace":"bringyour", "dockerHubUsername":"fixture-login", "dockerHubToken":"never-store-fixture-token"}

@@ -1277,6 +1277,7 @@ fi
 # A preexisting staged edit belongs to its author, not this generated commit.
 # The image rebuild uses the candidate's checked source. A rebase here could
 # silently adopt unchecked sources or invalidate the generated outputs.
+# Commit off main so a concurrent push leaves main ready to pull next time.
 (cd "$WARP_HOME/mmm" &&
     if [[ "$(git rev-parse HEAD)" != "$MMM_CANDIDATE_HEAD" ]]; then
         builder_message 'mmm changed after the candidate build. Start a fresh release to check the latest mmm sources.'
@@ -1309,15 +1310,28 @@ fi
         ur.io/{react,astro}/public/{blog,ar/blog,de/blog,es/blog,ru/blog,zh/blog}/rss.xml \
         ur.io/{react,astro}/public/images/home-hero-{768,1024,1440,2048}.webp &&
     if ! git diff --cached --quiet; then
+        git checkout --quiet --detach "$MMM_CANDIDATE_HEAD" || exit $?
         git commit -m "${EXTERNAL_WARP_VERSION} ur.io content and page dates update" || exit $?
-        git push origin HEAD:refs/heads/main || {
+        if git push origin HEAD:refs/heads/main; then
+            git update-ref refs/heads/main HEAD "$MMM_CANDIDATE_HEAD" &&
+                git checkout --quiet main
+        else
             push_result=$?
-            # Restore the candidate's branch and index while keeping the generated
-            # files so the wrapper can stash them and pull on the next full run.
-            git reset --mixed --quiet "$MMM_CANDIDATE_HEAD" || exit $?
-            builder_message 'mmm generated-site push failed. Start a fresh release to check the latest mmm sources.'
-            exit "$push_result"
-        }
+            if git fetch --no-tags --no-recurse-submodules origin refs/heads/main &&
+                remote_main=$(git rev-parse --verify FETCH_HEAD) &&
+                [[ "$remote_main" != "$MMM_CANDIDATE_HEAD" ]] &&
+                git merge-base --is-ancestor "$MMM_CANDIDATE_HEAD" "$remote_main"; then
+                # Seal the checked source and its generated outputs together.
+                git checkout --quiet -b "v${EXTERNAL_WARP_VERSION}" || exit $?
+                builder_message "mmm main advanced. Continuing with the checked MMM commit on local v${EXTERNAL_WARP_VERSION}."
+            else
+                # Keep the generated files as unstaged edits for the next run.
+                git reset --mixed --quiet "$MMM_CANDIDATE_HEAD" &&
+                    git checkout --quiet main || exit $?
+                builder_message 'mmm generated-site push failed. A verified main advance is required to continue.'
+                exit "$push_result"
+            fi
+        fi
     fi)
 error_trap 'ur.io content and page dates update push'
 
@@ -3870,8 +3884,8 @@ error_trap 'verify retained web image digest'
 builder_message "service web \`${EXTERNAL_WARP_VERSION}\` available"
 
 # The mmm service is the nginx front for the sites whose source lives in mmm
-# (mmm/mmm/PLAN.md). It builds from the mmm checkout pulled above, on main with
-# no release branch, and warpctl names an image after its Makefile's directory,
+# (mmm/mmm/PLAN.md). It builds from the checked and sealed mmm checkout above,
+# and warpctl names an image after its Makefile's directory,
 # so this publishes the service mmm. Its module replaces warp with ../../warp,
 # which from $WARP_HOME/mmm is the developer's warp checkout rather than this
 # release's, so a workspace outside both checkouts pins it to the release's

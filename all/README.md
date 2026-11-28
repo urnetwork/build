@@ -196,11 +196,14 @@ whose source lives in mmm) reads that corpus for ur.io; documentation
 generation and the web and mmm checks remain required. Historical release tags
 retain their original `docs` submodule pins.
 
-The mmm service builds from `$WARP_HOME/mmm` on main, with no release branch,
-beside the web build. Its Go module's warp replacement is pinned to this
-release's `warp` submodule through a temporary workspace. The rollout deploys
-mmm first in every wave, so no load balancer routes the mmm hostnames before
-mmm's blocks run.
+The mmm service builds beside the web build from the checked and sealed
+`$WARP_HOME/mmm` checkout. Generated site outputs normally land on `main`. If
+remote `main` advances during preparation, the release seals the checked source
+and generated outputs on a local `v<version>` branch. The next full build pulls
+`main`, and a same-version resume verifies the sealed checkout. The Go module's
+warp replacement is pinned to this release's `warp` submodule through a temporary
+workspace. Rollout deploys mmm first in every wave before load balancers route
+its hostnames.
 
 The extension consumes the exact localizations version published by the same
 release. It has no npm SDK dependency: it builds against this run's `sdk/js`
