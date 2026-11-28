@@ -2415,8 +2415,9 @@ github_release_upload () {
 # nightly goes on. A published asset keeps its row in the release body table.
 # The subshell sees VIRUSTOTAL_QUOTA_EXCEEDED, so it skips VirusTotal once an
 # earlier scan tripped the quota, but its own scans never set it for the run.
+# An optional third argument names the kind of asset in the warning.
 github_release_upload_staged () {
-    local rows result
+    local rows result label=${3:-stable SDK package asset}
     rows=$(
         release_failure_hint () { : ; }
         VIRUSTOTAL_ARTIFACTS=()
@@ -2425,7 +2426,7 @@ github_release_upload_staged () {
     )
     result=$?
     if (( result != 0 )); then
-        builder_message "warning: stable SDK package asset \`$1\` was not attached to \`${EXTERNAL_WARP_VERSION}\` (exit $result); the nightly continues without it"
+        builder_message "warning: $label \`$1\` was not attached to \`${EXTERNAL_WARP_VERSION}\` (exit $result); the nightly continues without it"
         return 0
     fi
     VIRUSTOTAL_ARTIFACTS+=(${(f)rows})
@@ -2720,6 +2721,21 @@ sn_cli_release miner provider \
 error_trap 'build provider (sn miner)'
 
 github_release_upload "urnetwork-provider-${EXTERNAL_WARP_VERSION}.tar.gz" "$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/miner/build/provider.tar.gz"
+
+# The same miner binaries packaged for the package managers as
+# urnetwork-provider (all/cli-packages.zsh): per-platform archives for
+# Homebrew, winget and Chocolatey, and .deb/.rpm for the apt and dnf
+# repositories. Never fatal: a failed build leaves them off this nightly, and
+# the release program's package-manager channels wait for a nightly that has
+# them. They upload with the staged assets, after the nightly's own.
+cli_packages_dir="$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/miner/build/packages"
+cli_packages=()
+if "$BUILD_HOME/all/cli-packages.zsh" "$EXTERNAL_WARP_VERSION" "$BUILD_HOME/sn${GO_MOD_SUFFIX}/cli/miner/build" \
+    "$BUILD_HOME/sn${GO_MOD_SUFFIX}/LICENSE" "$cli_packages_dir"; then
+    cli_packages=("$cli_packages_dir/"urnetwork-provider[-_]*(N.))
+else
+    builder_message "warning: the urnetwork-provider packages for \`${EXTERNAL_WARP_VERSION}\` did not build; the nightly continues without them"
+fi
 
 builder_message "provider (sn miner) \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
 
@@ -3344,6 +3360,12 @@ fi
 # Upload releases to testing channels
 
 builder_message "android github \`${EXTERNAL_WARP_VERSION}\` available - https://github.com/urnetwork/build/releases/tag/v${EXTERNAL_WARP_VERSION}"
+
+# The CLI's package-manager assets, built after the miner above: staged, so
+# a refused or failed upload warns and the nightly goes on.
+for cli_package in "${cli_packages[@]}"; do
+    github_release_upload_staged "$(basename "$cli_package")" "$cli_package" "urnetwork-provider package"
+done
 
 # The stable SDK package assets go last: every asset of the nightly itself is
 # attached and scanned first, so on a quota-limited VirusTotal key the stable
