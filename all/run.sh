@@ -1328,15 +1328,21 @@ error_trap 'ur.io content and page dates update push'
 # these are app repos, and `git add .` here would sweep any unrelated working-tree
 # change into the release commit. Guarding on the *staged* diff also means a build
 # where nothing changed pushes nothing.
+# android's res/xml/locales_config.xml lists the languages of those catalogs
+# (the per-app language settings, Android 13 and later), and apple's
+# <language>.lproj/AppShortcuts.strings hold the App Shortcuts phrases: the
+# generator writes both, and one it creates or changes and nobody stages leaves
+# the checkout dirty, which the next release's pull refuses. ls-files names
+# only the ones that are new or changed, so neither add can match nothing.
 (cd $BUILD_HOME/android &&
-    git add 'app/app/src/main/res/values*/strings.xml' &&
+    git add 'app/app/src/main/res/values*/strings.xml' $(git ls-files --others --modified --exclude-standard -- app/app/src/main/res/xml/locales_config.xml) &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
         git_push_with_rebase_retry
     fi)
 error_trap 'android localizations push'
 (cd $BUILD_HOME/apple &&
-    git add app/network/Shared/Resources/Localizable.xcstrings &&
+    git add app/network/Shared/Resources/Localizable.xcstrings $(git ls-files --others --modified --exclude-standard -- 'app/network/Shared/Resources/*.lproj/AppShortcuts.strings') &&
     if ! git diff --cached --quiet; then
         git commit -m "${EXTERNAL_WARP_VERSION} localizations update" &&
         git_push_with_rebase_retry
